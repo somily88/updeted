@@ -1,0 +1,9 @@
+firecrawl-py
+python-telegram-bot[job-queue]
+ccxt
+openai
+requests
+apscheduler
+fastapi
+uvicorn
+cryptography

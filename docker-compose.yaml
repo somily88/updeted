@@ -1,0 +1,11 @@
+services:
+  trading_bot:
+    container_name: telegram_crypto_bot
+    build: .
+    ports:
+      - "127.0.0.1:8010:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: always
