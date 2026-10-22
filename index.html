@@ -942,7 +942,7 @@ body { background:linear-gradient(180deg,#f0f1f5 0%,#f6f7fa 100%); }
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
   function coinInfo(pair) {
     var base = String(pair || '').split('/')[0].toUpperCase();
-    var map = { BTC:['₿','btc','Bitcoin'], ETH:['◆','eth','Ethereum'], BNB:['B','bnb','BNB'], SOL:['≋','sol','Solana'], XRP:['X','xrp','XRP'], ADA:['A','ada','Cardano'] };
+    var map = { BTC:['₿','btc','Bitcoin'], ETH:['◆','eth','Ethereum'], BNB:['B','bnb','BNB'], SOL:['≋','sol','Solana'], XRP:['X','xrp','XRP'], ADA:['A','ada','Cardano'], PAXG:['◉','other','PAX Gold'] };
     var item = map[base] || [base.slice(0,1) || '•','other',base];
     return { base:base, glyph:item[0], style:item[1], name:item[2] };
   }
@@ -1076,7 +1076,7 @@ $('case-title').textContent = mk.symbol;
     var conds = mk.conds || {};
     $('case-sub').textContent = mk.ready ?
       ('الاختيار=' + (mk.strategy_label || 'انتظار') + ' · tf=' + (mk.timeframe || '-') + ' · ' + (pos ? 'صفقة مفتوحة' : 'بدون صفقة') + ' · ' + mk.time) :
-      'waiting for first scan';
+      (mk.supported === false ? (mk.reason || 'غير متاح في Binance Demo') : 'waiting for first scan');
 
     // nodes
     var ready = mk.ready;
@@ -1154,7 +1154,7 @@ $('case-title').textContent = mk.symbol;
     var h = '';
     S.markets.forEach(function (m, i) {
       var ready = m.ready, coin = coinInfo(m.symbol);
-      h += '<button class="cell coin-cell' + (i === sel ? ' sel' : '') + '" data-i="' + i + '"><span class="coin-avatar coin-' + coin.style + '" aria-hidden="true">' + esc(coin.glyph) + '</span><span class="coin-copy"><span class="v">' + esc(coin.base) + '<small>/' + esc(String(m.symbol || '').split('/')[1] || 'USDT') + '</small></span><span class="sig"><i class="dot ' + (ready && m.signal ? 'on' : '') + '"></i>' + (m.in_position ? 'صفقة مفتوحة' : (ready ? (m.signal ? 'إشارة' : 'مراقبة') : 'بانتظار البيانات')) + '</span></span></button>';
+      h += '<button class="cell coin-cell' + (i === sel ? ' sel' : '') + '" data-i="' + i + '"><span class="coin-avatar coin-' + coin.style + '" aria-hidden="true">' + esc(coin.glyph) + '</span><span class="coin-copy"><span class="v">' + esc(coin.base) + '<small>/' + esc(String(m.symbol || '').split('/')[1] || 'USDT') + '</small></span><span class="sig"><i class="dot ' + (ready && m.signal ? 'on' : '') + '"></i>' + (m.in_position ? 'صفقة مفتوحة' : (ready ? (m.signal ? 'إشارة' : 'مراقبة') : (m.supported === false ? 'غير متاح' : 'بانتظار البيانات'))) + '</span></span></button>';
     });
     h += '<div class="cell"><span class="n">OPEN</span><span class="v">' + S.positions.length + '</span><span class="sig">positions</span></div>';
     h += '<div class="cell"><span class="n">CLOSED</span><span class="v">' + S.stats.total + '</span><span class="sig">trades</span></div>';
