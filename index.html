@@ -1075,7 +1075,7 @@ $('case-title').textContent = mk.symbol;
     var caseCoin = coinInfo(mk.symbol); $('case-coin-icon').className = 'coin-avatar case-avatar coin-' + caseCoin.style; $('case-coin-icon').textContent = caseCoin.glyph;
     var conds = mk.conds || {};
     $('case-sub').textContent = mk.ready ?
-      ('tf=' + P.timeframe + ' · ema' + P.ema_period + ' · signal=' + (mk.signal ? 'true' : 'false') + ' · ' + (pos ? 'in position' : 'flat') + ' · ' + mk.time) :
+      ('الاختيار=' + (mk.strategy_label || 'انتظار') + ' · tf=' + (mk.timeframe || '-') + ' · ' + (pos ? 'صفقة مفتوحة' : 'بدون صفقة') + ' · ' + mk.time) :
       'waiting for first scan';
 
     // nodes
@@ -1087,7 +1087,7 @@ $('case-title').textContent = mk.symbol;
     var reason = !ready ? 'لا بيانات بعد' : (!mk.signal ? 'لا توجد إشارة' : (!newsOk ? 'الأخبار توقف الشراء' : (inpos ? 'صفقة مفتوحة' : (!fundsOk ? 'الرصيد غير كافٍ' : ''))));
 
     setNode('price', 'idle', ready ? usd(mk.price) : '-', 'binance ticker · live');
-    setNode('candles', 'idle', P.timeframe, '500 candles · closed only');
+    setNode('candles', 'idle', mk.timeframe || '-', 'timeframe selected automatically');
     setNode('news', N.enabled ? (N.blocked ? 'bad' : 'idle') : 'idle', N.enabled ? 'RSS ×2' : 'OFF', N.checked_at ? ('checked ' + N.checked_at) : 'waiting');
     setNode('wallet', 'idle', usd(W.free), 'total ' + usd(W.total));
 
@@ -1159,21 +1159,22 @@ $('case-title').textContent = mk.symbol;
     h += '<div class="cell"><span class="n">OPEN</span><span class="v">' + S.positions.length + '</span><span class="sig">positions</span></div>';
     h += '<div class="cell"><span class="n">CLOSED</span><span class="v">' + S.stats.total + '</span><span class="sig">trades</span></div>';
     $('cells').innerHTML = h;
-    $('mk-tag').textContent = 'tf ' + S.params.timeframe;
+    $('mk-tag').textContent = 'AUTO · ' + (S.params.strategies || []).length + ' strategies';
   }  function renderCode(mk, P, N, buy) {
-    var t = function (b) { return '<span class="' + (b ? 't' : 'f') + '">' + (b ? 'True' : 'False') + '</span>'; };
-    var h = '<span class="c"># ' + P.timeframe + ' candles · closed only</span>\n';
+    var labels = {trend:'تتبّع الاتجاه', breakout:'الاختراق', bounce:'الارتداد', wait:'انتظار'};
+    var strategy = labels[mk.strategy] || mk.strategy_label || 'انتظار';
+    var h = '<span class="c"># AUTO · strategy selected from closed candles</span>\\n';
     if (!mk.ready) { h += '<span class="c"># waiting for first scan...</span>'; $('code').innerHTML = h; return; }
-    var c = mk.conds || {};
-    h += 'price  = <span class="n">' + num(mk.ref_close, 2) + '</span>\n';
-    h += 'ema' + P.ema_period + '  = <span class="n">' + num(mk.ema, 2) + '</span>   <span class="k">→</span> price &gt; ema  ' + t(c.ema) + '\n';
-    h += 'hist   = <span class="n">' + (mk.hist >= 0 ? '+' : '') + num(mk.hist, 2) + '</span>   <span class="k">→</span> hist &gt; 0    ' + t(c.macd) + '\n';
-    h += 'rsi    = <span class="n">' + num(mk.rsi, 1) + '</span>   <span class="k">→</span> rsi &lt;= ' + P.rsi_max + '   ' + t(c.rsi) + '\n';
-    h += '<span class="hl">signal = <span class="k">all</span>(conds)       ' + t(mk.signal) + '</span>\n';
-    h += 'news   = <span class="n">' + (N.checked_at ? N.sentiment + ' ' + N.severity + '/5' : 'n/a') + '</span>   <span class="k">→</span> gate ' + (N.blocked ? '<span class="f">BLOCKED</span>' : '<span class="t">PASS</span>') + '\n';
+    h += 'strategy = <span class="n">' + esc(strategy) + '</span>\\n';
+    h += 'timeframe = <span class="n">' + esc(mk.timeframe || '-') + '</span>\\n';
+    h += 'reason = <span class="n">' + esc(mk.reason || 'لا توجد إشارة') + '</span>\\n';
+    h += '<span class="hl">signal = <span class="k">confirmed setup</span>  ' + (mk.signal ? '<span class="t">True</span>' : '<span class="f">False</span>') + '</span>\\n';
+    h += 'news   = <span class="n">' + (N.checked_at ? N.sentiment + ' ' + N.severity + '/5' : 'n/a') + '</span>   <span class="k">→</span> gate ' + (N.blocked ? '<span class="f">BLOCKED</span>' : '<span class="t">PASS</span>') + '\\n';
+    h += '<span class="c"># negative news limits entries to trend setups</span>\\n';
     h += '<span class="k">if</span> signal <span class="k">and</span> gate: <span class="k">buy</span>(<span class="n">' + S.trade_amount + '</span>)  ' + (buy ? '<span class="t">← NOW</span>' : '<span class="c"># wait</span>');
     $('code').innerHTML = h;
   }
+
   function renderLog() {
     var h = '';
     S.events.slice(0, 8).forEach(function (e) {
