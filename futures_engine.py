@@ -40,6 +40,7 @@ class BinanceFuturesDemo:
         self.positions = self._load_positions()
         self.snapshot = {}
         self.last_entry_candle = {}
+        self._balance_cache = {"time": 0.0, "value": None}
         self._init_db()
 
     def _connect(self):
@@ -76,13 +77,19 @@ class BinanceFuturesDemo:
         except sqlite3.OperationalError:
             return {}
 
-    def balance(self):
+    def balance(self, ttl=10):
+        now = time.time()
+        cached = self._balance_cache
+        if cached["value"] is not None and now - cached["time"] < ttl:
+            return dict(cached["value"])
         try:
             data = self.exchange.fetch_balance()
-            return {
+            value = {
                 "free": float((data.get("free") or {}).get("USDT") or 0),
                 "total": float((data.get("total") or {}).get("USDT") or 0),
             }
+            self._balance_cache = {"time": now, "value": value}
+            return dict(value)
         except Exception as exc:
             return {"free": 0.0, "total": 0.0, "error": type(exc).__name__}
 
@@ -98,10 +105,11 @@ class BinanceFuturesDemo:
                      "losses": row[2] or 0, "realized_pnl": row[3] or 0.0}
         except sqlite3.OperationalError:
             pass
+        balance = self.balance()
         return {
             "connected": True, "environment": "demo", "trading_enabled": True,
             "symbols": self.symbols, "open_positions": len(self.positions),
-            "balance": self.balance()["total"], "free_balance": self.balance()["free"],
+            "balance": balance["total"], "free_balance": balance["free"],
             **stats,
         }
 
@@ -118,22 +126,37 @@ class BinanceFuturesDemo:
     def _close(self, symbol, pos, price, reason):
         order = self.exchange.create_order(
             symbol, "market", "sell", pos["contracts"], None, {"reduceOnly": True})
-        filled = float(order.get("filled") or pos["contracts"])
+        if order.get("status") != "closed" and order.get("id"):
+            order = self.exchange.fetch_order(order["id"], symbol)
+        filled = float(order.get("filled") or 0)
+        if filled <= 0:
+            raise RuntimeError("أمر الإغلاق لم يُنفذ؛ ستتم إعادة المحاولة لاحقًا")
         exit_price = float(order.get("average") or price)
         market = self.exchange.market(symbol)
         multiplier = float(market.get("contractSize") or 1)
-        pnl = (exit_price - pos["entry_price"]) * filled * multiplier
-        pnl_pct = pnl / pos["cost"] * 100 if pos["cost"] else 0.0
+        previous_contracts = pos["contracts"]
+        closed_contracts = min(filled, previous_contracts)
+        pnl = (exit_price - pos["entry_price"]) * closed_contracts * multiplier
+        closed_cost = pos["cost"] * closed_contracts / previous_contracts
+        pnl_pct = pnl / closed_cost * 100 if closed_cost else 0.0
         status = "WIN" if pnl > 0 else "LOSS"
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        remaining = max(previous_contracts - closed_contracts, 0.0)
         with self._connect() as conn:
-            conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
+            if remaining <= 0:
+                conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
+            else:
+                pos["contracts"] = remaining
+                pos["amount"] = remaining * multiplier
+                pos["cost"] -= closed_cost
+                self._save_position(pos)
             conn.execute("""INSERT INTO futures_trades
                 (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
                  strategy, timeframe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (symbol, pos["entry_price"], exit_price, pnl_pct, pnl, status, now,
                  pos["strategy"], pos["timeframe"]))
-        self.positions.pop(symbol, None)
+        if remaining <= 0:
+            self.positions.pop(symbol, None)
         self.on_event("FUTURES", "إغلاق {} {} ({:+.2f} USDT)".format(symbol, reason, pnl))
 
     def _monitor_positions(self):
@@ -172,6 +195,13 @@ class BinanceFuturesDemo:
                 if (not setup or not setup.get("signal") or symbol in self.positions
                         or not can_open() or self.last_entry_candle.get(symbol) == setup.get("candle_ts")):
                     continue
+                # Fail closed if the account has an unmanaged position on this contract.
+                if symbol not in self.positions:
+                    exchange_positions = self.exchange.fetch_positions([symbol])
+                    unmanaged = [p for p in exchange_positions if float(p.get("contracts") or 0) > 0]
+                    if unmanaged:
+                        self.on_event("WARN", "تخطي {}: توجد صفقة Futures خارج إدارة البوت".format(symbol))
+                        continue
                 account = self.balance()
                 if account.get("error"):
                     raise RuntimeError("تعذر قراءة رصيد Futures Demo")
