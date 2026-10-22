@@ -1,4 +1,5 @@
 import os
+import secrets
 import time
 import html
 import ccxt
@@ -15,7 +16,8 @@ from pydantic import BaseModel, Field
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -394,7 +396,24 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan)
+_dashboard_auth = HTTPBasic()
+DASHBOARD_USER = os.getenv("DASHBOARD_USER", "").strip()
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
+
+
+def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(_dashboard_auth)):
+    valid_user = secrets.compare_digest(credentials.username.encode("utf-8"), DASHBOARD_USER.encode("utf-8"))
+    valid_password = secrets.compare_digest(credentials.password.encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8"))
+    if not DASHBOARD_USER or not DASHBOARD_PASSWORD or not (valid_user and valid_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
+
+
+app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 class RuntimeSettings(BaseModel):
     trade_amount_usdt: float = Field(gt=0, le=100000)
     max_concurrent_trades: int = Field(ge=1, le=20)
@@ -940,7 +959,7 @@ def automated_market_scan():
 # =====================================================================
 # 6. لوحة التحكم (صفحة واحدة تقرأ البيانات الحية من /api/state)
 # =====================================================================
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
 def read_root():
     try:
         with open("index.html", "r", encoding="utf-8") as f:
@@ -949,7 +968,7 @@ def read_root():
         return HTMLResponse(content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))))
 
 
-@app.get("/api/state")
+@app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
 def api_state():
     total, wins, losses, win_rate, total_pnl, best, worst = get_performance_stats()
     realized_total, realized_today = get_realized_stats()
@@ -1033,7 +1052,7 @@ def api_state():
 
 
 
-@app.post("/api/settings")
+@app.post("/api/settings", dependencies=[Depends(require_dashboard_auth)])
 def update_runtime_settings(payload: RuntimeSettings):
     global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
     if not scan_lock.acquire(blocking=False):
@@ -1054,7 +1073,7 @@ def update_runtime_settings(payload: RuntimeSettings):
         scan_lock.release()
 
 
-@app.post("/api/platforms/binance/credentials")
+@app.post("/api/platforms/binance/credentials", dependencies=[Depends(require_dashboard_auth)])
 def update_binance_credentials(payload: BinanceCredentials):
     global exchange, BINANCE_API_KEY, BINANCE_SECRET_KEY
     if BINANCE_ENV != "demo":
@@ -1085,12 +1104,12 @@ def update_binance_credentials(payload: BinanceCredentials):
         return {'ok': True, 'platform': 'binance', 'environment': BINANCE_ENV, 'message': 'Binance Demo credentials saved encrypted'}
     finally:
         scan_lock.release()
-@app.get("/api/equity")
+@app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])
 def api_equity(range: str = "1d"):
     return get_equity_series(range)
 
 
-@app.get("/check")
+@app.get("/check", dependencies=[Depends(require_dashboard_auth)])
 def manual_check():
     automated_market_scan()
     return RedirectResponse(url="/", status_code=303)
