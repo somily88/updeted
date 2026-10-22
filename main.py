@@ -10,14 +10,12 @@ import urllib.request
 import urllib.error
 import json
 import re
-import secrets
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, Field
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -405,20 +403,6 @@ class RuntimeSettings(BaseModel):
 class BinanceCredentials(BaseModel):
     api_key: str = Field(min_length=8, max_length=256)
     secret_key: str = Field(min_length=8, max_length=256)
-_dashboard_auth = HTTPBasic()
-DASHBOARD_USER = os.getenv("DASHBOARD_USER", "").strip()
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
-
-
-def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(_dashboard_auth)):
-    valid_user = secrets.compare_digest(credentials.username.encode("utf-8"), DASHBOARD_USER.encode("utf-8"))
-    valid_password = secrets.compare_digest(credentials.password.encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8"))
-    if not DASHBOARD_USER or not DASHBOARD_PASSWORD or not (valid_user and valid_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required",
-                            headers={"WWW-Authenticate": "Basic"})
-    return True
-
-
 _balance_cache = {'t': 0.0, 'v': (0.0, 0.0)}
 
 
@@ -956,7 +940,7 @@ def automated_market_scan():
 # =====================================================================
 # 6. لوحة التحكم (صفحة واحدة تقرأ البيانات الحية من /api/state)
 # =====================================================================
-@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
+@app.get("/", response_class=HTMLResponse)
 def read_root():
     try:
         with open("index.html", "r", encoding="utf-8") as f:
@@ -965,7 +949,7 @@ def read_root():
         return HTMLResponse(content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))))
 
 
-@app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
+@app.get("/api/state")
 def api_state():
     total, wins, losses, win_rate, total_pnl, best, worst = get_performance_stats()
     realized_total, realized_today = get_realized_stats()
@@ -1049,7 +1033,7 @@ def api_state():
 
 
 
-@app.post("/api/settings", dependencies=[Depends(require_dashboard_auth)])
+@app.post("/api/settings")
 def update_runtime_settings(payload: RuntimeSettings):
     global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
     if not scan_lock.acquire(blocking=False):
@@ -1070,7 +1054,7 @@ def update_runtime_settings(payload: RuntimeSettings):
         scan_lock.release()
 
 
-@app.post("/api/platforms/binance/credentials", dependencies=[Depends(require_dashboard_auth)])
+@app.post("/api/platforms/binance/credentials")
 def update_binance_credentials(payload: BinanceCredentials):
     global exchange, BINANCE_API_KEY, BINANCE_SECRET_KEY
     if BINANCE_ENV != "demo":
@@ -1101,12 +1085,12 @@ def update_binance_credentials(payload: BinanceCredentials):
         return {'ok': True, 'platform': 'binance', 'environment': BINANCE_ENV, 'message': 'Binance Demo credentials saved encrypted'}
     finally:
         scan_lock.release()
-@app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])
+@app.get("/api/equity")
 def api_equity(range: str = "1d"):
     return get_equity_series(range)
 
 
-@app.get("/check", dependencies=[Depends(require_dashboard_auth)])
+@app.get("/check")
 def manual_check():
     automated_market_scan()
     return RedirectResponse(url="/", status_code=303)
