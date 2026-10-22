@@ -79,7 +79,7 @@ NEWS_FEEDS = [
 
 print("🔐 [CONFIG] Binance credentials loaded:", bool(BINANCE_API_KEY and BINANCE_SECRET_KEY))
 print("🌐 [ENV] Binance environment:", BINANCE_ENV)
-print("📐 [STRATEGY] Timeframe: {} | EMA{} | RSI<={} | MACD required: {} | tolerance: {:.2f}% of close".format(TIMEFRAME, EMA_PERIOD, RSI_MAX_ENTRY, REQUIRE_MACD, MACD_HIST_TOLERANCE_PCT))
+print("📐 [STRATEGY] Automatic selection: trend (1d/4h), breakout (1h/15m), bounce (15m/5m) | risk exits: ATR-based")
 print("📰 [NEWS] Filter: {} | Classifier: {} | Pause: {}h".format(
     "ON" if NEWS_FILTER else "OFF", "Groq ({})".format(GROQ_MODEL or "auto model") if GROQ_API_KEY else "Keywords (no GROQ_API_KEY)", NEWS_PAUSE_HOURS))
 print("🛒 [TRADING] Order execution:", "ENABLED" if TRADING_ENABLED else "SIMULATION ONLY", "| Amount per trade: {} USDT".format(TRADE_AMOUNT_USDT))
@@ -423,7 +423,7 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(check_news, 'interval', minutes=60, max_instances=1, coalesce=True,
                           next_run_time=datetime.datetime.now())
     scheduler.start()
-    log_event("START", "البوت يعمل ({} | {} | EMA{})".format(BINANCE_ENV, TIMEFRAME, EMA_PERIOD))
+    log_event("START", "البوت يعمل ({} | اختيار الاستراتيجية تلقائي)".format(BINANCE_ENV))
     print("🚀 [SCHEDULER] تم تفعيل الجدولة الآلية (البيئة: {})".format(BINANCE_ENV))
     if active_positions:
         print("♻️ [RESTORE] تم استرجاع {} صفقة مفتوحة من قاعدة البيانات".format(len(active_positions)))
