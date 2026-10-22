@@ -50,6 +50,9 @@ CANDLES_LIMIT = 500
 RSI_MAX_ENTRY = float(os.getenv("RSI_MAX_ENTRY", "70"))
 EMA_PERIOD = int(os.getenv("EMA_PERIOD", "50"))
 REQUIRE_MACD = os.getenv("REQUIRE_MACD", "true").strip().lower() == "true"
+MACD_HIST_TOLERANCE_PCT = float(os.getenv("MACD_HIST_TOLERANCE_PCT", "0.10"))
+if not 0.0 <= MACD_HIST_TOLERANCE_PCT <= 0.50:
+    raise ValueError("MACD_HIST_TOLERANCE_PCT must be between 0 and 0.50")
 TAKE_PROFIT_PCT = 1.0      # هدف الربح %
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
@@ -75,7 +78,7 @@ NEWS_FEEDS = [
 
 print("🔐 [CONFIG] Binance credentials loaded:", bool(BINANCE_API_KEY and BINANCE_SECRET_KEY))
 print("🌐 [ENV] Binance environment:", BINANCE_ENV)
-print("📐 [STRATEGY] Timeframe: {} | EMA{} | RSI<={} | MACD required: {}".format(TIMEFRAME, EMA_PERIOD, RSI_MAX_ENTRY, REQUIRE_MACD))
+print("📐 [STRATEGY] Timeframe: {} | EMA{} | RSI<={} | MACD required: {} | tolerance: {:.2f}% of close".format(TIMEFRAME, EMA_PERIOD, RSI_MAX_ENTRY, REQUIRE_MACD, MACD_HIST_TOLERANCE_PCT))
 print("📰 [NEWS] Filter: {} | Classifier: {} | Pause: {}h".format(
     "ON" if NEWS_FILTER else "OFF", "Groq ({})".format(GROQ_MODEL or "auto model") if GROQ_API_KEY else "Keywords (no GROQ_API_KEY)", NEWS_PAUSE_HOURS))
 print("🛒 [TRADING] Order execution:", "ENABLED" if TRADING_ENABLED else "SIMULATION ONLY", "| Amount per trade: {} USDT".format(TRADE_AMOUNT_USDT))
@@ -874,7 +877,7 @@ def automated_market_scan():
                 current_price = exchange.fetch_ticker(symbol)['last']
 
                 cond_ema = ema is not None and closes[-1] > ema
-                cond_macd = hist > 0 or not REQUIRE_MACD
+                cond_macd = hist >= -(closes[-1] * MACD_HIST_TOLERANCE_PCT / 100.0) or not REQUIRE_MACD
                 cond_rsi = rsi <= RSI_MAX_ENTRY
                 signal_ok = cond_rsi and cond_ema and cond_macd
                 market_snapshot[symbol] = {
@@ -1026,7 +1029,7 @@ def api_state():
         },
         'params': {
             'timeframe': TIMEFRAME, 'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
-            'require_macd': REQUIRE_MACD, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
+            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,
             'news_pause_h': NEWS_PAUSE_HOURS
         },
