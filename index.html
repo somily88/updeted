@@ -894,6 +894,18 @@ body { background:linear-gradient(180deg,#f0f1f5 0%,#f6f7fa 100%); }
           </form>
         </details>
       </article>
+      <article class="platform-card" id="platform-binance-futures-card">
+        <div class="platform-card-head"><div class="platform-brand"><span class="platform-logo binance-logo">B</span><div><h4>Binance Futures</h4><small>USDⓈ-M · Demo · رافعة 1x</small></div></div><span class="account-state" id="platform-binance-futures-status">بانتظار المفتاح</span></div>
+        <div class="account-metrics"><div><small>رصيد Futures</small><b class="ltr" id="platform-binance-futures-balance">—</b></div><div><small>صفقات مفتوحة</small><b id="platform-binance-futures-open">—</b></div><div><small>الربح المحقق</small><b class="ltr" id="platform-binance-futures-pnl">—</b></div><div><small>صفقات مغلقة</small><b id="platform-binance-futures-closed">—</b></div></div>
+        <div class="connector-status"><span>العقود المكتشفة</span><b id="platform-binance-futures-symbols">CL · BZ · XAU عند توفرها في Demo</b></div>
+        <details class="credential-details"><summary>إضافة مفتاح Binance Futures Demo</summary><p>أنشئ المفتاح من صفحة API Management داخل حساب Futures Demo. هذا مفتاح منفصل عن Spot؛ أدخله هنا مباشرة ليتم التحقق منه وتخزينه مشفّرًا. لا ترسله في المحادثة، ولا تمنحه صلاحية السحب. التداول تجريبي برافعة 1x مع وقف/هدف يديرهما البوت، لذا يلزم بقاء الخدمة متصلة.</p>
+          <form id="binance-futures-api-form" class="credential-form" autocomplete="off">
+            <label>Futures Demo API Key<input name="api_key" type="password" autocomplete="new-password" required minlength="8" maxlength="256" placeholder="مفتاح Futures Demo"></label>
+            <label>Futures Demo Secret<input name="secret_key" type="password" autocomplete="new-password" required minlength="8" maxlength="256" placeholder="المفتاح السري لـ Futures Demo"></label>
+            <button type="submit" class="action-btn">التحقق وربط Futures Demo</button><span id="futures-credential-message" class="form-message" role="status"></span>
+          </form>
+        </details>
+      </article>
       <article class="platform-card muted-platform">
         <div class="platform-card-head"><div class="platform-brand"><span class="platform-logo mitrade-logo">M</span><div><h4>Mitrade</h4><small>منصة تداول خاصة</small></div></div><span class="account-state pending">غير متصل</span></div>
         <p class="platform-note">لم أعثر على توثيق عام رسمي لواجهة تداول API من Mitrade، لذلك لا يمكن إدخال مفاتيحها أو إرسال أوامر إليها بأمان الآن.</p>
@@ -1026,6 +1038,15 @@ body { background:linear-gradient(180deg,#f0f1f5 0%,#f6f7fa 100%); }
       $('platform-binance-open').textContent = platformBinance.open_positions;
       $('platform-binance-pnl').textContent = usd(platformBinance.realized_pnl, true);
       $('platform-binance-closed').textContent = platformBinance.closed_trades;
+    }
+    var platformFutures = (S.platforms || []).find(function (p) { return p.id === 'binance_futures'; });
+    if (platformFutures) {
+      $('platform-binance-futures-status').textContent = platformFutures.connected ? 'متصل · Futures Demo' : 'أضف مفتاح Futures Demo';
+      $('platform-binance-futures-balance').textContent = usd(platformFutures.balance);
+      $('platform-binance-futures-open').textContent = platformFutures.open_positions || 0;
+      $('platform-binance-futures-pnl').textContent = usd(platformFutures.realized_pnl, true);
+      $('platform-binance-futures-closed').textContent = platformFutures.closed_trades || 0;
+      $('platform-binance-futures-symbols').textContent = (platformFutures.symbols || []).length ? platformFutures.symbols.join(' · ') : 'بانتظار التحقق من العقود';
     }
     var amountInput = document.querySelector('#trading-settings-form [name="trade_amount_usdt"]');
     var maxInput = document.querySelector('#trading-settings-form [name="max_concurrent_trades"]');
@@ -1383,6 +1404,14 @@ document.addEventListener('click', function (ev) {
       fetch('/api/platforms/binance/credentials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: fd.get('api_key'), secret_key: fd.get('secret_key') }) })
         .then(function (r) { if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'فشل التحقق'); }); return r.json(); })
         .then(function () { msg.className = 'form-message success'; msg.textContent = 'تم حفظ مفاتيح Demo مشفّرة'; form.reset(); poll(); })
+        .catch(function (e) { msg.className = 'form-message error'; msg.textContent = e.message || 'تعذر التحقق'; form.reset(); });
+    } else if (form.id === 'binance-futures-api-form') {
+      ev.preventDefault();
+      var msg = $('futures-credential-message'); msg.className = 'form-message'; msg.textContent = 'جارٍ التحقق من Binance Futures Demo…';
+      var fd = new FormData(form);
+      fetch('/api/platforms/binance-futures/credentials', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: fd.get('api_key'), secret_key: fd.get('secret_key') }) })
+        .then(function (r) { if (!r.ok) return r.json().then(function (d) { throw new Error(d.detail || 'فشل التحقق من Futures Demo'); }); return r.json(); })
+        .then(function (d) { msg.className = 'form-message success'; msg.textContent = 'تم الربط المشفّر · العقود: ' + (d.symbols || []).join('، '); form.reset(); poll(); })
         .catch(function (e) { msg.className = 'form-message error'; msg.textContent = e.message || 'تعذر التحقق'; form.reset(); });
     }
   });

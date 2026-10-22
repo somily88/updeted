@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import evaluate_symbol, STRATEGY_RISK
+from futures_engine import BinanceFuturesDemo
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -30,6 +31,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"').strip("'")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "").strip().strip('"').strip("'")
+BINANCE_FUTURES_API_KEY = os.getenv("BINANCE_FUTURES_API_KEY", "").strip().strip('"').strip("'")
+BINANCE_FUTURES_SECRET_KEY = os.getenv("BINANCE_FUTURES_SECRET_KEY", "").strip().strip('"').strip("'")
 BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet | live
 
 # حجم كل صفقة بالدولار (USDT)
@@ -201,12 +204,12 @@ def load_runtime_settings():
             conn.close()
 
 
-def load_saved_binance_credentials():
+def load_saved_binance_credentials(platform='binance'):
     if not CREDENTIAL_ENCRYPTION_KEY:
         return None
     try:
         conn = sqlite3.connect(DB_NAME)
-        row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', ('binance',)).fetchone()
+        row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', (platform,)).fetchone()
         conn.close()
         if row:
             cipher = _credential_cipher()
@@ -395,6 +398,9 @@ print("⚙️ [SETTINGS] Max concurrent trades: {}".format(MAX_CONCURRENT_TRADES
 saved_binance_credentials = load_saved_binance_credentials()
 if saved_binance_credentials:
     BINANCE_API_KEY, BINANCE_SECRET_KEY = saved_binance_credentials
+saved_futures_credentials = load_saved_binance_credentials('binance_futures')
+if saved_futures_credentials:
+    BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY = saved_futures_credentials
 
 exchange = make_binance_exchange(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 if BINANCE_ENV == "live":
@@ -412,6 +418,7 @@ event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها
 def log_event(tag, text):
     event_log.appendleft({'t': datetime.datetime.now().strftime("%H:%M:%S"), 'tag': tag, 'text': text})
 scheduler = BackgroundScheduler()
+futures_engine = None
 
 
 @asynccontextmanager
@@ -431,6 +438,19 @@ async def lifespan(app: FastAPI):
             print("✅ [MARKETS] Active spot pairs: {}".format(", ".join(sorted(SUPPORTED_SYMBOLS))))
     except Exception as e:
         print("Load Markets Error: {}".format(e))
+    global futures_engine
+    if BINANCE_ENV == 'demo' and BINANCE_FUTURES_API_KEY and BINANCE_FUTURES_SECRET_KEY:
+        try:
+            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event)
+            print('✅ [FUTURES DEMO] Active contracts: {}'.format(', '.join(futures_engine.symbols) or 'none'))
+            if not futures_engine.symbols:
+                log_event('WARN', 'Binance Futures Demo لا يعرض عقود CL/BZ/XAU المطلوبة')
+        except Exception as e:
+            futures_engine = None
+            print('❌ [FUTURES DEMO] Connection unavailable ({})'.format(type(e).__name__))
+            log_event('ERR', 'تعذر الاتصال بـ Binance Futures Demo')
+    else:
+        print('ℹ️ [FUTURES DEMO] بانتظار مفاتيح API الخاصة بـ Futures Demo')
     scheduler.add_job(automated_market_scan, 'interval', minutes=1, max_instances=1, coalesce=True)
     if NEWS_FILTER:
         scheduler.add_job(check_news, 'interval', minutes=60, max_instances=1, coalesce=True,
@@ -470,6 +490,11 @@ class RuntimeSettings(BaseModel):
 
 
 class BinanceCredentials(BaseModel):
+    api_key: str = Field(min_length=8, max_length=256)
+    secret_key: str = Field(min_length=8, max_length=256)
+
+
+class FuturesCredentials(BaseModel):
     api_key: str = Field(min_length=8, max_length=256)
     secret_key: str = Field(min_length=8, max_length=256)
 _balance_cache = {'t': 0.0, 'v': (0.0, 0.0)}
@@ -928,7 +953,7 @@ def automated_market_scan():
                 print("📊 {} | {} {} | RSI: {:.2f} | setup: {}".format(
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'], setup['reason']))
 
-                if symbol not in active_positions and len(active_positions) >= MAX_CONCURRENT_TRADES:
+                if symbol not in active_positions and (len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)) >= MAX_CONCURRENT_TRADES:
                     continue
 
                 global test_trade_done
@@ -1002,6 +1027,8 @@ def automated_market_scan():
                         "\n🧪 محاكاة" if fill['simulated'] else ""))
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
+        if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
+            futures_engine.scan(TRADE_AMOUNT_USDT, lambda: (len(active_positions) + len(futures_engine.positions)) < MAX_CONCURRENT_TRADES)
         record_equity()
     except Exception as e:
         print("Error in automated market scan: {}".format(e))
@@ -1065,17 +1092,55 @@ def api_state():
             'timeframe': d.get('timeframe', '15m'), 'reason': d.get('reason', '')
         })
 
+    if futures_engine:
+        for sym, pos in futures_engine.positions.items():
+            price = float((futures_engine.snapshot.get(sym) or {}).get('price') or pos['entry_price'])
+            pnl = (price - pos['entry_price']) * pos['contracts'] * float(futures_engine.exchange.market(sym).get('contractSize') or 1)
+            positions.append({'symbol': sym, 'entry': pos['entry_price'], 'amount': pos['amount'],
+                'cost': pos['cost'], 'highest': pos['highest_price'], 'price': price, 'pnl_usdt': pnl,
+                'pnl_pct': pnl / pos['cost'] * 100 if pos['cost'] else 0, 'stop': pos['stop_price'],
+                'target': pos['target_price'], 'strategy': pos['strategy'], 'timeframe': pos['timeframe'],
+                'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
+    if futures_engine:
+        for sym in futures_engine.symbols:
+            data = futures_engine.snapshot.get(sym)
+            if data:
+                markets.append({'symbol': sym, 'ready': data.get('ready', False), 'supported': True,
+                    'price': data.get('price'), 'rsi': data.get('rsi', 50), 'ema': data.get('ema', 0),
+                    'ref_close': data.get('ref_close', data.get('price')), 'hist': data.get('hist', 0),
+                    'signal': data.get('signal', False), 'conds': data.get('conds', {}), 'time': '',
+                    'in_position': sym in futures_engine.positions, 'strategy': data.get('strategy', 'wait'),
+                    'strategy_label': data.get('strategy_label', 'انتظار'), 'timeframe': data.get('timeframe', '15m'),
+                    'reason': data.get('reason', ''), 'market_type': 'Futures Demo'})
+            else:
+                markets.append({'symbol': sym, 'ready': False, 'supported': True,
+                    'in_position': sym in futures_engine.positions, 'market_type': 'Futures Demo',
+                    'reason': 'بانتظار أول فحص Futures'})
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7]
     } for t in get_recent_trades(limit=8)]
+    if futures_engine:
+        try:
+            with futures_engine._connect() as conn:
+                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
+            trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
+                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'market_type': 'Futures Demo'} for t in rows)
+            trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
+        except Exception:
+            pass
 
+    future_state = futures_engine.public_state() if futures_engine else {
+        'connected': False, 'environment': 'demo', 'trading_enabled': False, 'symbols': [],
+        'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
+        'wins': 0, 'losses': 0, 'realized_pnl': 0.0}
     return {
+        'futures': future_state,
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
         'telegram': bool(TELEGRAM_BOT_TOKEN),
         'trade_amount': TRADE_AMOUNT_USDT,
-        'settings': {'max_concurrent_trades': MAX_CONCURRENT_TRADES, 'active_trades': len(active_positions)},
+        'settings': {'max_concurrent_trades': MAX_CONCURRENT_TRADES, 'active_trades': len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)},
         'wallet': {'total': total_usdt, 'free': free_usdt},
         'stats': {
             'realized_total': realized_total, 'realized_today': realized_today,
@@ -1095,7 +1160,8 @@ def api_state():
         'positions': positions,
         'trades': trades,
         'platforms': [
-            {'id': 'binance', 'name': 'Binance', 'connected': bool(BINANCE_API_KEY and BINANCE_SECRET_KEY), 'environment': BINANCE_ENV, 'trading_enabled': TRADING_ENABLED, 'balance': total_usdt, 'free_balance': free_usdt, 'open_positions': len(active_positions), 'realized_pnl': realized_total, 'closed_trades': total, 'status': 'connected' if BINANCE_API_KEY and BINANCE_SECRET_KEY else 'credentials missing'},
+            {'id': 'binance', 'name': 'Binance Spot', 'connected': bool(BINANCE_API_KEY and BINANCE_SECRET_KEY), 'environment': BINANCE_ENV, 'trading_enabled': TRADING_ENABLED, 'balance': total_usdt, 'free_balance': free_usdt, 'open_positions': len(active_positions), 'realized_pnl': realized_total, 'closed_trades': total, 'status': 'connected' if BINANCE_API_KEY and BINANCE_SECRET_KEY else 'credentials missing'},
+            {'id': 'binance_futures', 'name': 'Binance Futures', 'connected': future_state['connected'], 'environment': 'demo', 'trading_enabled': bool(future_state['connected'] and TRADING_ENABLED), 'balance': future_state['balance'], 'free_balance': future_state['free_balance'], 'open_positions': future_state['open_positions'], 'realized_pnl': future_state['realized_pnl'], 'closed_trades': future_state['closed'], 'symbols': future_state['symbols'], 'status': 'connected' if future_state['connected'] else 'credentials missing'},
             {'id': 'mitrade', 'name': 'Mitrade', 'connected': False, 'supported': False, 'status': 'No public trading API documentation found'}
         ],
         'news': {
@@ -1165,6 +1231,42 @@ def update_binance_credentials(payload: BinanceCredentials):
         return {'ok': True, 'platform': 'binance', 'environment': BINANCE_ENV, 'message': 'Binance Demo credentials saved encrypted'}
     finally:
         scan_lock.release()
+@app.post('/api/platforms/binance-futures/credentials', dependencies=[Depends(require_dashboard_auth)])
+def update_binance_futures_credentials(payload: FuturesCredentials):
+    global futures_engine, BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY
+    if BINANCE_ENV != 'demo':
+        raise HTTPException(status_code=409, detail='Futures API credentials are accepted only in Binance Demo mode')
+    if not CREDENTIAL_ENCRYPTION_KEY:
+        raise HTTPException(status_code=503, detail='Encrypted credential storage is not configured')
+    if futures_engine and futures_engine.positions:
+        raise HTTPException(status_code=409, detail='Close or wait for Futures Demo positions before changing keys')
+    if not scan_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail='Market scan in progress; retry shortly')
+    try:
+        try:
+            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event)
+            balance_check = candidate.balance()
+            if balance_check.get('error'):
+                raise RuntimeError('Futures API authentication failed')
+            if not candidate.symbols:
+                raise RuntimeError('No supported oil or gold contracts in Futures Demo markets')
+        except Exception:
+            raise HTTPException(status_code=400, detail='تعذر التحقق من Binance Futures Demo أو أن عقود النفط/الذهب غير متاحة في حساب الديمو')
+        cipher = _credential_cipher()
+        conn = sqlite3.connect(DB_NAME)
+        conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
+            ('binance_futures', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
+        conn.commit(); conn.close()
+        futures_engine = candidate
+        BINANCE_FUTURES_API_KEY = payload.api_key.strip()
+        BINANCE_FUTURES_SECRET_KEY = payload.secret_key.strip()
+        log_event('PLATFORM', 'تم ربط Binance Futures Demo')
+        return {'ok': True, 'platform': 'binance_futures', 'environment': 'demo', 'symbols': candidate.symbols,
+            'message': 'Binance Futures Demo credentials saved encrypted'}
+    finally:
+        scan_lock.release()
+
+
 @app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])
 def api_equity(range: str = "1d"):
     return get_equity_series(range)
