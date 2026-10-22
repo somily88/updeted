@@ -58,7 +58,9 @@ TAKE_PROFIT_PCT = 1.0      # هدف الربح %
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 
-SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
+SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "PAXG/USDT"]
+SUPPORTED_SYMBOLS = set(SYMBOLS)
+UNSUPPORTED_SYMBOLS = {}
 
 # صفقة اختبار واحدة: تُفتح فوراً عند التشغيل وتُغلق تلقائياً بعد دقيقتين (للتأكد من عمل الأوامر)
 FORCE_TEST_TRADE = os.getenv("FORCE_TEST_TRADE", "false").strip().lower() == "true"
@@ -416,6 +418,17 @@ scheduler = BackgroundScheduler()
 async def lifespan(app: FastAPI):
     try:
         exchange.load_markets()
+        if exchange.markets:
+            SUPPORTED_SYMBOLS.clear()
+            for symbol in SYMBOLS:
+                market = exchange.markets.get(symbol)
+                if market and market.get('spot') and market.get('active') is not False:
+                    SUPPORTED_SYMBOLS.add(symbol)
+                else:
+                    UNSUPPORTED_SYMBOLS[symbol] = "الزوج غير متاح في Binance Spot Demo"
+            if UNSUPPORTED_SYMBOLS:
+                print("⚠️ [MARKETS] Pairs unavailable in Demo: {}".format(", ".join(sorted(UNSUPPORTED_SYMBOLS))))
+            print("✅ [MARKETS] Active spot pairs: {}".format(", ".join(sorted(SUPPORTED_SYMBOLS))))
     except Exception as e:
         print("Load Markets Error: {}".format(e))
     scheduler.add_job(automated_market_scan, 'interval', minutes=1, max_instances=1, coalesce=True)
@@ -903,6 +916,8 @@ def automated_market_scan():
 
         for symbol in SYMBOLS:
             try:
+                if symbol not in SUPPORTED_SYMBOLS:
+                    continue
                 setup = evaluate_symbol(exchange, symbol)
                 current_price = exchange.fetch_ticker(symbol)['last']
                 if not setup:
@@ -1038,7 +1053,9 @@ def api_state():
     for sym in SYMBOLS:
         d = market_snapshot.get(sym)
         if not d:
-            markets.append({'symbol': sym, 'ready': False, 'in_position': sym in active_positions})
+            markets.append({'symbol': sym, 'ready': False, 'in_position': sym in active_positions,
+                            'supported': sym in SUPPORTED_SYMBOLS,
+                            'reason': UNSUPPORTED_SYMBOLS.get(sym, 'بانتظار أول فحص')})
             continue
         markets.append({
             'symbol': sym, 'ready': True, 'price': d['price'], 'rsi': d['rsi'], 'ema': d['ema'],
