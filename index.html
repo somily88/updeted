@@ -972,7 +972,7 @@ body { background:linear-gradient(180deg,#f0f1f5 0%,#f6f7fa 100%); }
   var TITLES = {
     price: ['TICKER', 'السعر'], candles: ['OHLCV', 'الشموع'], news: ['RSS', 'الأخبار'], wallet: ['USDT', 'الرصيد'],
     rsi: ['RSI·14', 'مؤشر القوة'], ema: ['EMA', 'المتوسط'], macd: ['MACD', 'الهيستوغرام'], groq: ['LLM', 'المصنّف'],
-    k_ema: ['price > ema', 'السعر فوق EMA'], k_macd: ['hist > 0', 'MACD موجب'], k_rsi: ['rsi ≤ max', 'RSI مناسب'], signal: ['AND', 'إشارة الدخول'],
+    k_ema: ['price > ema', 'السعر فوق EMA'], k_macd: ['hist ≥ −tolerance', 'MACD ضمن الهامش'], k_rsi: ['rsi ≤ max', 'RSI مناسب'], signal: ['AND', 'إشارة الدخول'],
     g_news: ['NEWS', 'بوابة الأخبار'], g_pos: ['ONE/SYMBOL', 'صفقة واحدة'], g_funds: ['FUNDS', 'الرصيد كافٍ'], decision: ['DECIDE', 'قرار الشراء'],
     a_buy: ['MARKET', 'أمر الشراء'], a_sl: ['STOP', 'وقف الخسارة'], a_tp: ['TARGET', 'هدف الربح'], a_tg: ['TELEGRAM', 'التنبيه']
   };
@@ -1094,7 +1094,7 @@ $('case-title').textContent = mk.symbol;
     setNode('rsi', ready ? (conds.rsi ? 'ok' : 'bad') : 'idle', ready ? num(mk.rsi, 1) : '-', 'max ' + P.rsi_max, ready ? { pct: mk.rsi, mark: P.rsi_max } : null);
     var delta = ready && mk.ema ? (mk.price / mk.ema - 1) * 100 : null;
     setNode('ema', ready ? (conds.ema ? 'ok' : 'bad') : 'idle', ready ? num(mk.ema, 2) : '-', 'EMA' + P.ema_period + (delta === null ? '' : ' · price ' + (delta >= 0 ? '+' : '') + num(delta, 2) + '%'));
-    setNode('macd', ready ? (conds.macd ? 'ok' : 'bad') : 'idle', ready ? (mk.hist >= 0 ? '+' : '') + num(mk.hist, 2) : '-', P.require_macd ? 'required' : 'optional (off)');
+    setNode('macd', ready ? (conds.macd ? 'ok' : 'bad') : 'idle', ready ? (mk.hist >= 0 ? '+' : '') + num(mk.hist, 2) : '-', P.require_macd ? 'required · tolerance ' + num(P.macd_tolerance_pct, 2) + '%' : 'optional (off)');
     var sentLbl = { positive: 'POSITIVE', neutral: 'NEUTRAL', negative: 'NEGATIVE' }[N.sentiment] || 'NEUTRAL';
     setNode('groq', N.enabled && N.checked_at ? (N.blocked ? 'bad' : 'ok') : 'idle', N.enabled && N.checked_at ? sentLbl + ' ' + N.severity + '/5' : (N.enabled ? 'WAIT' : 'OFF'), N.model ? N.model : (N.source || 'groq'));
 
