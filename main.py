@@ -21,6 +21,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
+from strategy_engine import evaluate_symbol, STRATEGY_RISK
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -136,6 +137,16 @@ def init_db():
                 simulated INTEGER NOT NULL DEFAULT 0
             )
         ''')
+        for column, definition in [
+            ('strategy', "TEXT NOT NULL DEFAULT 'trend'"),
+            ('timeframe', "TEXT NOT NULL DEFAULT '1h'"),
+            ('stop_price', 'REAL'),
+            ('target_price', 'REAL'),
+            ('trailing_distance', 'REAL'),
+        ]:
+            existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
+            if column not in existing:
+                cursor.execute('ALTER TABLE open_positions ADD COLUMN {} {}'.format(column, definition))
         # لقطات قيمة المحفظة (للرسم البياني في لوحة التحكم)
         cursor.execute('CREATE TABLE IF NOT EXISTS equity (ts INTEGER PRIMARY KEY, value REAL NOT NULL)')
         cursor.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
@@ -329,10 +340,13 @@ def save_position(symbol, pos):
         conn = sqlite3.connect(DB_NAME)
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
-            (symbol, entry_price, amount, cost, highest_price, opened_at, simulated)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
+             strategy, timeframe, stop_price, target_price, trailing_distance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
-              pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0))
+              pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
+              pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
+              pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance')))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -354,11 +368,15 @@ def load_positions():
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute('SELECT symbol, entry_price, amount, cost, highest_price, opened_at, simulated FROM open_positions')
+        cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
+                          simulated, strategy, timeframe, stop_price, target_price, trailing_distance
+                          FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
                 'entry_price': r[1], 'amount': r[2], 'cost': r[3],
-                'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6])
+                'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6]),
+                'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
+                'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
             }
         conn.close()
     except Exception as e:
@@ -825,20 +843,23 @@ def check_and_close_positions():
                 pos['highest_price'] = highest_price
                 save_position(symbol, pos)
 
-            pnl_pct = ((current_price - entry_price) / entry_price) * 100
+            target = pos.get('target_price') or entry_price * (1 + TAKE_PROFIT_PCT / 100)
+            initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
+            trailing_distance = pos.get('trailing_distance')
+            active_stop = max(initial_stop, highest_price - trailing_distance) if trailing_distance else max(
+                entry_price * (1 - INITIAL_SL_PCT / 100),
+                highest_price * (1 - TRAILING_SL_PCT / 100)
+            )
 
             reason = None
             if pos.get('test'):
                 opened = datetime.datetime.strptime(pos['time'], "%Y-%m-%d %H:%M:%S")
                 if (datetime.datetime.now() - opened).total_seconds() >= TEST_TRADE_SECONDS:
                     reason = "TEST"
-            elif pnl_pct >= TAKE_PROFIT_PCT:
+            elif current_price >= target:
                 reason = "TP"
-            else:
-                initial_sl = entry_price * (1 - INITIAL_SL_PCT / 100)
-                trailing_sl = highest_price * (1 - TRAILING_SL_PCT / 100)
-                if current_price <= max(initial_sl, trailing_sl):
-                    reason = "SL"
+            elif current_price <= active_stop:
+                reason = "SL"
 
             if not reason:
                 continue
@@ -856,12 +877,15 @@ def check_and_close_positions():
             realized_pnl = ((sale['proceeds'] - pos['cost']) / pos['cost']) * 100
             status = "WIN" if realized_pnl > 0 else "LOSS"
             title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار"}.get(reason, "🛑 إغلاق بوقف الخسارة")
-            print("{} [{}] {} | PnL: {:+.2f}%".format(title, status, symbol, realized_pnl))
-            log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"), "{} {:+.2f}% ({})".format(symbol, realized_pnl, status))
+            print("{} [{}] {} | PnL: {:+.2f}% | {} ({})".format(
+                title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
+            log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
+                      "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
             log_trade(symbol, entry_price, sale['price'], realized_pnl, status, sale['proceeds'] - pos['cost'])
             send_telegram_message(
-                "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%{}".format(
+                "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
+                    pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
                     "\n🧪 محاكاة" if (not TRADING_ENABLED or pos.get('simulated')) else ""))
             del active_positions[symbol]
             delete_position(symbol)
@@ -874,35 +898,20 @@ def automated_market_scan():
         print("⏳ [SCANNER] فحص آخر قيد التنفيذ، تم التخطي")
         return
     try:
-        print("🔄 [SCANNER] جاري فحص الأسواق والمؤشرات الفنية ({} | {})...".format(BINANCE_ENV, TIMEFRAME))
+        print("🔄 [SCANNER] فحص الاستراتيجيات الآلية الثلاث ({} | Demo-only safety)...".format(BINANCE_ENV))
         check_and_close_positions()
 
         for symbol in SYMBOLS:
             try:
-                ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_LIMIT)
-                closed = ohlcv[:-1]  # نتجاهل الشمعة الجارية، الإشارة تُحسب على شموع مغلقة فقط
-                if len(closed) < EMA_PERIOD + 1:
-                    print("⚠️ {} بيانات غير كافية".format(symbol))
-                    continue
-
-                closes = [c[4] for c in closed]
-                last_candle_ts = closed[-1][0]
-                rsi = calculate_rsi(closes)
-                ema = calculate_ema(closes, EMA_PERIOD)
-                macd, signal, hist = calculate_macd(closes)
+                setup = evaluate_symbol(exchange, symbol)
                 current_price = exchange.fetch_ticker(symbol)['last']
-
-                cond_ema = ema is not None and closes[-1] > ema
-                cond_macd = hist >= -(closes[-1] * MACD_HIST_TOLERANCE_PCT / 100.0) or not REQUIRE_MACD
-                cond_rsi = rsi <= RSI_MAX_ENTRY
-                signal_ok = cond_rsi and cond_ema and cond_macd
-                market_snapshot[symbol] = {
-                    'price': current_price, 'rsi': rsi, 'ema': ema, 'hist': hist, 'signal': signal_ok,
-                    'conds': {'ema': cond_ema, 'macd': cond_macd, 'rsi': cond_rsi}, 'ref_close': closes[-1],
-                    'time': datetime.datetime.now().strftime("%H:%M:%S")
-                }
-                print("📊 {} - Price: {} | RSI: {:.2f} | EMA{}: {:.2f} | MACD hist: {:.4f}".format(
-                    symbol, current_price, rsi, EMA_PERIOD, ema, hist))
+                if not setup:
+                    continue
+                setup = dict(setup)
+                setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S")})
+                market_snapshot[symbol] = setup
+                print("📊 {} | {} {} | RSI: {:.2f} | setup: {}".format(
+                    symbol, setup['strategy'], setup['timeframe'], setup['rsi'], setup['reason']))
 
                 if symbol not in active_positions and len(active_positions) >= MAX_CONCURRENT_TRADES:
                     continue
@@ -916,7 +925,8 @@ def automated_market_scan():
                             'entry_price': fill['price'], 'amount': fill['amount'],
                             'cost': fill['cost'], 'highest_price': fill['price'],
                             'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'simulated': fill['simulated'], 'test': True
+                            'simulated': fill['simulated'], 'test': True,
+                            'strategy': 'test', 'timeframe': setup.get('timeframe', '15m'),
                         }
                         active_positions[symbol] = pos
                         save_position(symbol, pos)
@@ -928,20 +938,22 @@ def automated_market_scan():
                         send_telegram_message("❌ <b>فشل شراء الاختبار</b>\n{}".format(html.escape(str(e))))
                     continue
 
-                if symbol in active_positions:
+                if symbol in active_positions or not setup['signal']:
                     continue
-                if last_entry_candle.get(symbol) == last_candle_ts:
-                    continue
-
-                if not signal_ok:
+                if last_entry_candle.get(symbol) == setup.get('candle_ts'):
                     continue
 
                 if news_blocked():
-                    print("📰 [NEWS] إشارة شراء على {} لكن الشراء موقوف بسبب الأخبار حتى {}".format(
-                        symbol, datetime.datetime.fromtimestamp(news_state['blocked_until']).strftime("%H:%M")))
+                    print("📰 [NEWS] إشارة {} على {} لكن الشراء موقوف بسبب الأخبار".format(
+                        setup['strategy'], symbol))
+                    continue
+                if (news_state['sentiment'] == 'negative' and news_state['severity'] >= 2
+                        and setup['strategy'] != 'trend'):
+                    print("📰 [NEWS] خبر سلبي؛ السماح فقط بإشارات الاتجاه وتجاهل {} على {}".format(
+                        setup['strategy'], symbol))
                     continue
 
-                last_entry_candle[symbol] = last_candle_ts
+                last_entry_candle[symbol] = setup.get('candle_ts')
                 try:
                     fill = place_buy(symbol, current_price)
                 except Exception as e:
@@ -950,21 +962,28 @@ def automated_market_scan():
                     send_telegram_message("❌ <b>فشل شراء {}</b>\n{}".format(symbol, html.escape(str(e))))
                     continue
 
+                entry = fill['price']
+                atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
+                risk = STRATEGY_RISK[setup['strategy']]
+                stop_price = entry - atr * risk['stop_atr']
+                target_price = entry + atr * risk['target_atr']
+                trailing_distance = atr * risk['trail_atr']
                 pos = {
-                    'entry_price': fill['price'],
-                    'amount': fill['amount'],
-                    'cost': fill['cost'],
-                    'highest_price': fill['price'],
-                    'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'simulated': fill['simulated']
+                    'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
+                    'highest_price': entry, 'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'simulated': fill['simulated'], 'strategy': setup['strategy'],
+                    'timeframe': setup['timeframe'], 'stop_price': stop_price,
+                    'target_price': target_price, 'trailing_distance': trailing_distance,
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
-                print("🚀 [BUY] {} بسعر {} | الكمية {:.6f} | RSI: {:.2f}".format(symbol, fill['price'], fill['amount'], rsi))
-                log_event("BUY", "{} @ {:,.2f} | {:.6f}".format(symbol, fill['price'], fill['amount']))
+                print("🚀 [BUY] {} | {} {} | price {} | SL {} | TP {}".format(
+                    symbol, setup['strategy'], setup['timeframe'], entry, stop_price, target_price))
+                log_event("BUY", "{} · {} · {}".format(symbol, setup['strategy'], setup['timeframe']))
                 send_telegram_message(
-                    "🚀 <b>فتح صفقة جديدة (BUY)</b>\n🪙 العملة: {}\n💵 السعر: {}\n📦 الكمية: {:.6f}\n💰 التكلفة: {:.2f} USDT\n📉 RSI: {:.2f}{}".format(
-                        symbol, fill['price'], fill['amount'], fill['cost'], rsi,
+                    "🚀 <b>فتح صفقة Demo جديدة</b>\n🪙 {}\n🧭 {} · {}\n💵 الدخول: {}\n🛑 الوقف: {}\n🎯 الهدف: {}\n📦 القيمة: {:.2f} USDT{}".format(
+                        symbol, setup['strategy_label'], setup['timeframe'], entry,
+                        stop_price, target_price, fill['cost'],
                         "\n🧪 محاكاة" if fill['simulated'] else ""))
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
@@ -1008,8 +1027,10 @@ def api_state():
             'symbol': sym, 'entry': entry, 'amount': pos['amount'], 'cost': pos['cost'],
             'highest': high, 'price': price, 'pnl_usdt': pnl_usdt,
             'pnl_pct': pnl_usdt / pos['cost'] * 100 if pos['cost'] else 0.0,
-            'stop': max(entry * (1 - INITIAL_SL_PCT / 100), high * (1 - TRAILING_SL_PCT / 100)),
-            'target': entry * (1 + TAKE_PROFIT_PCT / 100),
+            'stop': max(pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100),
+                        high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
+            'target': pos.get('target_price') or entry * (1 + TAKE_PROFIT_PCT / 100),
+            'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', '')
         })
 
@@ -1022,7 +1043,9 @@ def api_state():
         markets.append({
             'symbol': sym, 'ready': True, 'price': d['price'], 'rsi': d['rsi'], 'ema': d['ema'],
             'ref_close': d.get('ref_close', d['price']), 'hist': d['hist'], 'signal': d['signal'], 'conds': d.get('conds', {}),
-            'time': d['time'], 'in_position': sym in active_positions
+            'time': d['time'], 'in_position': sym in active_positions,
+            'strategy': d.get('strategy', 'wait'), 'strategy_label': d.get('strategy_label', 'انتظار'),
+            'timeframe': d.get('timeframe', '15m'), 'reason': d.get('reason', '')
         })
 
     trades = [{
@@ -1044,7 +1067,9 @@ def api_state():
             'exposure': min(invested / total_usdt * 100, 100.0) if total_usdt > 0 else 0.0
         },
         'params': {
-            'timeframe': TIMEFRAME, 'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
+            'timeframe': 'auto', 'strategy_mode': 'automatic',
+            'strategies': ['trend', 'breakout', 'bounce'],
+            'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
             'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,
             'news_pause_h': NEWS_PAUSE_HOURS
