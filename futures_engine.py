@@ -149,7 +149,9 @@ class BinanceFuturesDemo:
                 pos["contracts"] = remaining
                 pos["amount"] = remaining * multiplier
                 pos["cost"] -= closed_cost
-                self._save_position(pos)
+                conn.execute("""UPDATE futures_positions SET amount = ?, contracts = ?, cost = ?,
+                    highest_price = ? WHERE symbol = ?""",
+                    (pos["amount"], pos["contracts"], pos["cost"], pos["highest_price"], symbol))
             conn.execute("""INSERT INTO futures_trades
                 (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
                  strategy, timeframe) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -198,7 +200,7 @@ class BinanceFuturesDemo:
                 # Fail closed if the account has an unmanaged position on this contract.
                 if symbol not in self.positions:
                     exchange_positions = self.exchange.fetch_positions([symbol])
-                    unmanaged = [p for p in exchange_positions if float(p.get("contracts") or 0) > 0]
+                    unmanaged = [p for p in exchange_positions if abs(float(p.get("contracts") or 0)) > 0]
                     if unmanaged:
                         self.on_event("WARN", "تخطي {}: توجد صفقة Futures خارج إدارة البوت".format(symbol))
                         continue
