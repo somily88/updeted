@@ -163,10 +163,10 @@ def _credential_cipher():
 
 def load_runtime_settings():
     global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
+    conn = None
     try:
         conn = sqlite3.connect(DB_NAME)
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
-        conn.close()
         TRADE_AMOUNT_USDT = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
         env_max_trades = os.getenv("MAX_CONCURRENT_TRADES", "").strip()
         if env_max_trades:
@@ -183,6 +183,9 @@ def load_runtime_settings():
             MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
     except Exception as e:
         print("Settings Load Error: {}".format(e))
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def load_saved_binance_credentials():
@@ -368,6 +371,7 @@ def load_positions():
 # =====================================================================
 init_db()
 load_runtime_settings()
+print("⚙️ [SETTINGS] Max concurrent trades: {}".format(MAX_CONCURRENT_TRADES))
 saved_binance_credentials = load_saved_binance_credentials()
 if saved_binance_credentials:
     BINANCE_API_KEY, BINANCE_SECRET_KEY = saved_binance_credentials
