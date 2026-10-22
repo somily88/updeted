@@ -72,7 +72,7 @@ def run_backtest(symbol):
         macd, signal, hist = calculate_macd(closes)
 
         if not in_position:
-            if rsi <= 70 and ema and current_price > ema and hist > 0:
+            if rsi <= 70 and ema and current_price > ema and hist >= -(current_price * 0.10 / 100.0):
                 in_position = True
                 entry_price = current_price
                 highest_price = current_price
