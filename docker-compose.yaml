@@ -9,3 +9,20 @@ services:
     volumes:
       - ./data:/app/data
     restart: always
+
+  caddy:
+    image: caddy:2-alpine
+    command: ["caddy", "reverse-proxy", "--from", "sobhitrader.tech", "--to", "trading_bot:8000"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - trading_bot
+
+volumes:
+  caddy_data:
+  caddy_config:
