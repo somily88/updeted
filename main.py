@@ -168,7 +168,19 @@ def load_runtime_settings():
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
         conn.close()
         TRADE_AMOUNT_USDT = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
-        MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
+        env_max_trades = os.getenv("MAX_CONCURRENT_TRADES", "").strip()
+        if env_max_trades:
+            requested_max = int(env_max_trades)
+            if not 1 <= requested_max <= 20:
+                raise ValueError("MAX_CONCURRENT_TRADES must be between 1 and 20")
+            MAX_CONCURRENT_TRADES = requested_max
+            conn.execute(
+                'INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
+                ('max_concurrent_trades', str(requested_max))
+            )
+            conn.commit()
+        else:
+            MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
     except Exception as e:
         print("Settings Load Error: {}".format(e))
 
