@@ -1040,7 +1040,7 @@ body { background:linear-gradient(180deg,#f0f1f5 0%,#f6f7fa 100%); }
     // strip
     $('m-wallet').textContent = usd(W.total);
     $('m-free').textContent = 'free ' + usd(W.free);
-    $('m-env').textContent = S.env + ' · ' + (S.trading_enabled ? 'live orders' : 'simulation');
+    $('m-env').textContent = S.env + ' · ' + (S.trading_enabled ? (S.env === 'demo' ? 'demo API orders' : 'live orders') : 'simulation');
     seg($('seg-exp'), Math.round(ST.exposure / 100 * 24), 24);
     var realEl = $('m-real'); realEl.textContent = usd(ST.realized_total, true);
     realEl.parentNode.className = 'm-val ' + (ST.realized_total > 0 ? 'glow-green' : (ST.realized_total < 0 ? 'glow-red' : ''));
