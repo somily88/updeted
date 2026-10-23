@@ -1140,12 +1140,14 @@ def api_state():
     if futures_engine:
         for sym, pos in futures_engine.positions.items():
             price = float((futures_engine.snapshot.get(sym) or {}).get('price') or pos['entry_price'])
-            pnl = (price - pos['entry_price']) * pos['contracts'] * float(futures_engine.exchange.market(sym).get('contractSize') or 1)
+            side = pos.get('side', 'long')
+            direction = -1.0 if side == 'short' else 1.0
+            pnl = direction * (price - pos['entry_price']) * pos['contracts'] * float(futures_engine.exchange.market(sym).get('contractSize') or 1)
             positions.append({'symbol': sym, 'entry': pos['entry_price'], 'amount': pos['amount'],
                 'cost': pos['cost'], 'highest': pos['highest_price'], 'price': price, 'pnl_usdt': pnl,
                 'pnl_pct': pnl / pos['cost'] * 100 if pos['cost'] else 0, 'stop': pos['stop_price'],
                 'target': pos['target_price'], 'strategy': pos['strategy'], 'timeframe': pos['timeframe'],
-                'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
+                'side': side, 'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
     if futures_engine:
         for sym in futures_engine.symbols:
             data = futures_engine.snapshot.get(sym)
@@ -1154,7 +1156,8 @@ def api_state():
                     'price': data.get('price'), 'rsi': data.get('rsi', 50), 'ema': data.get('ema', 0),
                     'ref_close': data.get('ref_close', data.get('price')), 'hist': data.get('hist', 0),
                     'signal': data.get('signal', False), 'conds': data.get('conds', {}), 'time': '',
-                    'in_position': sym in futures_engine.positions, 'strategy': data.get('strategy', 'wait'),
+                    'in_position': sym in futures_engine.positions, 'direction': data.get('direction', 'flat'),
+                    'strategy': data.get('strategy', 'wait'),
                     'strategy_label': data.get('strategy_label', 'انتظار'), 'timeframe': data.get('timeframe', '15m'),
                     'reason': data.get('reason', ''), 'market_type': 'Futures Demo'})
             else:
@@ -1168,9 +1171,9 @@ def api_state():
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
+                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
             trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
-                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'market_type': 'Futures Demo'} for t in rows)
+                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'market_type': 'Futures Demo'} for t in rows)
             trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
         except Exception:
             pass
