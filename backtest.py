@@ -7,7 +7,6 @@ import argparse
 import csv
 import datetime as dt
 import json
-import math
 import os
 import sys
 from collections import defaultdict
@@ -93,12 +92,12 @@ def load_market_data(exchange, symbols, days):
     return result
 
 
-def generate_signal_events(data, symbols, timeline):
+def generate_signal_events(data, symbols, timeline, allow_short=False):
     events = defaultdict(list)
     for now_ms in timeline:
         historical = HistoricalExchange(data, now_ms)
         for symbol in symbols:
-            setup = evaluate_symbol(historical, symbol, allow_short=False)
+            setup = evaluate_symbol(historical, symbol, allow_short=allow_short)
             if setup and setup.get("signal"):
                 events[now_ms].append({"symbol": symbol, "setup": dict(setup)})
     return events
@@ -354,8 +353,8 @@ def run(args):
         raise RuntimeError("البيانات المتاحة قصيرة جدًا لإجراء مقارنة موثوقة")
     split_index = max(1, min(len(timeline) - 1, int(len(timeline) * args.train_percent / 100.0)))
     split_ms = timeline[split_index]
-    end_ms = timeline[-1] + TIMEFRAME_MS["5m"]
-    events = generate_signal_events(data, symbols, timeline)
+    end_ms = timeline[-1] + 1
+    events = generate_signal_events(data, symbols, timeline, allow_short=args.market == "futures")
 
     fee_percent = args.fee_percent
     if fee_percent is None:
