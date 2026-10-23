@@ -138,6 +138,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .market-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
 .market-group + .market-group { margin-top:10px; }
 .tx-head small { display:block; margin-top:3px; }
+.futures-market-section { margin-top:22px; }
+.futures-market-section .market-cards { grid-template-columns:1fr; }
+.futures-market-section .mkt { padding:14px; }
+.futures-market-section .mkt-price { font-size:24px; }
+.futures-market-section .mkt-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
 @media (max-width:720px) {
   .accounts { grid-template-columns:1fr; }
   .account-metrics { gap:6px; }
@@ -359,6 +364,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
         <div class="tx-head-row"><h3>سجل الصفقات</h3></div>
         <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
       </section>
+
+      <section class="futures-market-section" aria-label="عقود Futures Demo">
+        <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
+        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
+      </section>
     </aside>
   </div>
 </div>
@@ -382,7 +392,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
   }
   function renderMarkets(markets) {
     var host = el('markets');
-    if (!Array.isArray(markets) || !markets.length) { host.innerHTML = '<div class="empty">لا توجد بيانات سوق حتى الآن.</div>'; return; }
+    var futuresHost = el('futures-markets');
+    if (!Array.isArray(markets)) markets = [];
     function card(m) {
       var c = coin(m.symbol), age = m.age_seconds, stale = m.ready && age != null && age > 150;
       var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? 'إشارة شراء' : 'مراقبة')));
@@ -400,10 +411,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     var spot = markets.filter(function(m){ return m.market_type !== 'Futures Demo'; });
     var futures = markets.filter(function(m){ return m.market_type === 'Futures Demo'; });
     function group(title, items, badge) {
-      if (!items.length) return '';
+      if (!items.length) return '<div class="empty">لا توجد أسواق متاحة حاليًا.</div>';
       return '<section class="market-group"><div class="market-group-head"><h3>' + title + '</h3><small>' + badge + ' · ' + items.length + '</small></div><div class="market-cards">' + items.map(card).join('') + '</div></section>';
     }
-    host.innerHTML = group('عملات Spot', spot, 'Binance Spot') + group('عقود Futures Demo', futures, 'حساب تجريبي');
+    host.innerHTML = group('عملات Spot', spot, 'Binance Spot');
+    futuresHost.innerHTML = futures.length ? futures.map(card).join('') : '<div class="empty">لا توجد عقود Futures Demo متاحة حاليًا.</div>';
   }
   function renderPositions(positions) {
     var host = el('tx-cards');
