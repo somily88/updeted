@@ -100,7 +100,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .range.active { border-color: var(--lime); color: var(--text); }
 
 /* ---------- chart ---------- */
-.chart-card { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:0; position:relative; height:310px; overflow:hidden; margin-bottom:24px; }
+.chart-card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:0; position:relative; height:180px; overflow:hidden; margin-bottom:20px; }
 #chart { position: absolute; inset: 0; touch-action: pan-y; }
 #chart svg { display: block; width: 100%; height: 100%; }
 .chart-empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--muted); font-size: 15px; line-height: 1.5; }
@@ -227,7 +227,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 @media (max-width: 720px) {
   body { padding: 16px; }
   .stats { grid-template-columns: repeat(2, 1fr); }
-  .chart-card { height: 300px; }
+  .chart-card { height: 170px; }
   .txs { grid-template-columns: 1fr; }
   .wallet-label { font-size: 17px; }
 }
@@ -571,7 +571,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     emptyEl.style.display = 'none';
 
     var w = chartEl.clientWidth, h = chartEl.clientHeight;
-    var padTop = 64, padBottom = 44;
+    var padTop = 38, padBottom = 30;
     var plotH = h - padTop - padBottom;
     var vals = data.map(function (p) { return p.v; });
     var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
@@ -589,15 +589,34 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       return ys[i] + (ys[i + 1] - ys[i]) * t;
     }
 
-    var bars = '';
-    var step = 6, bottom = h - padBottom;
-    for (var x = 3, k = 0; x < w; x += step, k++) {
-      var y = yAt(x);
-      var top = Math.max(18, y - hash(k) * plotH * 0.45);
-      bars += '<line x1="' + x + '" x2="' + x + '" y1="' + top + '" y2="' + bottom + '" stroke="#2f2f2f" stroke-width="1.6"/>';
+    var targetCount = Math.max(12, Math.min(160, Math.floor(w / 7)));
+    var bucketSize = Math.max(1, Math.ceil(n / targetCount));
+    var candles = '';
+    var count = Math.ceil(n / bucketSize);
+    var candleWidth = Math.max(2, Math.min(9, (w / count) * 0.58));
+    function yValue(v) { return padTop + (1 - (v - min) / span) * plotH; }
+    for (var start = 0; start < n; start += bucketSize) {
+      var end = Math.min(n, start + bucketSize);
+      var open = data[start].v, close = data[end - 1].v;
+      var high = -Infinity, low = Infinity;
+      for (var q = start; q < end; q++) {
+        high = Math.max(high, data[q].v);
+        low = Math.min(low, data[q].v);
+      }
+      var centerX = ((start + end - 1) / 2) / (n - 1) * w;
+      var yOpen = yValue(open), yClose = yValue(close);
+      var yHigh = yValue(high), yLow = yValue(low);
+      var color = close >= open ? '#d4f53c' : '#ff6b5e';
+      var bodyY = Math.min(yOpen, yClose);
+      var bodyH = Math.max(2, Math.abs(yClose - yOpen));
+      candles += '<line x1="' + centerX.toFixed(1) + '" x2="' + centerX.toFixed(1) + '" y1="' + yHigh.toFixed(1) + '" y2="' + yLow.toFixed(1) + '" stroke="' + color + '" stroke-width="1.2"/>' +
+        '<rect x="' + (centerX - candleWidth / 2).toFixed(1) + '" y="' + bodyY.toFixed(1) + '" width="' + candleWidth.toFixed(1) + '" height="' + bodyH.toFixed(1) + '" rx="1" fill="' + color + '"/>';
     }
-
-    var path = xs.map(function (x, i) { return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + ys[i].toFixed(1); }).join(' ');
+    var guides = '';
+    for (var g = 0; g < 3; g++) {
+      var gy = padTop + (plotH * g / 2);
+      guides += '<line x1="0" x2="' + w + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '" stroke="#282828" stroke-width="1"/>';
+    }
 
     var withDate = range === '1w' || range === '1m' || range === 'all';
     var labels = '';
@@ -612,8 +631,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 
     chartEl.innerHTML =
       '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" role="img" aria-label="قيمة المحفظة عبر الزمن">' +
-      bars +
-      '<path d="' + path + '" fill="none" stroke="#d4f53c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>' +
+      guides + candles +
       '<g id="hover" style="display:none">' +
       '<line id="hv" y1="0" y2="' + (h - padBottom) + '" stroke="#fff" stroke-width="1.5" opacity=".85"/>' +
       '<circle id="hc" r="7" fill="#050505" stroke="#d4f53c" stroke-width="3.5"/></g>' +
