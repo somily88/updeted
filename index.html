@@ -58,6 +58,25 @@ button { font: inherit; color: inherit; }
 }
 .btn-scan:hover { background: var(--lime); color: #000; }
 
+
+/* ---------- moving news ticker ---------- */
+.news-ticker { display:flex; align-items:center; gap:16px; min-height:52px; margin:-18px 0 26px; padding:0 16px; overflow:hidden; background:var(--card); border:1px solid var(--line); border-inline-start:3px solid var(--lime); border-radius:14px; }
+.ticker-label { display:flex; align-items:center; gap:8px; flex:none; white-space:nowrap; }
+.ticker-label b { font-size:13px; font-weight:600; }
+.ticker-label small { font-size:11px; }
+.ticker-dot { width:8px; height:8px; border-radius:50%; background:var(--lime); box-shadow:0 0 8px var(--lime); }
+.ticker-dot.paused { background:#e8a33d; box-shadow:none; }
+.ticker-viewport { min-width:0; flex:1; overflow:hidden; direction:ltr; }
+.ticker-track { display:flex; width:max-content; align-items:center; white-space:nowrap; direction:ltr; }
+.ticker-track.is-moving { animation:news-scroll 42s linear infinite; }
+.news-ticker:hover .ticker-track, .news-ticker:focus-within .ticker-track { animation-play-state:paused; }
+.ticker-sequence { display:flex; align-items:center; flex:none; }
+.ticker-item { display:inline-flex; align-items:center; gap:9px; padding-inline:24px; color:#dedede; font-size:13px; }
+.ticker-item::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--lime); flex:none; }
+.ticker-source { color:var(--lime); font-size:11px; }
+@keyframes news-scroll { from { transform:translateX(0); } to { transform:translateX(-50%); } }
+@media (prefers-reduced-motion:reduce) { .ticker-track.is-moving { animation:none; } }
+
 /* ---------- layout ---------- */
 .grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:24px; align-items:start; }
 .up { color: var(--up); }
@@ -149,8 +168,9 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .news-list li { font-size: 13px; line-height: 1.5; color: #d0d0d0; }
 .freshness { color: var(--muted); font-size: 11px; margin-top: 7px; }
 .mkt.stale { border: 1px solid rgba(255,107,94,.55); }
-.tx-history { margin-top: 24px; background: var(--card); border-radius: 18px; padding: 16px; overflow-x: auto; }
-.history-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr 1.2fr; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; align-items: center; }
+.history-section { margin-top: 22px; }
+.tx-history { margin-top: 0; background: var(--card); border:1px solid var(--line); border-radius: 16px; padding: 12px; overflow-x: auto; }
+.history-row { display: grid; grid-template-columns: 1fr .9fr .8fr 1fr; gap: 7px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 11px; align-items: center; min-width: 280px; }
 .history-row:first-child { border-top: 0; }
 .history-head { color: var(--muted); font-size: 11px; }
 
@@ -223,6 +243,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       <a class="btn-scan" href="/check">افحص السوق الآن</a>
     </div>
   </header>
+
+  <section class="news-ticker" aria-label="شريط الأخبار">
+    <div class="ticker-label"><span class="ticker-dot" id="news-ticker-dot"></span><b>الأخبار</b><small id="news-ticker-status">جارٍ تحميل الأخبار</small></div>
+    <div class="ticker-viewport"><div class="ticker-track" id="news-track" aria-live="polite"><span class="ticker-item">جارٍ تحميل العناوين من البوت…</span></div></div>
+  </section>
 
   <div class="grid">
     <!-- left column -->
@@ -305,11 +330,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       <h2 class="section-title">الأسواق والإشارات</h2>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
 
-      <h2 class="section-title" style="margin-top:36px">سجل الصفقات</h2>
-      <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
 
-      <h2 class="section-title" style="margin-top:36px">الأخبار</h2>
-      <div class="news-card" id="news-card"><div class="news-reason">جارٍ تحميل حالة الأخبار…</div></div>
     </main>
 
     <!-- right column -->
@@ -332,6 +353,10 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
           <span id="open-count">0 مفتوحة</span>
         </div>
         <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
+      </section>
+
+<h2 class="section-title" style="margin-top:36px">سجل الصفقات</h2>
+      <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
       </section>
     </aside>
   </div>
@@ -419,15 +444,24 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     }).join('');
   }
   function renderNews(n) {
-    var host = el('news-card');
-    var state = !n || !n.enabled ? 'موقوف' : (n.blocked ? 'توقّف الشراء بسبب خبر قوي' : (n.checked_at ? 'تم فحص الأخبار' : 'بانتظار أول فحص'));
-    var mood = n && n.sentiment ? n.sentiment : 'غير متاح';
-    var headlines = n && Array.isArray(n.headlines) ? n.headlines : [];
-    host.innerHTML = '<div class="news-head"><span class="pill ' + (n && n.blocked ? 'pill-off' : '') + '">' + esc(state) + '</span></div>' +
-      '<div class="news-reason">الميل: <b>' + esc(mood) + '</b> · مستوى الخطورة: <b>' + esc(n && n.severity != null ? n.severity : '—') + '/5</b></div>' +
-      (n && n.reason ? '<div class="news-reason">' + esc(n.reason) + '</div>' : '') +
-      (headlines.length ? '<ul class="news-list">' + headlines.slice(0, 4).map(function (h) { return '<li>' + esc(h.source) + ': ' + esc(h.title) + '</li>'; }).join('') + '</ul>' : '<small>لا توجد عناوين حديثة في آخر فحص.</small>') +
-      '<small class="freshness">آخر فحص أخبار: ' + esc(n && n.checked_at || 'لم يُسجّل بعد') + (n && n.error ? ' · تعذّر جلب الأخبار' : '') + '</small>';
+    n = n || {};
+    var track = el('news-track'), status = el('news-ticker-status'), dot = el('news-ticker-dot');
+    var headlines = Array.isArray(n.headlines) ? n.headlines.slice(0, 8) : [];
+    var state = !n.enabled ? 'الأخبار موقوفة' : (n.blocked ? 'حظر بسبب خبر قوي' : (n.checked_at ? 'آخر فحص ' + String(n.checked_at) : 'بانتظار أول فحص'));
+    status.textContent = state;
+    dot.classList.toggle('paused', !!n.blocked || !n.enabled);
+    var items = headlines.map(function (h) {
+      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span>' + esc(h.title || '') + '</span></span>';
+    }).join('');
+    if (!items) {
+      var fallback = n.reason || (n.error ? 'تعذّر جلب الأخبار في آخر فحص' : 'لا توجد عناوين حديثة في آخر فحص');
+      track.classList.remove('is-moving');
+      track.innerHTML = '<span class="ticker-item">' + esc(fallback) + '</span>';
+      return;
+    }
+    var sequence = '<span class="ticker-sequence">' + items + '</span>';
+    track.innerHTML = sequence + (headlines.length > 1 ? '<span class="ticker-sequence" aria-hidden="true">' + items + '</span>' : '');
+    track.classList.toggle('is-moving', headlines.length > 1);
   }
   function render(d) {
     var stats = d.stats || {}, wallet = d.wallet || {}, scanner = d.scanner || {};
