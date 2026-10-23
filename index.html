@@ -398,7 +398,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     if (!Array.isArray(markets)) markets = [];
     function card(m) {
       var c = coin(m.symbol), age = m.age_seconds, stale = m.ready && age != null && age > 150;
-      var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? 'إشارة شراء' : 'مراقبة')));
+      var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'مراقبة')));
       var statusClass = stale ? 'pill-off' : (m.ready && (m.signal || m.in_position) ? 'pill-on' : '');
       return '<article class="mkt' + (stale ? ' stale' : '') + '"><div class="mkt-head">' +
         '<span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span>' +
@@ -425,7 +425,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     if (!positions || !positions.length) { host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>'; return; }
     host.innerHTML = positions.map(function (p) {
       var c = coin(p.symbol), cls = pnlClass(p.pnl_usdt);
-      return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + (p.simulated ? 'محاكاة' : 'منفّذة على Binance') + '</small></div></div>' +
+      var venue = p.market_type === 'Futures Demo' ? (p.side === 'short' ? 'Futures Demo · شورت' : 'Futures Demo · لونغ') : (p.simulated ? 'محاكاة' : 'منفّذة على Binance');
+      return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue) + '</small></div></div>' +
         '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
     }).join('');
   }
@@ -455,7 +456,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     if (!trades || !trades.length) { host.innerHTML = '<div class="empty">لا توجد صفقات مغلقة مسجلة بعد.</div>'; return; }
     host.innerHTML = '<div class="history-row history-head"><span>العملة</span><span>النتيجة</span><span>التغير</span><span>الوقت</span></div>' + trades.map(function (t) {
       var cls = pnlClass(t.pnl_usdt);
-      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '</span><b class="' + cls + '" dir="ltr">' + usd(t.pnl_usdt, 2) + '</b><span class="' + cls + '" dir="ltr">' + num(t.pnl_pct, 2) + '%</span><small>' + esc(t.time || '—') + '</small></div>';
+      var label = t.market_type === 'Futures Demo' ? (t.side === 'short' ? ' · شورت' : ' · لونغ') : '';
+      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + '</small></span><b class="' + cls + '" dir="ltr">' + usd(t.pnl_usdt, 2) + '</b><span class="' + cls + '" dir="ltr">' + num(t.pnl_pct, 2) + '%</span><small>' + esc(t.time || '—') + '</small></div>';
     }).join('');
   }
   function renderNews(n) {
