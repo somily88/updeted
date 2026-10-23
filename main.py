@@ -877,6 +877,7 @@ def check_news():
         if titles and GROQ_API_KEY:
             try:
                 headline_translations = translate_headlines_with_groq(titles)
+                print("📰 [NEWS] تمت ترجمة {} عنواناً إلى العربية".format(len(headline_translations)))
             except Exception as e:
                 print("📰 [NEWS] تعذرت ترجمة العناوين: {}".format(type(e).__name__))
                 headline_translations = []
