@@ -99,6 +99,17 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .range:hover { color: var(--text); }
 .range.active { border-color: var(--lime); color: var(--text); }
 
+/* ---------- top wallet and Futures Demo contracts ---------- */
+.overview-top { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:14px; align-items:stretch; margin-bottom:22px; }
+.wallet-top { display:flex; align-items:center; min-width:0; padding:22px; background:var(--card); border:1px solid var(--line); border-radius:18px; }
+.wallet-top .wallet-row { width:100%; flex-direction:column; align-items:flex-start; justify-content:center; flex-wrap:nowrap; gap:22px; margin:0; }
+.wallet-top .wallet-value h1 { font-size:clamp(40px,5vw,58px); }
+.futures-market-section { margin-top:0; min-width:0; padding:18px; background:var(--card); border:1px solid var(--line); border-radius:18px; }
+.futures-market-section .market-group-head { margin-top:0; }
+.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); }
+.futures-market-section .mkt { padding:12px; background:var(--card-hi); }
+@media (max-width:720px) { .overview-top { grid-template-columns:1fr; } .wallet-top { padding:18px; } }
+
 /* ---------- chart ---------- */
 .chart-card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:0; position:relative; height:180px; overflow:hidden; margin-bottom:20px; }
 #chart { position: absolute; inset: 0; touch-action: pan-y; }
@@ -257,22 +268,30 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
   <div class="grid">
     <!-- left column -->
     <main>
-      <div class="wallet-row">
-        <div>
-          <div class="wallet-label">قيمة المحفظة</div>
-          <div class="wallet-value">
-            <h1 id="wallet-value">—</h1>
-            <span class="change flat" id="change" dir="ltr"></span>
+      <div class="overview-top">
+        <div class="wallet-top">
+        <div class="wallet-row">
+          <div>
+            <div class="wallet-label">قيمة المحفظة</div>
+            <div class="wallet-value">
+              <h1 id="wallet-value">—</h1>
+              <span class="change flat" id="change" dir="ltr"></span>
+            </div>
+          </div>
+          <div class="ranges" id="ranges" role="group" aria-label="المدى الزمني للرسم">
+            <button class="range" data-r="1h">ساعة</button>
+            <button class="range" data-r="8h">8 ساعات</button>
+            <button class="range" data-r="1d">يوم</button>
+            <button class="range" data-r="1w">أسبوع</button>
+            <button class="range" data-r="1m">شهر</button>
+            <button class="range" data-r="all">الكل</button>
           </div>
         </div>
-        <div class="ranges" id="ranges" role="group" aria-label="المدى الزمني للرسم">
-          <button class="range" data-r="1h">ساعة</button>
-          <button class="range" data-r="8h">8 ساعات</button>
-          <button class="range" data-r="1d">يوم</button>
-          <button class="range" data-r="1w">أسبوع</button>
-          <button class="range" data-r="1m">شهر</button>
-          <button class="range" data-r="all">الكل</button>
         </div>
+        <section class="futures-market-section" aria-label="عقود Futures Demo">
+          <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
+          <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
+        </section>
       </div>
 
       <div class="stats">
@@ -335,10 +354,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       <h2 class="section-title">الأسواق والإشارات</h2>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
 
-      <section class="futures-market-section" aria-label="عقود Futures Demo">
-        <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
-        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
-      </section>
+
 
 
     </main>
