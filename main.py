@@ -1,5 +1,4 @@
 import os
-import secrets
 import time
 import html
 import ccxt
@@ -11,18 +10,17 @@ import urllib.request
 import urllib.error
 import json
 import re
+import secrets
 from cryptography.fernet import Fernet
 from pydantic import BaseModel, Field
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, Response, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from strategy_engine import evaluate_symbol, STRATEGY_RISK
-from futures_engine import BinanceFuturesDemo
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -31,8 +29,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"').strip("'")
 BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "").strip().strip('"').strip("'")
-BINANCE_FUTURES_API_KEY = os.getenv("BINANCE_FUTURES_API_KEY", "").strip().strip('"').strip("'")
-BINANCE_FUTURES_SECRET_KEY = os.getenv("BINANCE_FUTURES_SECRET_KEY", "").strip().strip('"').strip("'")
 BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet | live
 
 # حجم كل صفقة بالدولار (USDT)
@@ -54,16 +50,11 @@ CANDLES_LIMIT = 500
 RSI_MAX_ENTRY = float(os.getenv("RSI_MAX_ENTRY", "70"))
 EMA_PERIOD = int(os.getenv("EMA_PERIOD", "50"))
 REQUIRE_MACD = os.getenv("REQUIRE_MACD", "true").strip().lower() == "true"
-MACD_HIST_TOLERANCE_PCT = float(os.getenv("MACD_HIST_TOLERANCE_PCT", "0.10"))
-if not 0.0 <= MACD_HIST_TOLERANCE_PCT <= 0.50:
-    raise ValueError("MACD_HIST_TOLERANCE_PCT must be between 0 and 0.50")
 TAKE_PROFIT_PCT = 1.0      # هدف الربح %
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 
-SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "PAXG/USDT"]
-SUPPORTED_SYMBOLS = set(SYMBOLS)
-UNSUPPORTED_SYMBOLS = {}
+SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
 
 # صفقة اختبار واحدة: تُفتح فوراً عند التشغيل وتُغلق تلقائياً بعد دقيقتين (للتأكد من عمل الأوامر)
 FORCE_TEST_TRADE = os.getenv("FORCE_TEST_TRADE", "false").strip().lower() == "true"
@@ -84,7 +75,7 @@ NEWS_FEEDS = [
 
 print("🔐 [CONFIG] Binance credentials loaded:", bool(BINANCE_API_KEY and BINANCE_SECRET_KEY))
 print("🌐 [ENV] Binance environment:", BINANCE_ENV)
-print("📐 [STRATEGY] Automatic selection: trend (1d/4h), breakout (1h/15m), bounce (15m/5m) | risk exits: ATR-based")
+print("📐 [STRATEGY] Timeframe: {} | EMA{} | RSI<={} | MACD required: {}".format(TIMEFRAME, EMA_PERIOD, RSI_MAX_ENTRY, REQUIRE_MACD))
 print("📰 [NEWS] Filter: {} | Classifier: {} | Pause: {}h".format(
     "ON" if NEWS_FILTER else "OFF", "Groq ({})".format(GROQ_MODEL or "auto model") if GROQ_API_KEY else "Keywords (no GROQ_API_KEY)", NEWS_PAUSE_HOURS))
 print("🛒 [TRADING] Order execution:", "ENABLED" if TRADING_ENABLED else "SIMULATION ONLY", "| Amount per trade: {} USDT".format(TRADE_AMOUNT_USDT))
@@ -142,16 +133,6 @@ def init_db():
                 simulated INTEGER NOT NULL DEFAULT 0
             )
         ''')
-        for column, definition in [
-            ('strategy', "TEXT NOT NULL DEFAULT 'trend'"),
-            ('timeframe', "TEXT NOT NULL DEFAULT '1h'"),
-            ('stop_price', 'REAL'),
-            ('target_price', 'REAL'),
-            ('trailing_distance', 'REAL'),
-        ]:
-            existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
-            if column not in existing:
-                cursor.execute('ALTER TABLE open_positions ADD COLUMN {} {}'.format(column, definition))
         # لقطات قيمة المحفظة (للرسم البياني في لوحة التحكم)
         cursor.execute('CREATE TABLE IF NOT EXISTS equity (ts INTEGER PRIMARY KEY, value REAL NOT NULL)')
         cursor.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
@@ -179,37 +160,22 @@ def _credential_cipher():
 
 def load_runtime_settings():
     global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
-    conn = None
     try:
         conn = sqlite3.connect(DB_NAME)
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
+        conn.close()
         TRADE_AMOUNT_USDT = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
-        env_max_trades = os.getenv("MAX_CONCURRENT_TRADES", "").strip()
-        if env_max_trades:
-            requested_max = int(env_max_trades)
-            if not 1 <= requested_max <= 20:
-                raise ValueError("MAX_CONCURRENT_TRADES must be between 1 and 20")
-            MAX_CONCURRENT_TRADES = requested_max
-            conn.execute(
-                'INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
-                ('max_concurrent_trades', str(requested_max))
-            )
-            conn.commit()
-        else:
-            MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
+        MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
     except Exception as e:
         print("Settings Load Error: {}".format(e))
-    finally:
-        if conn is not None:
-            conn.close()
 
 
-def load_saved_binance_credentials(platform='binance'):
+def load_saved_binance_credentials():
     if not CREDENTIAL_ENCRYPTION_KEY:
         return None
     try:
         conn = sqlite3.connect(DB_NAME)
-        row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', (platform,)).fetchone()
+        row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', ('binance',)).fetchone()
         conn.close()
         if row:
             cipher = _credential_cipher()
@@ -345,13 +311,10 @@ def save_position(symbol, pos):
         conn = sqlite3.connect(DB_NAME)
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
-            (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
-             strategy, timeframe, stop_price, target_price, trailing_distance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (symbol, entry_price, amount, cost, highest_price, opened_at, simulated)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
-              pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
-              pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
-              pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance')))
+              pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -373,15 +336,11 @@ def load_positions():
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
-                          simulated, strategy, timeframe, stop_price, target_price, trailing_distance
-                          FROM open_positions''')
+        cursor.execute('SELECT symbol, entry_price, amount, cost, highest_price, opened_at, simulated FROM open_positions')
         for r in cursor.fetchall():
             result[r[0]] = {
                 'entry_price': r[1], 'amount': r[2], 'cost': r[3],
-                'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6]),
-                'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
-                'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
+                'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6])
             }
         conn.close()
     except Exception as e:
@@ -394,13 +353,9 @@ def load_positions():
 # =====================================================================
 init_db()
 load_runtime_settings()
-print("⚙️ [SETTINGS] Max concurrent trades: {}".format(MAX_CONCURRENT_TRADES))
 saved_binance_credentials = load_saved_binance_credentials()
 if saved_binance_credentials:
     BINANCE_API_KEY, BINANCE_SECRET_KEY = saved_binance_credentials
-saved_futures_credentials = load_saved_binance_credentials('binance_futures')
-if saved_futures_credentials:
-    BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY = saved_futures_credentials
 
 exchange = make_binance_exchange(BINANCE_API_KEY, BINANCE_SECRET_KEY)
 if BINANCE_ENV == "live":
@@ -410,6 +365,7 @@ elif BINANCE_ENV not in ("demo", "testnet"):
 
 active_positions = load_positions()
 market_snapshot = {}
+scanner_state = {'last_started_at': None, 'last_completed_at': None, 'last_error': None}
 last_entry_candle = {}   # آخر شمعة تمت محاولة الدخول عليها لكل عملة (لمنع تكرار الدخول على نفس الشمعة)
 scan_lock = threading.Lock()
 event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها في لوحة التحكم
@@ -418,45 +374,20 @@ event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها
 def log_event(tag, text):
     event_log.appendleft({'t': datetime.datetime.now().strftime("%H:%M:%S"), 'tag': tag, 'text': text})
 scheduler = BackgroundScheduler()
-futures_engine = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
         exchange.load_markets()
-        if exchange.markets:
-            SUPPORTED_SYMBOLS.clear()
-            for symbol in SYMBOLS:
-                market = exchange.markets.get(symbol)
-                if market and market.get('spot') and market.get('active') is not False:
-                    SUPPORTED_SYMBOLS.add(symbol)
-                else:
-                    UNSUPPORTED_SYMBOLS[symbol] = "الزوج غير متاح في Binance Spot Demo"
-            if UNSUPPORTED_SYMBOLS:
-                print("⚠️ [MARKETS] Pairs unavailable in Demo: {}".format(", ".join(sorted(UNSUPPORTED_SYMBOLS))))
-            print("✅ [MARKETS] Active spot pairs: {}".format(", ".join(sorted(SUPPORTED_SYMBOLS))))
     except Exception as e:
         print("Load Markets Error: {}".format(e))
-    global futures_engine
-    if BINANCE_ENV == 'demo' and BINANCE_FUTURES_API_KEY and BINANCE_FUTURES_SECRET_KEY:
-        try:
-            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event)
-            print('✅ [FUTURES DEMO] Active contracts: {}'.format(', '.join(futures_engine.symbols) or 'none'))
-            if not futures_engine.symbols:
-                log_event('WARN', 'Binance Futures Demo لا يعرض عقود CL/BZ/XAU المطلوبة')
-        except Exception as e:
-            futures_engine = None
-            print('❌ [FUTURES DEMO] Connection unavailable ({})'.format(type(e).__name__))
-            log_event('ERR', 'تعذر الاتصال بـ Binance Futures Demo')
-    else:
-        print('ℹ️ [FUTURES DEMO] بانتظار مفاتيح API الخاصة بـ Futures Demo')
     scheduler.add_job(automated_market_scan, 'interval', minutes=1, max_instances=1, coalesce=True)
     if NEWS_FILTER:
         scheduler.add_job(check_news, 'interval', minutes=60, max_instances=1, coalesce=True,
                           next_run_time=datetime.datetime.now())
     scheduler.start()
-    log_event("START", "البوت يعمل ({} | اختيار الاستراتيجية تلقائي)".format(BINANCE_ENV))
+    log_event("START", "البوت يعمل ({} | {} | EMA{})".format(BINANCE_ENV, TIMEFRAME, EMA_PERIOD))
     print("🚀 [SCHEDULER] تم تفعيل الجدولة الآلية (البيئة: {})".format(BINANCE_ENV))
     if active_positions:
         print("♻️ [RESTORE] تم استرجاع {} صفقة مفتوحة من قاعدة البيانات".format(len(active_positions)))
@@ -466,6 +397,15 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
+app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan)
+class RuntimeSettings(BaseModel):
+    trade_amount_usdt: float = Field(gt=0, le=100000)
+    max_concurrent_trades: int = Field(ge=1, le=20)
+
+
+class BinanceCredentials(BaseModel):
+    api_key: str = Field(min_length=8, max_length=256)
+    secret_key: str = Field(min_length=8, max_length=256)
 _dashboard_auth = HTTPBasic()
 DASHBOARD_USER = os.getenv("DASHBOARD_USER", "").strip()
 DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
@@ -475,29 +415,12 @@ def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(_dashboar
     valid_user = secrets.compare_digest(credentials.username.encode("utf-8"), DASHBOARD_USER.encode("utf-8"))
     valid_password = secrets.compare_digest(credentials.password.encode("utf-8"), DASHBOARD_PASSWORD.encode("utf-8"))
     if not DASHBOARD_USER or not DASHBOARD_PASSWORD or not (valid_user and valid_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required",
+                            headers={"WWW-Authenticate": "Basic"})
     return True
 
 
-app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-class RuntimeSettings(BaseModel):
-    trade_amount_usdt: float = Field(gt=0, le=100000)
-    max_concurrent_trades: int = Field(ge=1, le=20)
-
-
-class BinanceCredentials(BaseModel):
-    api_key: str = Field(min_length=8, max_length=256)
-    secret_key: str = Field(min_length=8, max_length=256)
-
-
-class FuturesCredentials(BaseModel):
-    api_key: str = Field(min_length=8, max_length=256)
-    secret_key: str = Field(min_length=8, max_length=256)
-_balance_cache = {'t': 0.0, 'v': (0.0, 0.0)}
+_balance_cache = {'t': 0.0, 'v': (0.0, 0.0), 'error': None}
 
 
 def get_binance_balance(ttl=10):
@@ -505,10 +428,11 @@ def get_binance_balance(ttl=10):
     if now - _balance_cache['t'] < ttl:
         return _balance_cache['v']
     value = _get_binance_balance_uncached()
-    if value != (0.0, 0.0):
+    if _balance_cache['error'] is None:
         _balance_cache['t'] = now
         _balance_cache['v'] = value
-    return value
+        return value
+    return _balance_cache['v'] if _balance_cache['t'] else value
 
 
 def _get_binance_balance_uncached():
@@ -540,9 +464,11 @@ def _get_binance_balance_uncached():
                 total_usdt += pos['amount'] * price
 
         available_total = free_usdt if free_usdt > 0 else free_usdc
+        _balance_cache['error'] = None
         return available_total, total_usdt if total_usdt > 0 else available_total
     except Exception as e:
-        print("Balance Fetch Error details: {}".format(e))
+        _balance_cache['error'] = type(e).__name__
+        print("Balance Fetch Error: {}".format(type(e).__name__))
         return 0.0, 0.0
 
 
@@ -881,23 +807,20 @@ def check_and_close_positions():
                 pos['highest_price'] = highest_price
                 save_position(symbol, pos)
 
-            target = pos.get('target_price') or entry_price * (1 + TAKE_PROFIT_PCT / 100)
-            initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
-            trailing_distance = pos.get('trailing_distance')
-            active_stop = max(initial_stop, highest_price - trailing_distance) if trailing_distance else max(
-                entry_price * (1 - INITIAL_SL_PCT / 100),
-                highest_price * (1 - TRAILING_SL_PCT / 100)
-            )
+            pnl_pct = ((current_price - entry_price) / entry_price) * 100
 
             reason = None
             if pos.get('test'):
                 opened = datetime.datetime.strptime(pos['time'], "%Y-%m-%d %H:%M:%S")
                 if (datetime.datetime.now() - opened).total_seconds() >= TEST_TRADE_SECONDS:
                     reason = "TEST"
-            elif current_price >= target:
+            elif pnl_pct >= TAKE_PROFIT_PCT:
                 reason = "TP"
-            elif current_price <= active_stop:
-                reason = "SL"
+            else:
+                initial_sl = entry_price * (1 - INITIAL_SL_PCT / 100)
+                trailing_sl = highest_price * (1 - TRAILING_SL_PCT / 100)
+                if current_price <= max(initial_sl, trailing_sl):
+                    reason = "SL"
 
             if not reason:
                 continue
@@ -915,15 +838,12 @@ def check_and_close_positions():
             realized_pnl = ((sale['proceeds'] - pos['cost']) / pos['cost']) * 100
             status = "WIN" if realized_pnl > 0 else "LOSS"
             title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار"}.get(reason, "🛑 إغلاق بوقف الخسارة")
-            print("{} [{}] {} | PnL: {:+.2f}% | {} ({})".format(
-                title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
-            log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
-                      "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
+            print("{} [{}] {} | PnL: {:+.2f}%".format(title, status, symbol, realized_pnl))
+            log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"), "{} {:+.2f}% ({})".format(symbol, realized_pnl, status))
             log_trade(symbol, entry_price, sale['price'], realized_pnl, status, sale['proceeds'] - pos['cost'])
             send_telegram_message(
-                "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
+                "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
-                    pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
                     "\n🧪 محاكاة" if (not TRADING_ENABLED or pos.get('simulated')) else ""))
             del active_positions[symbol]
             delete_position(symbol)
@@ -935,25 +855,42 @@ def automated_market_scan():
     if not scan_lock.acquire(blocking=False):
         print("⏳ [SCANNER] فحص آخر قيد التنفيذ، تم التخطي")
         return
+    scanner_state['last_started_at'] = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+    scanner_state['last_error'] = None
     try:
-        print("🔄 [SCANNER] فحص الاستراتيجيات الآلية الثلاث ({} | Demo-only safety)...".format(BINANCE_ENV))
+        print("🔄 [SCANNER] جاري فحص الأسواق والمؤشرات الفنية ({} | {})...".format(BINANCE_ENV, TIMEFRAME))
         check_and_close_positions()
 
         for symbol in SYMBOLS:
             try:
-                if symbol not in SUPPORTED_SYMBOLS:
+                ohlcv = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=CANDLES_LIMIT)
+                closed = ohlcv[:-1]  # نتجاهل الشمعة الجارية، الإشارة تُحسب على شموع مغلقة فقط
+                if len(closed) < EMA_PERIOD + 1:
+                    print("⚠️ {} بيانات غير كافية".format(symbol))
                     continue
-                setup = evaluate_symbol(exchange, symbol)
-                current_price = exchange.fetch_ticker(symbol)['last']
-                if not setup:
-                    continue
-                setup = dict(setup)
-                setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S")})
-                market_snapshot[symbol] = setup
-                print("📊 {} | {} {} | RSI: {:.2f} | setup: {}".format(
-                    symbol, setup['strategy'], setup['timeframe'], setup['rsi'], setup['reason']))
 
-                if symbol not in active_positions and (len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)) >= MAX_CONCURRENT_TRADES:
+                closes = [c[4] for c in closed]
+                last_candle_ts = closed[-1][0]
+                rsi = calculate_rsi(closes)
+                ema = calculate_ema(closes, EMA_PERIOD)
+                macd, signal, hist = calculate_macd(closes)
+                current_price = exchange.fetch_ticker(symbol)['last']
+
+                cond_ema = ema is not None and closes[-1] > ema
+                cond_macd = hist > 0 or not REQUIRE_MACD
+                cond_rsi = rsi <= RSI_MAX_ENTRY
+                signal_ok = cond_rsi and cond_ema and cond_macd
+                market_snapshot[symbol] = {
+                    'price': current_price, 'rsi': rsi, 'ema': ema, 'hist': hist, 'signal': signal_ok,
+                    'conds': {'ema': cond_ema, 'macd': cond_macd, 'rsi': cond_rsi}, 'ref_close': closes[-1],
+                    'time': datetime.datetime.now().strftime("%H:%M:%S"),
+                    'updated_ts': time.time(),
+                    'updated_at': datetime.datetime.now().astimezone().isoformat(timespec='seconds')
+                }
+                print("📊 {} - Price: {} | RSI: {:.2f} | EMA{}: {:.2f} | MACD hist: {:.4f}".format(
+                    symbol, current_price, rsi, EMA_PERIOD, ema, hist))
+
+                if symbol not in active_positions and len(active_positions) >= MAX_CONCURRENT_TRADES:
                     continue
 
                 global test_trade_done
@@ -965,8 +902,7 @@ def automated_market_scan():
                             'entry_price': fill['price'], 'amount': fill['amount'],
                             'cost': fill['cost'], 'highest_price': fill['price'],
                             'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'simulated': fill['simulated'], 'test': True,
-                            'strategy': 'test', 'timeframe': setup.get('timeframe', '15m'),
+                            'simulated': fill['simulated'], 'test': True
                         }
                         active_positions[symbol] = pos
                         save_position(symbol, pos)
@@ -978,22 +914,20 @@ def automated_market_scan():
                         send_telegram_message("❌ <b>فشل شراء الاختبار</b>\n{}".format(html.escape(str(e))))
                     continue
 
-                if symbol in active_positions or not setup['signal']:
+                if symbol in active_positions:
                     continue
-                if last_entry_candle.get(symbol) == setup.get('candle_ts'):
+                if last_entry_candle.get(symbol) == last_candle_ts:
+                    continue
+
+                if not signal_ok:
                     continue
 
                 if news_blocked():
-                    print("📰 [NEWS] إشارة {} على {} لكن الشراء موقوف بسبب الأخبار".format(
-                        setup['strategy'], symbol))
-                    continue
-                if (news_state['sentiment'] == 'negative' and news_state['severity'] >= 2
-                        and setup['strategy'] != 'trend'):
-                    print("📰 [NEWS] خبر سلبي؛ السماح فقط بإشارات الاتجاه وتجاهل {} على {}".format(
-                        setup['strategy'], symbol))
+                    print("📰 [NEWS] إشارة شراء على {} لكن الشراء موقوف بسبب الأخبار حتى {}".format(
+                        symbol, datetime.datetime.fromtimestamp(news_state['blocked_until']).strftime("%H:%M")))
                     continue
 
-                last_entry_candle[symbol] = setup.get('candle_ts')
+                last_entry_candle[symbol] = last_candle_ts
                 try:
                     fill = place_buy(symbol, current_price)
                 except Exception as e:
@@ -1002,37 +936,30 @@ def automated_market_scan():
                     send_telegram_message("❌ <b>فشل شراء {}</b>\n{}".format(symbol, html.escape(str(e))))
                     continue
 
-                entry = fill['price']
-                atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
-                risk = STRATEGY_RISK[setup['strategy']]
-                stop_price = entry - atr * risk['stop_atr']
-                target_price = entry + atr * risk['target_atr']
-                trailing_distance = atr * risk['trail_atr']
                 pos = {
-                    'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
-                    'highest_price': entry, 'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'simulated': fill['simulated'], 'strategy': setup['strategy'],
-                    'timeframe': setup['timeframe'], 'stop_price': stop_price,
-                    'target_price': target_price, 'trailing_distance': trailing_distance,
+                    'entry_price': fill['price'],
+                    'amount': fill['amount'],
+                    'cost': fill['cost'],
+                    'highest_price': fill['price'],
+                    'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'simulated': fill['simulated']
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
-                print("🚀 [BUY] {} | {} {} | price {} | SL {} | TP {}".format(
-                    symbol, setup['strategy'], setup['timeframe'], entry, stop_price, target_price))
-                log_event("BUY", "{} · {} · {}".format(symbol, setup['strategy'], setup['timeframe']))
+                print("🚀 [BUY] {} بسعر {} | الكمية {:.6f} | RSI: {:.2f}".format(symbol, fill['price'], fill['amount'], rsi))
+                log_event("BUY", "{} @ {:,.2f} | {:.6f}".format(symbol, fill['price'], fill['amount']))
                 send_telegram_message(
-                    "🚀 <b>فتح صفقة Demo جديدة</b>\n🪙 {}\n🧭 {} · {}\n💵 الدخول: {}\n🛑 الوقف: {}\n🎯 الهدف: {}\n📦 القيمة: {:.2f} USDT{}".format(
-                        symbol, setup['strategy_label'], setup['timeframe'], entry,
-                        stop_price, target_price, fill['cost'],
+                    "🚀 <b>فتح صفقة جديدة (BUY)</b>\n🪙 العملة: {}\n💵 السعر: {}\n📦 الكمية: {:.6f}\n💰 التكلفة: {:.2f} USDT\n📉 RSI: {:.2f}{}".format(
+                        symbol, fill['price'], fill['amount'], fill['cost'], rsi,
                         "\n🧪 محاكاة" if fill['simulated'] else ""))
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
-        if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
-            futures_engine.scan(TRADE_AMOUNT_USDT, lambda: (len(active_positions) + len(futures_engine.positions)) < MAX_CONCURRENT_TRADES)
         record_equity()
     except Exception as e:
         print("Error in automated market scan: {}".format(e))
+        scanner_state['last_error'] = type(e).__name__
     finally:
+        scanner_state['last_completed_at'] = datetime.datetime.now().astimezone().isoformat(timespec='seconds')
         scan_lock.release()
 
 
@@ -1041,15 +968,18 @@ def automated_market_scan():
 # =====================================================================
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
 def read_root():
+    cache_headers = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}
     try:
         with open("index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(content=f.read(), headers=cache_headers)
     except Exception as e:
-        return HTMLResponse(content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))))
+        return HTMLResponse(content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))), headers=cache_headers)
 
 
 @app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
-def api_state():
+def api_state(response: Response):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     total, wins, losses, win_rate, total_pnl, best, worst = get_performance_stats()
     realized_total, realized_today = get_realized_stats()
     free_usdt, total_usdt = get_binance_balance()
@@ -1069,10 +999,8 @@ def api_state():
             'symbol': sym, 'entry': entry, 'amount': pos['amount'], 'cost': pos['cost'],
             'highest': high, 'price': price, 'pnl_usdt': pnl_usdt,
             'pnl_pct': pnl_usdt / pos['cost'] * 100 if pos['cost'] else 0.0,
-            'stop': max(pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100),
-                        high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
-            'target': pos.get('target_price') or entry * (1 + TAKE_PROFIT_PCT / 100),
-            'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
+            'stop': max(entry * (1 - INITIAL_SL_PCT / 100), high * (1 - TRAILING_SL_PCT / 100)),
+            'target': entry * (1 + TAKE_PROFIT_PCT / 100),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', '')
         })
 
@@ -1080,67 +1008,37 @@ def api_state():
     for sym in SYMBOLS:
         d = market_snapshot.get(sym)
         if not d:
-            markets.append({'symbol': sym, 'ready': False, 'in_position': sym in active_positions,
-                            'supported': sym in SUPPORTED_SYMBOLS,
-                            'reason': UNSUPPORTED_SYMBOLS.get(sym, 'بانتظار أول فحص')})
+            markets.append({'symbol': sym, 'ready': False, 'in_position': sym in active_positions})
             continue
+        updated_ts = d.get('updated_ts', 0)
         markets.append({
             'symbol': sym, 'ready': True, 'price': d['price'], 'rsi': d['rsi'], 'ema': d['ema'],
             'ref_close': d.get('ref_close', d['price']), 'hist': d['hist'], 'signal': d['signal'], 'conds': d.get('conds', {}),
-            'time': d['time'], 'in_position': sym in active_positions,
-            'strategy': d.get('strategy', 'wait'), 'strategy_label': d.get('strategy_label', 'انتظار'),
-            'timeframe': d.get('timeframe', '15m'), 'reason': d.get('reason', '')
+            'time': d['time'], 'timeframe': TIMEFRAME, 'updated_at': d.get('updated_at'),
+            'age_seconds': max(0, int(time.time() - updated_ts)) if updated_ts else None,
+            'in_position': sym in active_positions
         })
 
-    if futures_engine:
-        for sym, pos in futures_engine.positions.items():
-            price = float((futures_engine.snapshot.get(sym) or {}).get('price') or pos['entry_price'])
-            pnl = (price - pos['entry_price']) * pos['contracts'] * float(futures_engine.exchange.market(sym).get('contractSize') or 1)
-            positions.append({'symbol': sym, 'entry': pos['entry_price'], 'amount': pos['amount'],
-                'cost': pos['cost'], 'highest': pos['highest_price'], 'price': price, 'pnl_usdt': pnl,
-                'pnl_pct': pnl / pos['cost'] * 100 if pos['cost'] else 0, 'stop': pos['stop_price'],
-                'target': pos['target_price'], 'strategy': pos['strategy'], 'timeframe': pos['timeframe'],
-                'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
-    if futures_engine:
-        for sym in futures_engine.symbols:
-            data = futures_engine.snapshot.get(sym)
-            if data:
-                markets.append({'symbol': sym, 'ready': data.get('ready', False), 'supported': True,
-                    'price': data.get('price'), 'rsi': data.get('rsi', 50), 'ema': data.get('ema', 0),
-                    'ref_close': data.get('ref_close', data.get('price')), 'hist': data.get('hist', 0),
-                    'signal': data.get('signal', False), 'conds': data.get('conds', {}), 'time': '',
-                    'in_position': sym in futures_engine.positions, 'strategy': data.get('strategy', 'wait'),
-                    'strategy_label': data.get('strategy_label', 'انتظار'), 'timeframe': data.get('timeframe', '15m'),
-                    'reason': data.get('reason', ''), 'market_type': 'Futures Demo'})
-            else:
-                markets.append({'symbol': sym, 'ready': False, 'supported': True,
-                    'in_position': sym in futures_engine.positions, 'market_type': 'Futures Demo',
-                    'reason': 'بانتظار أول فحص Futures'})
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7]
     } for t in get_recent_trades(limit=8)]
-    if futures_engine:
-        try:
-            with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
-            trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
-                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'market_type': 'Futures Demo'} for t in rows)
-            trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
-        except Exception:
-            pass
 
-    future_state = futures_engine.public_state() if futures_engine else {
-        'connected': False, 'environment': 'demo', 'trading_enabled': False, 'symbols': [],
-        'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
-        'wins': 0, 'losses': 0, 'realized_pnl': 0.0}
     return {
-        'futures': future_state,
+        'as_of': datetime.datetime.now().astimezone().isoformat(timespec='seconds'),
+        'scanner': {
+            'last_started_at': scanner_state['last_started_at'],
+            'last_completed_at': scanner_state['last_completed_at'],
+            'last_error': scanner_state['last_error']
+        },
+        'balance_updated_at': datetime.datetime.fromtimestamp(_balance_cache['t']).astimezone().isoformat(timespec='seconds') if _balance_cache['t'] else None,
+        'balance_age_seconds': max(0, int(time.time() - _balance_cache['t'])) if _balance_cache['t'] else None,
+        'balance_status': 'stale' if _balance_cache['error'] and _balance_cache['t'] else ('unavailable' if _balance_cache['error'] else ('current' if _balance_cache['t'] else 'waiting')),
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
         'telegram': bool(TELEGRAM_BOT_TOKEN),
         'trade_amount': TRADE_AMOUNT_USDT,
-        'settings': {'max_concurrent_trades': MAX_CONCURRENT_TRADES, 'active_trades': len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)},
+        'settings': {'max_concurrent_trades': MAX_CONCURRENT_TRADES, 'active_trades': len(active_positions)},
         'wallet': {'total': total_usdt, 'free': free_usdt},
         'stats': {
             'realized_total': realized_total, 'realized_today': realized_today,
@@ -1149,10 +1047,8 @@ def api_state():
             'exposure': min(invested / total_usdt * 100, 100.0) if total_usdt > 0 else 0.0
         },
         'params': {
-            'timeframe': 'auto', 'strategy_mode': 'automatic',
-            'strategies': ['trend', 'breakout', 'bounce'],
-            'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
-            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
+            'timeframe': TIMEFRAME, 'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
+            'require_macd': REQUIRE_MACD, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,
             'news_pause_h': NEWS_PAUSE_HOURS
         },
@@ -1160,8 +1056,7 @@ def api_state():
         'positions': positions,
         'trades': trades,
         'platforms': [
-            {'id': 'binance', 'name': 'Binance Spot', 'connected': bool(BINANCE_API_KEY and BINANCE_SECRET_KEY), 'environment': BINANCE_ENV, 'trading_enabled': TRADING_ENABLED, 'balance': total_usdt, 'free_balance': free_usdt, 'open_positions': len(active_positions), 'realized_pnl': realized_total, 'closed_trades': total, 'status': 'connected' if BINANCE_API_KEY and BINANCE_SECRET_KEY else 'credentials missing'},
-            {'id': 'binance_futures', 'name': 'Binance Futures', 'connected': future_state['connected'], 'environment': 'demo', 'trading_enabled': bool(future_state['connected'] and TRADING_ENABLED), 'balance': future_state['balance'], 'free_balance': future_state['free_balance'], 'open_positions': future_state['open_positions'], 'realized_pnl': future_state['realized_pnl'], 'closed_trades': future_state['closed'], 'symbols': future_state['symbols'], 'status': 'connected' if future_state['connected'] else 'credentials missing'},
+            {'id': 'binance', 'name': 'Binance', 'connected': bool(BINANCE_API_KEY and BINANCE_SECRET_KEY), 'environment': BINANCE_ENV, 'trading_enabled': TRADING_ENABLED, 'balance': total_usdt, 'free_balance': free_usdt, 'open_positions': len(active_positions), 'realized_pnl': realized_total, 'closed_trades': total, 'status': 'connected' if BINANCE_API_KEY and BINANCE_SECRET_KEY else 'credentials missing'},
             {'id': 'mitrade', 'name': 'Mitrade', 'connected': False, 'supported': False, 'status': 'No public trading API documentation found'}
         ],
         'news': {
@@ -1231,44 +1126,10 @@ def update_binance_credentials(payload: BinanceCredentials):
         return {'ok': True, 'platform': 'binance', 'environment': BINANCE_ENV, 'message': 'Binance Demo credentials saved encrypted'}
     finally:
         scan_lock.release()
-@app.post('/api/platforms/binance-futures/credentials', dependencies=[Depends(require_dashboard_auth)])
-def update_binance_futures_credentials(payload: FuturesCredentials):
-    global futures_engine, BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY
-    if BINANCE_ENV != 'demo':
-        raise HTTPException(status_code=409, detail='Futures API credentials are accepted only in Binance Demo mode')
-    if not CREDENTIAL_ENCRYPTION_KEY:
-        raise HTTPException(status_code=503, detail='Encrypted credential storage is not configured')
-    if futures_engine and futures_engine.positions:
-        raise HTTPException(status_code=409, detail='Close or wait for Futures Demo positions before changing keys')
-    if not scan_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail='Market scan in progress; retry shortly')
-    try:
-        try:
-            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event)
-            balance_check = candidate.balance()
-            if balance_check.get('error'):
-                raise RuntimeError('Futures API authentication failed')
-            if not candidate.symbols:
-                raise RuntimeError('No supported oil or gold contracts in Futures Demo markets')
-        except Exception:
-            raise HTTPException(status_code=400, detail='تعذر التحقق من Binance Futures Demo أو أن عقود النفط/الذهب غير متاحة في حساب الديمو')
-        cipher = _credential_cipher()
-        conn = sqlite3.connect(DB_NAME)
-        conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
-            ('binance_futures', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
-        conn.commit(); conn.close()
-        futures_engine = candidate
-        BINANCE_FUTURES_API_KEY = payload.api_key.strip()
-        BINANCE_FUTURES_SECRET_KEY = payload.secret_key.strip()
-        log_event('PLATFORM', 'تم ربط Binance Futures Demo')
-        return {'ok': True, 'platform': 'binance_futures', 'environment': 'demo', 'symbols': candidate.symbols,
-            'message': 'Binance Futures Demo credentials saved encrypted'}
-    finally:
-        scan_lock.release()
-
-
 @app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])
-def api_equity(range: str = "1d"):
+def api_equity(response: Response, range: str = "1d"):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     return get_equity_series(range)
 
 
