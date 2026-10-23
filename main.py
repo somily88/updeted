@@ -36,7 +36,7 @@ BINANCE_FUTURES_SECRET_KEY = os.getenv("BINANCE_FUTURES_SECRET_KEY", "").strip()
 BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet | live
 
 # حجم كل صفقة بالدولار (USDT)
-TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "100"))
+TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "1000"))
 MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", "2"))
 CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "").strip()
 
@@ -57,7 +57,7 @@ REQUIRE_MACD = os.getenv("REQUIRE_MACD", "true").strip().lower() == "true"
 MACD_HIST_TOLERANCE_PCT = float(os.getenv("MACD_HIST_TOLERANCE_PCT", "0.10"))
 if not 0.0 <= MACD_HIST_TOLERANCE_PCT <= 0.50:
     raise ValueError("MACD_HIST_TOLERANCE_PCT must be between 0 and 0.50")
-TAKE_PROFIT_PCT = 1.0      # هدف الربح %
+TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))  # هدف الربح الإجمالي لكل صفقة، قبل الرسوم
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 
@@ -183,7 +183,15 @@ def load_runtime_settings():
     try:
         conn = sqlite3.connect(DB_NAME)
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
-        TRADE_AMOUNT_USDT = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
+        stored_amount = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
+        # One-time migration: the user requested changing the existing 100 USDT
+        # trade size to 1000 USDT. Preserve any other saved dashboard amount.
+        if abs(stored_amount - 100.0) < 1e-9 and abs(TRADE_AMOUNT_USDT - 1000.0) < 1e-9:
+            stored_amount = 1000.0
+            conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
+                         ('trade_amount_usdt', str(stored_amount)))
+            conn.commit()
+        TRADE_AMOUNT_USDT = stored_amount
         env_max_trades = os.getenv("MAX_CONCURRENT_TRADES", "").strip()
         if env_max_trades:
             requested_max = int(env_max_trades)
@@ -926,7 +934,7 @@ def check_and_close_positions():
                 pos['highest_price'] = highest_price
                 save_position(symbol, pos)
 
-            target = pos.get('target_price') or entry_price * (1 + TAKE_PROFIT_PCT / 100)
+            target = pos.get('target_price') or entry_price + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12)
             initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
             trailing_distance = pos.get('trailing_distance')
             active_stop = max(initial_stop, highest_price - trailing_distance) if trailing_distance else max(
@@ -1051,7 +1059,7 @@ def automated_market_scan():
                 atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
                 risk = STRATEGY_RISK[setup['strategy']]
                 stop_price = entry - atr * risk['stop_atr']
-                target_price = entry + atr * risk['target_atr']
+                target_price = entry + TAKE_PROFIT_USDT / max(fill['amount'], 1e-12)
                 trailing_distance = atr * risk['trail_atr']
                 pos = {
                     'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
@@ -1116,7 +1124,7 @@ def api_state():
             'pnl_pct': pnl_usdt / pos['cost'] * 100 if pos['cost'] else 0.0,
             'stop': max(pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100),
                         high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
-            'target': pos.get('target_price') or entry * (1 + TAKE_PROFIT_PCT / 100),
+            'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
             'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', '')
         })
@@ -1200,7 +1208,7 @@ def api_state():
             'timeframe': 'auto', 'strategy_mode': 'automatic',
             'strategies': ['trend', 'breakout', 'bounce'],
             'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
-            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp': TAKE_PROFIT_PCT, 'sl': INITIAL_SL_PCT,
+            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp_usdt': TAKE_PROFIT_USDT, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,
             'news_pause_h': NEWS_PAUSE_HOURS
         },
