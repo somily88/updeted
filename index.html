@@ -464,7 +464,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     status.textContent = state;
     dot.classList.toggle('paused', !!n.blocked || !n.enabled);
     var items = headlines.map(function (h) {
-      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span>' + esc(h.title || '') + '</span></span>';
+      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span dir="auto">' + esc(h.title_ar || h.title || '') + '</span></span>';
     }).join('');
     if (!items) {
       var fallback = n.reason || (n.error ? 'تعذّر جلب الأخبار في آخر فحص' : 'لا توجد عناوين حديثة في آخر فحص');
