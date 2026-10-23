@@ -1074,7 +1074,7 @@ def automated_market_scan():
                 atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
                 risk = STRATEGY_RISK[setup['strategy']]
                 stop_price = entry - atr * risk['stop_atr']
-                target_price = entry + TAKE_PROFIT_USDT / max(fill['amount'], 1e-12)
+                target_price = entry + atr * risk['target_atr']
                 trailing_distance = atr * risk['trail_atr']
                 pos = {
                     'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
