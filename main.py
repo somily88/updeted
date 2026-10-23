@@ -152,6 +152,8 @@ def init_db():
             ('stop_price', 'REAL'),
             ('target_price', 'REAL'),
             ('trailing_distance', 'REAL'),
+            ('entries', 'INTEGER NOT NULL DEFAULT 1'),
+            ('last_add_candle', 'TEXT'),
         ]:
             existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
             if column not in existing:
@@ -364,12 +366,13 @@ def save_position(symbol, pos):
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
             (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
-             strategy, timeframe, stop_price, target_price, trailing_distance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
               pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
               pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
-              pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance')))
+              pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance'),
+              max(1, int(pos.get('entries', 1))), pos.get('last_add_candle')))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -392,7 +395,8 @@ def load_positions():
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
-                          simulated, strategy, timeframe, stop_price, target_price, trailing_distance
+                          simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
+                          entries, last_add_candle
                           FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
@@ -400,6 +404,7 @@ def load_positions():
                 'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6]),
                 'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
                 'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
+                'entries': max(1, int(r[12] or 1)), 'last_add_candle': r[13],
             }
         conn.close()
     except Exception as e:
@@ -1021,7 +1026,10 @@ def automated_market_scan():
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'],
                     setup.get('signal_strength', 0), setup['reason']))
 
-                if symbol not in active_positions and len(active_positions) >= MAX_SPOT_CONCURRENT_TRADES:
+                spot_open_slots = sum(max(1, int(p.get('entries', 1))) for p in active_positions.values())
+                if symbol not in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
+                    continue
+                if symbol in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
                     continue
 
                 global test_trade_done
@@ -1046,9 +1054,10 @@ def automated_market_scan():
                         send_telegram_message("❌ <b>فشل شراء الاختبار</b>\n{}".format(html.escape(str(e))))
                     continue
 
-                if symbol in active_positions or not setup['signal']:
+                if not setup['signal']:
                     continue
-                if last_entry_candle.get(symbol) == setup.get('candle_ts'):
+                candle = setup.get('candle_ts')
+                if last_entry_candle.get(symbol) == candle:
                     continue
 
                 if news_blocked():
@@ -1061,13 +1070,78 @@ def automated_market_scan():
                         setup['strategy'], symbol))
                     continue
 
-                last_entry_candle[symbol] = setup.get('candle_ts')
+                pos = active_positions.get(symbol)
+                is_add = pos is not None
+                if is_add:
+                    entries = max(1, int(pos.get('entries', 1)))
+                    if entries >= 2:
+                        continue
+                    if setup['strategy'] != pos.get('strategy'):
+                        print("⏸️ [PYRAMID] {} تجاهل: الاستراتيجية الحالية مختلفة عن صفقة المركز".format(symbol))
+                        continue
+                    if str(pos.get('last_add_candle') or '') == str(candle):
+                        continue
+
+                    entry_before_add = float(pos['entry_price'])
+                    initial_stop = float(pos.get('stop_price') or entry_before_add * (1 - INITIAL_SL_PCT / 100))
+                    initial_risk = max(entry_before_add - initial_stop, entry_before_add * 0.0005)
+                    atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
+                    unrealized_before_add = current_price * float(pos['amount']) - float(pos['cost'])
+                    required_move = max(atr, initial_risk)
+                    if unrealized_before_add <= 0 or current_price < entry_before_add + required_move:
+                        print("⏸️ [PYRAMID] {} لم يصل إلى شرط الربح/الحركة المطلوبة".format(symbol))
+                        continue
+
+                    # Persist the candle before sending the market order so a timeout
+                    # cannot trigger a duplicate add on every scanner pass.
+                    pos['last_add_candle'] = str(candle)
+                    save_position(symbol, pos)
+                    last_entry_candle[symbol] = candle
+                    try:
+                        fill = place_buy(symbol, current_price)
+                    except Exception as e:
+                        print("❌ [PYRAMID ERROR] {}: {}".format(symbol, e))
+                        log_event("ERR", "إضافة {}: {}".format(symbol, str(e)[:80]))
+                        send_telegram_message("❌ <b>فشلت إضافة صفقة {}</b>\\n{}".format(symbol, html.escape(str(e))))
+                        continue
+
+                    total_amount = float(pos['amount']) + float(fill['amount'])
+                    total_cost = float(pos['cost']) + float(fill['cost'])
+                    weighted_entry = total_cost / total_amount if total_amount else fill['price']
+                    risk = STRATEGY_RISK[pos['strategy']]
+                    pos.update({
+                        'entry_price': weighted_entry,
+                        'amount': total_amount,
+                        'cost': total_cost,
+                        'highest_price': max(float(pos.get('highest_price') or 0.0), float(fill['price'])),
+                        'stop_price': max(initial_stop, entry_before_add),
+                        'target_price': weighted_entry + atr * risk['target_atr'],
+                        'trailing_distance': min(
+                            float(pos.get('trailing_distance') or atr * risk['trail_atr']),
+                            atr * risk['trail_atr']),
+                        'entries': entries + 1,
+                        'simulated': bool(pos.get('simulated') or fill['simulated']),
+                    })
+                    active_positions[symbol] = pos
+                    save_position(symbol, pos)
+                    print("➕ [PYRAMID] {} | دخول {}/2 | متوسط {} | كمية إجمالية {}".format(
+                        symbol, pos['entries'], weighted_entry, total_amount))
+                    log_event("PYRAMID", "{} · دخول {}/2 · متوسط {:.8g}".format(
+                        symbol, pos['entries'], weighted_entry))
+                    send_telegram_message(
+                        "➕ <b>إضافة Demo إلى مركز رابح</b>\\n🪙 {}\\n🧭 {} · {}\\n📥 دخول الإضافة: {}\\n📊 متوسط الدخول الجديد: {}\\n🔒 الوقف: {}\\n🎯 الهدف: {}\\n📦 القيمة المضافة: {:.2f} USDT\\n🔢 عدد مرات الدخول: {}/2{}".format(
+                            symbol, setup['strategy_label'], setup['timeframe'], fill['price'],
+                            weighted_entry, pos['stop_price'], pos['target_price'], fill['cost'],
+                            pos['entries'], "\\n🧪 محاكاة" if fill['simulated'] else ""))
+                    continue
+
+                last_entry_candle[symbol] = candle
                 try:
                     fill = place_buy(symbol, current_price)
                 except Exception as e:
                     print("❌ [BUY ERROR] {}: {}".format(symbol, e))
                     log_event("ERR", "شراء {}: {}".format(symbol, str(e)[:80]))
-                    send_telegram_message("❌ <b>فشل شراء {}</b>\n{}".format(symbol, html.escape(str(e))))
+                    send_telegram_message("❌ <b>فشل شراء {}</b>\\n{}".format(symbol, html.escape(str(e))))
                     continue
 
                 entry = fill['price']
@@ -1082,6 +1156,7 @@ def automated_market_scan():
                     'simulated': fill['simulated'], 'strategy': setup['strategy'],
                     'timeframe': setup['timeframe'], 'stop_price': stop_price,
                     'target_price': target_price, 'trailing_distance': trailing_distance,
+                    'entries': 1, 'last_add_candle': None,
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
@@ -1089,10 +1164,11 @@ def automated_market_scan():
                     symbol, setup['strategy'], setup['timeframe'], entry, stop_price, target_price))
                 log_event("BUY", "{} · {} · {}".format(symbol, setup['strategy'], setup['timeframe']))
                 send_telegram_message(
-                    "🚀 <b>فتح صفقة Demo جديدة</b>\n🪙 {}\n🧭 {} · {}\n💵 الدخول: {}\n🛑 الوقف: {}\n🎯 الهدف: {}\n📦 القيمة: {:.2f} USDT{}".format(
+                    "🚀 <b>فتح صفقة Demo جديدة</b>\\n🪙 {}\\n🧭 {} · {}\\n💵 الدخول: {}\\n🛑 الوقف: {}\\n🎯 الهدف: {}\\n📦 القيمة: {:.2f} USDT{}".format(
                         symbol, setup['strategy_label'], setup['timeframe'], entry,
                         stop_price, target_price, fill['cost'],
-                        "\n🧪 محاكاة" if fill['simulated'] else ""))
+                        "\\n🧪 محاكاة" if fill['simulated'] else ""))
+
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
@@ -1147,7 +1223,8 @@ def api_state():
                         high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
             'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
             'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
-            'simulated': bool(pos.get('simulated')), 'time': pos.get('time', '')
+            'simulated': bool(pos.get('simulated')), 'time': pos.get('time', ''),
+            'entries': max(1, int(pos.get('entries', 1)))
         })
 
     markets = []
@@ -1209,6 +1286,7 @@ def api_state():
         except Exception:
             pass
 
+    spot_open_trade_slots = sum(max(1, int(pos.get('entries', 1))) for pos in active_positions.values())
     future_state = futures_engine.public_state() if futures_engine else {
         'connected': False, 'environment': 'demo', 'trading_enabled': False, 'symbols': [],
         'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
@@ -1221,10 +1299,10 @@ def api_state():
         'trade_amount': TRADE_AMOUNT_USDT,
         'settings': {
             'spot_max_concurrent_trades': MAX_SPOT_CONCURRENT_TRADES,
-            'spot_active_trades': len(active_positions),
+            'spot_active_trades': spot_open_trade_slots,
             'futures_max_concurrent_trades': MAX_FUTURES_CONCURRENT_TRADES,
             'futures_active_trades': len(futures_engine.positions) if futures_engine else 0,
-            'active_trades': len(active_positions) + (len(futures_engine.positions) if futures_engine else 0),
+            'active_trades': spot_open_trade_slots + (len(futures_engine.positions) if futures_engine else 0),
         },
         'wallet': {'total': total_usdt, 'free': free_usdt},
         'stats': {
