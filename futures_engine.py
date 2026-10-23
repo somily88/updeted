@@ -357,9 +357,15 @@ class BinanceFuturesDemo:
                     "direction": direction,
                     "strategy": (setup or {}).get("strategy", "wait"),
                     "timeframe": (setup or {}).get("timeframe", "15m"),
+                    "signal_strength": (setup or {}).get("signal_strength", 0),
                     "reason": (setup or {}).get("reason", ""),
                     "in_position": symbol in self.positions,
                 }
+                self.on_event("FUTURES_SCAN", "{} | {} {} | strength {}/100 | {}".format(
+                    symbol, (setup or {}).get("strategy_label", "انتظار"),
+                    (setup or {}).get("timeframe", "15m"),
+                    (setup or {}).get("signal_strength", 0),
+                    (setup or {}).get("reason", "بيانات غير كافية")))
                 if (not setup or not setup.get("signal") or symbol in self.positions
                         or not can_open() or self.last_entry_candle.get(symbol) == setup.get("candle_ts")):
                     continue
