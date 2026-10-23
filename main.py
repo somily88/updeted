@@ -769,10 +769,7 @@ def classify_with_groq(titles):
     system = (
         "You are a crypto market risk analyst. Given recent crypto news headlines, judge the overall "
         "impact on BTC and ETH prices over the next few hours. Respond ONLY with a JSON object: "
-        '{"sentiment":"positive|neutral|negative","severity":1-5,"reason":"one short sentence in Arabic",'
-        '"translated_headlines":["Arabic translation for each input headline, in the same order"]}. '
-        "Translate every headline into clear, concise Modern Standard Arabic. Preserve coin tickers, company names, "
-        "figures, and meaning. Return exactly one translation per input headline. "
+        '{"sentiment":"positive|neutral|negative","severity":1-5,"reason":"one short sentence in Arabic"}. '
         "Use severity 4-5 ONLY for major market-wide negative events such as exchange hacks, major country bans, "
         "large lawsuits or enforcement actions, stablecoin depegs, insolvencies, or protocol exploits affecting BTC or ETH. "
         "Ordinary price drops, opinions, predictions and minor news are severity 1-2."
@@ -802,13 +799,42 @@ def classify_with_groq(titles):
     if sentiment not in ('positive', 'neutral', 'negative'):
         sentiment = 'neutral'
     severity = max(1, min(5, int(result.get('severity', 1))))
-    translated = result.get('translated_headlines', [])
-    if not isinstance(translated, list) or len(translated) != len(titles):
-        translated = []
-    translated = [str(value).strip() for value in translated]
-    if any(not value for value in translated):
-        translated = []
-    return sentiment, severity, str(result.get('reason', '')).strip() or 'لا توجد تفاصيل', translated
+    return sentiment, severity, str(result.get('reason', '')).strip() or 'لا توجد تفاصيل'
+
+
+def translate_headlines_with_groq(titles):
+    """ترجمة عناوين الأخبار منفصلة عن تصنيف المخاطر حتى لا يؤثر تعطل الترجمة على قرار التداول."""
+    if not titles or not GROQ_API_KEY:
+        return []
+    if not _groq_model['name']:
+        _groq_model['name'] = groq_pick_model()
+    messages = [
+        {"role": "system", "content":
+         "Translate each crypto news headline into concise Modern Standard Arabic. "
+         "Preserve tickers, company names, numbers, and meaning. Return only JSON "
+         "with one key: translations, an array with exactly one Arabic translation per input headline in the same order."},
+        {"role": "user", "content": "Headlines:\n" + "\n".join("{}. {}".format(i + 1, t) for i, t in enumerate(titles))}
+    ]
+    name = _groq_model['name']
+    try:
+        content = _groq_chat(name, messages, True)
+    except urllib.error.HTTPError as e:
+        if e.code == 400:
+            content = _groq_chat(name, messages, False)
+        elif e.code == 404 and not GROQ_MODEL:
+            name = _groq_model['name'] = groq_pick_model()
+            content = _groq_chat(name, messages, True)
+        else:
+            raise
+    match = re.search(r'\{.*\}', content, re.S)
+    result = json.loads(match.group(0) if match else content)
+    translations = result.get('translations', [])
+    if not isinstance(translations, list) or len(translations) != len(titles):
+        raise ValueError("عدد الترجمات لا يطابق عدد العناوين")
+    translations = [str(value).strip() for value in translations]
+    if any(not value for value in translations):
+        raise ValueError("إحدى الترجمات فارغة")
+    return translations
 
 
 def classify_with_keywords(titles):
@@ -840,13 +866,20 @@ def check_news():
             try:
                 if not GROQ_API_KEY:
                     raise RuntimeError("no groq key")
-                sentiment, severity, reason, headline_translations = classify_with_groq(titles)
+                sentiment, severity, reason = classify_with_groq(titles)
                 source = "Groq"
             except Exception as e:
                 if GROQ_API_KEY:
                     print("📰 [NEWS] فشل تصنيف Groq ({}), استخدام الكلمات المفتاحية".format(e))
                 sentiment, severity, reason = classify_with_keywords(titles)
                 source = "Keywords"
+
+        if titles and GROQ_API_KEY:
+            try:
+                headline_translations = translate_headlines_with_groq(titles)
+            except Exception as e:
+                print("📰 [NEWS] تعذرت ترجمة العناوين: {}".format(type(e).__name__))
+                headline_translations = []
 
         strong = (sentiment == 'negative' and severity >= NEWS_BLOCK_SEVERITY)
         if strong:
