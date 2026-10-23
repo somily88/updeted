@@ -37,7 +37,8 @@ BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet
 
 # حجم كل صفقة بالدولار (USDT)
 TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "1000"))
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", "2"))
+MAX_SPOT_CONCURRENT_TRADES = int(os.getenv("MAX_SPOT_CONCURRENT_TRADES", "6"))
+MAX_FUTURES_CONCURRENT_TRADES = int(os.getenv("MAX_FUTURES_CONCURRENT_TRADES", "6"))
 CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "").strip()
 
 # تنفيذ الأوامر الفعلية:
@@ -61,7 +62,7 @@ TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))  # هدف الرب�
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 
-SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "PAXG/USDT"]
+SYMBOLS = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT"]
 SUPPORTED_SYMBOLS = set(SYMBOLS)
 UNSUPPORTED_SYMBOLS = {}
 
@@ -157,7 +158,8 @@ def init_db():
         cursor.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
         cursor.executemany('INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)', [
             ('trade_amount_usdt', str(TRADE_AMOUNT_USDT)),
-            ('max_concurrent_trades', str(MAX_CONCURRENT_TRADES))
+            ('spot_max_concurrent_trades', str(MAX_SPOT_CONCURRENT_TRADES)),
+            ('futures_max_concurrent_trades', str(MAX_FUTURES_CONCURRENT_TRADES))
         ])
         cursor.execute('CREATE TABLE IF NOT EXISTS platform_credentials (platform TEXT PRIMARY KEY, api_key_enc TEXT NOT NULL, secret_enc TEXT NOT NULL, updated_at TEXT NOT NULL)')
         try:
@@ -178,7 +180,7 @@ def _credential_cipher():
 
 
 def load_runtime_settings():
-    global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
+    global TRADE_AMOUNT_USDT, MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES
     conn = None
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -192,19 +194,24 @@ def load_runtime_settings():
                          ('trade_amount_usdt', str(stored_amount)))
             conn.commit()
         TRADE_AMOUNT_USDT = stored_amount
-        env_max_trades = os.getenv("MAX_CONCURRENT_TRADES", "").strip()
-        if env_max_trades:
-            requested_max = int(env_max_trades)
-            if not 1 <= requested_max <= 20:
-                raise ValueError("MAX_CONCURRENT_TRADES must be between 1 and 20")
-            MAX_CONCURRENT_TRADES = requested_max
-            conn.execute(
-                'INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
-                ('max_concurrent_trades', str(requested_max))
-            )
-            conn.commit()
-        else:
-            MAX_CONCURRENT_TRADES = int(values.get('max_concurrent_trades', MAX_CONCURRENT_TRADES))
+        for setting_key, env_name, global_name, current_value in [
+            ('spot_max_concurrent_trades', 'MAX_SPOT_CONCURRENT_TRADES', 'spot', MAX_SPOT_CONCURRENT_TRADES),
+            ('futures_max_concurrent_trades', 'MAX_FUTURES_CONCURRENT_TRADES', 'futures', MAX_FUTURES_CONCURRENT_TRADES),
+        ]:
+            env_value = os.getenv(env_name, '').strip()
+            # Migrate older installs that stored one shared limit into independent caps.
+            stored_value = values.get(setting_key, values.get('max_concurrent_trades', current_value))
+            requested_value = int(env_value or stored_value)
+            if not 1 <= requested_value <= 20:
+                raise ValueError("{} must be between 1 and 20".format(env_name))
+            if global_name == 'spot':
+                MAX_SPOT_CONCURRENT_TRADES = requested_value
+            else:
+                MAX_FUTURES_CONCURRENT_TRADES = requested_value
+            if env_value or setting_key not in values:
+                conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
+                             (setting_key, str(requested_value)))
+                conn.commit()
     except Exception as e:
         print("Settings Load Error: {}".format(e))
     finally:
@@ -402,7 +409,8 @@ def load_positions():
 # =====================================================================
 init_db()
 load_runtime_settings()
-print("⚙️ [SETTINGS] Max concurrent trades: {}".format(MAX_CONCURRENT_TRADES))
+print("⚙️ [SETTINGS] Max concurrent trades: Spot={} Futures={}".format(
+    MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES))
 saved_binance_credentials = load_saved_binance_credentials()
 if saved_binance_credentials:
     BINANCE_API_KEY, BINANCE_SECRET_KEY = saved_binance_credentials
@@ -494,7 +502,8 @@ def require_dashboard_auth(credentials: HTTPBasicCredentials = Depends(_dashboar
 app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 class RuntimeSettings(BaseModel):
     trade_amount_usdt: float = Field(gt=0, le=100000)
-    max_concurrent_trades: int = Field(ge=1, le=20)
+    spot_max_concurrent_trades: int = Field(default=6, ge=1, le=20)
+    futures_max_concurrent_trades: int = Field(default=6, ge=1, le=20)
 
 
 class BinanceCredentials(BaseModel):
@@ -1006,7 +1015,7 @@ def automated_market_scan():
                 print("📊 {} | {} {} | RSI: {:.2f} | setup: {}".format(
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'], setup['reason']))
 
-                if symbol not in active_positions and (len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)) >= MAX_CONCURRENT_TRADES:
+                if symbol not in active_positions and len(active_positions) >= MAX_SPOT_CONCURRENT_TRADES:
                     continue
 
                 global test_trade_done
@@ -1081,7 +1090,7 @@ def automated_market_scan():
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
-            futures_engine.scan(TRADE_AMOUNT_USDT, lambda: (len(active_positions) + len(futures_engine.positions)) < MAX_CONCURRENT_TRADES)
+            futures_engine.scan(TRADE_AMOUNT_USDT, lambda: len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES)
         record_equity()
     except Exception as e:
         print("Error in automated market scan: {}".format(e))
@@ -1196,7 +1205,13 @@ def api_state():
         'trading_enabled': TRADING_ENABLED,
         'telegram': bool(TELEGRAM_BOT_TOKEN),
         'trade_amount': TRADE_AMOUNT_USDT,
-        'settings': {'max_concurrent_trades': MAX_CONCURRENT_TRADES, 'active_trades': len(active_positions) + (len(futures_engine.positions) if futures_engine else 0)},
+        'settings': {
+            'spot_max_concurrent_trades': MAX_SPOT_CONCURRENT_TRADES,
+            'spot_active_trades': len(active_positions),
+            'futures_max_concurrent_trades': MAX_FUTURES_CONCURRENT_TRADES,
+            'futures_active_trades': len(futures_engine.positions) if futures_engine else 0,
+            'active_trades': len(active_positions) + (len(futures_engine.positions) if futures_engine else 0),
+        },
         'wallet': {'total': total_usdt, 'free': free_usdt},
         'stats': {
             'realized_total': realized_total, 'realized_today': realized_today,
@@ -1237,21 +1252,29 @@ def api_state():
 
 @app.post("/api/settings", dependencies=[Depends(require_dashboard_auth)])
 def update_runtime_settings(payload: RuntimeSettings):
-    global TRADE_AMOUNT_USDT, MAX_CONCURRENT_TRADES
+    global TRADE_AMOUNT_USDT, MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES
     if not scan_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
     try:
         conn = sqlite3.connect(DB_NAME)
         conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [
             ('trade_amount_usdt', str(payload.trade_amount_usdt)),
-            ('max_concurrent_trades', str(payload.max_concurrent_trades))
+            ('spot_max_concurrent_trades', str(payload.spot_max_concurrent_trades)),
+            ('futures_max_concurrent_trades', str(payload.futures_max_concurrent_trades))
         ])
         conn.commit()
         conn.close()
         TRADE_AMOUNT_USDT = float(payload.trade_amount_usdt)
-        MAX_CONCURRENT_TRADES = int(payload.max_concurrent_trades)
-        log_event("SETTINGS", "حد الصفقات {} · حجم الصفقة {} USDT".format(MAX_CONCURRENT_TRADES, TRADE_AMOUNT_USDT))
-        return {'ok': True, 'trade_amount_usdt': TRADE_AMOUNT_USDT, 'max_concurrent_trades': MAX_CONCURRENT_TRADES}
+        MAX_SPOT_CONCURRENT_TRADES = int(payload.spot_max_concurrent_trades)
+        MAX_FUTURES_CONCURRENT_TRADES = int(payload.futures_max_concurrent_trades)
+        log_event("SETTINGS", "حد Spot {} · حد Futures {} · حجم الصفقة {} USDT".format(
+            MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES, TRADE_AMOUNT_USDT))
+        return {
+            'ok': True,
+            'trade_amount_usdt': TRADE_AMOUNT_USDT,
+            'spot_max_concurrent_trades': MAX_SPOT_CONCURRENT_TRADES,
+            'futures_max_concurrent_trades': MAX_FUTURES_CONCURRENT_TRADES,
+        }
     finally:
         scan_lock.release()
 

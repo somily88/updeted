@@ -2,6 +2,8 @@
 
 بوت تداول Spot تجريبي لـ Binance مع لوحة تحكم عربية، ومراقبة الأزواج BTC/USDT وETH/USDT وBNB/USDT وSOL/USDT وXRP/USDT وADA/USDT.
 
+حد الصفقات مستقل لكل سوق: حتى 6 صفقات Spot و6 مراكز Futures Demo. يمكن ضبط كل حد على حدة عبر `MAX_SPOT_CONCURRENT_TRADES` و`MAX_FUTURES_CONCURRENT_TRADES` أو إعدادات التطبيق.
+
 ## تشغيل محلي عبر Docker
 
 1. انسخ `.env.example` إلى ملف باسم `.env`.

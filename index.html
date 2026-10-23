@@ -321,7 +321,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
           <div class="account-balance" id="spot-balance">—</div>
           <div class="account-metrics">
             <div><small>الرصيد المتاح</small><b id="spot-free">—</b></div>
-            <div><small>صفقات مفتوحة</small><b id="spot-open">—</b></div>
+            <div><small>صفقات مفتوحة · حد Spot</small><b id="spot-open">— / 6</b></div>
             <div><small>الربح المحقق</small><b id="spot-pnl">—</b></div>
           </div>
         </article>
@@ -333,7 +333,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
           <div class="account-balance" id="futures-balance">—</div>
           <div class="account-metrics">
             <div><small>الرصيد المتاح</small><b id="futures-free">—</b></div>
-            <div><small>مراكز مفتوحة</small><b id="futures-open">—</b></div>
+            <div><small>مراكز مفتوحة · حد Futures</small><b id="futures-open">— / 6</b></div>
             <div><small>الربح المحقق</small><b id="futures-pnl">—</b></div>
           </div>
           <div class="account-symbols" id="futures-symbols"></div>
@@ -442,13 +442,13 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     }).join('');
   }
   function renderAccounts(d) {
-    var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {};
+    var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {}, settings = d.settings || {};
     var positions = Array.isArray(d.positions) ? d.positions : [];
     var spotPositions = positions.filter(function(p){ return p.market_type !== 'Futures Demo'; });
     var symbols = Array.isArray(future.symbols) ? future.symbols : [];
     el('spot-balance').textContent = usd(wallet.total, 2);
     el('spot-free').textContent = usd(wallet.free, 2);
-    el('spot-open').textContent = String(spotPositions.length);
+    el('spot-open').textContent = spotPositions.length + ' / ' + (settings.spot_max_concurrent_trades || 6);
     el('spot-pnl').textContent = usd(stats.realized_total, 2);
     el('spot-pnl').className = pnlClass(stats.realized_total);
     var connected = !!future.connected;
@@ -457,7 +457,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     state.className = 'account-state' + (connected ? ' online' : '');
     el('futures-balance').textContent = connected ? usd(future.balance, 2) : '—';
     el('futures-free').textContent = connected ? usd(future.free_balance, 2) : '—';
-    el('futures-open').textContent = String(future.open_positions || 0);
+    el('futures-open').textContent = (future.open_positions || 0) + ' / ' + (settings.futures_max_concurrent_trades || 6);
     el('futures-pnl').textContent = usd(future.realized_pnl, 2);
     el('futures-pnl').className = pnlClass(future.realized_pnl);
     el('futures-symbols').innerHTML = symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>';
