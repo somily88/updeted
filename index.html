@@ -59,7 +59,7 @@ button { font: inherit; color: inherit; }
 .btn-scan:hover { background: var(--lime); color: #000; }
 
 /* ---------- layout ---------- */
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: 36px; align-items: start; }
+.grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:24px; align-items:start; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .flat { color: var(--muted); }
@@ -81,7 +81,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .range.active { border-color: var(--lime); color: var(--text); }
 
 /* ---------- chart ---------- */
-.chart-card { background: var(--card); border-radius: 22px; padding: 0; position: relative; height: 380px; overflow: hidden; margin-bottom: 16px; }
+.chart-card { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:0; position:relative; height:310px; overflow:hidden; margin-bottom:24px; }
 #chart { position: absolute; inset: 0; touch-action: pan-y; }
 #chart svg { display: block; width: 100%; height: 100%; }
 .chart-empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--muted); font-size: 15px; line-height: 1.5; }
@@ -97,6 +97,34 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .stat > small { display: block; margin-bottom: 10px; }
 .stat b { display: block; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; margin-bottom: 8px; }
 .stat .sub { font-size: 12px; color: var(--muted); }
+
+/* ---------- account cards ---------- */
+.accounts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0 0 22px; }
+.account-card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; min-width:0; }
+.account-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
+.account-name { display:flex; align-items:center; gap:10px; font-size:16px; font-weight:600; }
+.account-icon { width:34px; height:34px; border-radius:11px; display:grid; place-items:center; background:var(--card-hi); color:var(--lime); font-size:13px; font-weight:700; direction:ltr; }
+.account-state { font-size:12px; color:var(--muted); }
+.account-state::before { content:''; display:inline-block; width:7px; height:7px; margin-inline-end:7px; border-radius:50%; background:#e8a33d; }
+.account-state.online::before { background:var(--lime); box-shadow:0 0 8px var(--lime); }
+.account-balance { font-size:28px; font-weight:600; letter-spacing:-.02em; margin-bottom:15px; direction:ltr; text-align:right; }
+.account-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; border-top:1px solid var(--line); padding-top:13px; }
+.account-metrics small { display:block; margin-bottom:4px; font-size:11px; }
+.account-metrics b { font-size:14px; font-weight:500; }
+.account-symbols { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
+.account-symbols span { padding:5px 8px; border-radius:8px; border:1px solid var(--line); color:#c8c8c8; font-size:11px; direction:ltr; }
+.market-group { grid-column:1/-1; min-width:0; }
+.market-group-head { display:flex; justify-content:space-between; align-items:center; margin:3px 0 10px; }
+.market-group-head h3 { font-size:15px; font-weight:600; }
+.market-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+.market-group + .market-group { margin-top:10px; }
+.tx-head small { display:block; margin-top:3px; }
+@media (max-width:720px) {
+  .accounts { grid-template-columns:1fr; }
+  .account-metrics { gap:6px; }
+  .account-metrics b { font-size:13px; }
+  .market-cards { grid-template-columns:1fr; }
+}
 
 /* ---------- markets ---------- */
 .section-title { font-size: 22px; font-weight: 500; margin-bottom: 14px; letter-spacing: -0.01em; }
@@ -134,7 +162,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 }
 
 /* ---------- right column ---------- */
-.risk { margin-bottom: 34px; }
+.risk { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:20px; margin-bottom:20px; }
 .risk-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .risk h2 { font-size: 30px; font-weight: 500; line-height: 1.08; letter-spacing: -0.025em; }
 .risk-note { text-align: end; font-size: 12px; color: var(--muted); line-height: 1.4; }
@@ -148,7 +176,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .tx-head-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
 .tx-head-row h3 { font-size: 17px; font-weight: 500; }
 .tx-head-row span { font-size: 14px; color: var(--lime); }
-.txs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.txs { display:grid; grid-template-columns:1fr; gap:10px; }
 .tx { background: var(--card); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 22px; min-height: 172px; }
 .tx-head { display: flex; align-items: center; gap: 10px; }
 .tx-head b { display: block; font-size: 13px; font-weight: 500; }
@@ -217,15 +245,9 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
         </div>
       </div>
 
-      <div class="chart-card">
-        <div id="chart" dir="ltr"></div>
-        <div class="chart-empty" id="chart-empty">بانتظار بيانات المحفظة من البوت.</div>
-        <div class="tip" id="tip" dir="ltr"></div>
-      </div>
-
       <div class="stats">
         <div class="stat">
-          <small>الربح المحقق</small>
+          <small>الربح المحقق · Spot</small>
           <b id="realized-pl">—</b>
           <span class="sub" id="realized-sub">—</span>
         </div>
@@ -246,10 +268,44 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
         </div>
       </div>
 
-      <h2 class="section-title">مراقبة السوق</h2>
+      <section class="accounts" id="accounts" aria-label="ملخص المنصات">
+        <article class="account-card">
+          <div class="account-top">
+            <div class="account-name"><span class="account-icon">S</span> Binance Spot</div>
+            <span class="account-state online" id="spot-state">متصل</span>
+          </div>
+          <div class="account-balance" id="spot-balance">—</div>
+          <div class="account-metrics">
+            <div><small>الرصيد المتاح</small><b id="spot-free">—</b></div>
+            <div><small>صفقات مفتوحة</small><b id="spot-open">—</b></div>
+            <div><small>الربح المحقق</small><b id="spot-pnl">—</b></div>
+          </div>
+        </article>
+        <article class="account-card">
+          <div class="account-top">
+            <div class="account-name"><span class="account-icon">F</span> Binance Futures Demo</div>
+            <span class="account-state" id="futures-state">جارٍ التحقق</span>
+          </div>
+          <div class="account-balance" id="futures-balance">—</div>
+          <div class="account-metrics">
+            <div><small>الرصيد المتاح</small><b id="futures-free">—</b></div>
+            <div><small>مراكز مفتوحة</small><b id="futures-open">—</b></div>
+            <div><small>الربح المحقق</small><b id="futures-pnl">—</b></div>
+          </div>
+          <div class="account-symbols" id="futures-symbols"></div>
+        </article>
+      </section>
+
+      <div class="chart-card">
+        <div id="chart" dir="ltr"></div>
+        <div class="chart-empty" id="chart-empty">بانتظار بيانات المحفظة من البوت.</div>
+        <div class="tip" id="tip" dir="ltr"></div>
+      </div>
+
+      <h2 class="section-title">الأسواق والإشارات</h2>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
 
-      <h2 class="section-title" style="margin-top:36px">سجل الصفقات المغلقة</h2>
+      <h2 class="section-title" style="margin-top:36px">سجل الصفقات</h2>
       <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
 
       <h2 class="section-title" style="margin-top:36px">الأخبار</h2>
@@ -260,8 +316,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     <aside>
       <section class="risk">
         <div class="risk-head">
-          <h2>تعرّض<br>المحفظة</h2>
-          <div class="risk-note">الرصيد المتاح<br><b id="free-usdt" style="color:var(--text);font-weight:600">—</b></div>
+          <h2>تعرّض<br>Spot</h2>
+          <div class="risk-note">رصيد Spot المتاح<br><b id="free-usdt" style="color:var(--text);font-weight:600">—</b></div>
         </div>
         <div class="meter" id="exposure-meter" role="img" aria-label="تعرّض المحفظة">
           <div class="meter-fill" id="meter-fill" style="width:0%"></div>
@@ -284,8 +340,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 <script>
 (function () {
   var busy = false;
-  var labels = { BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: 'X', ADA: '₳', PAXG: 'Au' };
-  var colors = { BTC: '#f7931a', ETH: '#627eea', BNB: '#f3ba2f', SOL: '#9945ff', XRP: '#346aa9', ADA: '#3468d4', PAXG: '#c6a85b' };
+  var labels = { BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: 'X', ADA: '₳', PAXG: 'Au', XAU: 'Au', CL: 'O', BZ: 'O' };
+  var colors = { BTC: '#f7931a', ETH: '#627eea', BNB: '#f3ba2f', SOL: '#9945ff', XRP: '#346aa9', ADA: '#3468d4', PAXG: '#c6a85b', XAU: '#c6a85b', CL: '#5886a8', BZ: '#5886a8' };
   function el(id) { return document.getElementById(id); }
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]; }); }
   function num(v, digits) { var n = Number(v); return Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '—'; }
@@ -301,20 +357,27 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
   function renderMarkets(markets) {
     var host = el('markets');
     if (!Array.isArray(markets) || !markets.length) { host.innerHTML = '<div class="empty">لا توجد بيانات سوق حتى الآن.</div>'; return; }
-    host.innerHTML = markets.map(function (m) {
+    function card(m) {
       var c = coin(m.symbol), age = m.age_seconds, stale = m.ready && age != null && age > 150;
-      var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك صفقة' : (m.signal ? 'إشارة شراء' : 'مراقبة')));
+      var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? 'إشارة شراء' : 'مراقبة')));
       var statusClass = stale ? 'pill-off' : (m.ready && (m.signal || m.in_position) ? 'pill-on' : '');
       return '<article class="mkt' + (stale ? ' stale' : '') + '"><div class="mkt-head">' +
         '<span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span>' +
-        '<div class="mkt-title"><b dir="ltr">' + esc(m.symbol) + '</b><small>' + (m.ready ? 'Binance · ' + esc(m.timeframe || '') : 'Binance · لم يصل فحص بعد') + '</small></div>' +
+        '<div class="mkt-title"><b dir="ltr">' + esc(m.symbol) + '</b><small>' + esc(m.strategy_label || (m.market_type === 'Futures Demo' ? 'Futures Demo' : 'Binance Spot')) + ' · ' + (m.ready ? esc(m.timeframe || '') : 'بانتظار الفحص') + '</small></div>' +
         '<span class="pill ' + statusClass + '">' + status + '</span></div>' +
-        '<div class="mkt-price" dir="ltr">' + (m.ready ? usd(m.price, m.price < 1 ? 5 : 2) : '—') + '</div>' +
+        '<div class="mkt-price" dir="ltr">' + (m.ready && m.price != null ? usd(m.price, m.price < 1 ? 5 : 2) : '—') + '</div>' +
         '<div class="mkt-grid"><div><small>RSI</small><b dir="ltr">' + (m.ready ? num(m.rsi, 1) : '—') + '</b></div>' +
         '<div><small>EMA</small><b dir="ltr">' + (m.ready ? num(m.ema, 2) : '—') + '</b></div>' +
         '<div><small>MACD</small><b dir="ltr" class="' + (Number(m.hist) >= 0 ? 'up' : 'down') + '">' + (m.ready ? num(m.hist, 4) : '—') + '</b></div></div>' +
-        '<div class="freshness">' + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : 'سيظهر السعر والمؤشر بعد أول فحص') + '</div></article>';
-    }).join('');
+        '<div class="freshness">' + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : esc(m.reason || 'سيظهر السعر بعد أول فحص')) + '</div></article>';
+    }
+    var spot = markets.filter(function(m){ return m.market_type !== 'Futures Demo'; });
+    var futures = markets.filter(function(m){ return m.market_type === 'Futures Demo'; });
+    function group(title, items, badge) {
+      if (!items.length) return '';
+      return '<section class="market-group"><div class="market-group-head"><h3>' + title + '</h3><small>' + badge + ' · ' + items.length + '</small></div><div class="market-cards">' + items.map(card).join('') + '</div></section>';
+    }
+    host.innerHTML = group('عملات Spot', spot, 'Binance Spot') + group('عقود Futures Demo', futures, 'حساب تجريبي');
   }
   function renderPositions(positions) {
     var host = el('tx-cards');
@@ -325,6 +388,27 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + (p.simulated ? 'محاكاة' : 'منفّذة على Binance') + '</small></div></div>' +
         '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
     }).join('');
+  }
+  function renderAccounts(d) {
+    var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {};
+    var positions = Array.isArray(d.positions) ? d.positions : [];
+    var spotPositions = positions.filter(function(p){ return p.market_type !== 'Futures Demo'; });
+    var symbols = Array.isArray(future.symbols) ? future.symbols : [];
+    el('spot-balance').textContent = usd(wallet.total, 2);
+    el('spot-free').textContent = usd(wallet.free, 2);
+    el('spot-open').textContent = String(spotPositions.length);
+    el('spot-pnl').textContent = usd(stats.realized_total, 2);
+    el('spot-pnl').className = pnlClass(stats.realized_total);
+    var connected = !!future.connected;
+    var state = el('futures-state');
+    state.textContent = connected ? (future.trading_enabled ? 'متصل · التنفيذ مفعّل' : 'متصل · محاكاة') : 'بانتظار مفاتيح Futures Demo';
+    state.className = 'account-state' + (connected ? ' online' : '');
+    el('futures-balance').textContent = connected ? usd(future.balance, 2) : '—';
+    el('futures-free').textContent = connected ? usd(future.free_balance, 2) : '—';
+    el('futures-open').textContent = String(future.open_positions || 0);
+    el('futures-pnl').textContent = usd(future.realized_pnl, 2);
+    el('futures-pnl').className = pnlClass(future.realized_pnl);
+    el('futures-symbols').innerHTML = symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>';
   }
   function renderHistory(trades) {
     var host = el('trade-history');
@@ -374,6 +458,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     el('exposure-pct').textContent = num(exposure, 1) + '%';
     el('exposure-note').textContent = exposure > 70 ? 'تعرّض مرتفع' : (exposure > 30 ? 'تعرّض متوسط' : 'تعرّض منخفض');
     el('exposure-meter').setAttribute('aria-label', num(exposure, 1) + '% من المحفظة في صفقات مفتوحة');
+    renderAccounts(d);
     renderMarkets(d.markets || []);
     renderPositions(d.positions || []);
     renderHistory(d.trades || []);
