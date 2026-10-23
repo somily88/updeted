@@ -409,6 +409,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     if (!Array.isArray(markets)) markets = [];
     function card(m) {
       var c = coin(m.symbol), age = m.age_seconds, stale = m.ready && age != null && age > 150;
+      var strength = m.signal && m.signal_strength != null ? 'التقييم الفني ' + esc(m.signal_strength) + '/100 · ' : '';
       var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'مراقبة')));
       var statusClass = stale ? 'pill-off' : (m.ready && (m.signal || m.in_position) ? 'pill-on' : '');
       return '<article class="mkt' + (stale ? ' stale' : '') + '"><div class="mkt-head">' +
@@ -419,7 +420,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
         '<div class="mkt-grid"><div><small>RSI</small><b dir="ltr">' + (m.ready ? num(m.rsi, 1) : '—') + '</b></div>' +
         '<div><small>EMA</small><b dir="ltr">' + (m.ready ? num(m.ema, 2) : '—') + '</b></div>' +
         '<div><small>MACD</small><b dir="ltr" class="' + (Number(m.hist) >= 0 ? 'up' : 'down') + '">' + (m.ready ? num(m.hist, 4) : '—') + '</b></div></div>' +
-        '<div class="freshness">' + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : esc(m.reason || 'سيظهر السعر بعد أول فحص')) + '</div></article>';
+        '<div class="freshness">' + strength + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : esc(m.reason || 'سيظهر السعر بعد أول فحص')) + '</div></article>';
     }
     var spot = markets.filter(function(m){ return m.market_type !== 'Futures Demo'; });
     var futures = markets.filter(function(m){ return m.market_type === 'Futures Demo'; });
