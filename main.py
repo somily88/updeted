@@ -154,6 +154,7 @@ def init_db():
             ('trailing_distance', 'REAL'),
             ('entries', 'INTEGER NOT NULL DEFAULT 1'),
             ('last_add_candle', 'TEXT'),
+            ('add_attempted', 'INTEGER NOT NULL DEFAULT 0'),
         ]:
             existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
             if column not in existing:
@@ -366,13 +367,14 @@ def save_position(symbol, pos):
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
             (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
-             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
               pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
               pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
               pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance'),
-              max(1, int(pos.get('entries', 1))), pos.get('last_add_candle')))
+              max(1, int(pos.get('entries', 1))), pos.get('last_add_candle'),
+              1 if pos.get('add_attempted') else 0))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -396,7 +398,7 @@ def load_positions():
         cursor = conn.cursor()
         cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
                           simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
-                          entries, last_add_candle
+                          entries, last_add_candle, add_attempted
                           FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
@@ -405,6 +407,7 @@ def load_positions():
                 'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
                 'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
                 'entries': max(1, int(r[12] or 1)), 'last_add_candle': r[13],
+                'add_attempted': bool(r[14]),
             }
         conn.close()
     except Exception as e:
@@ -1027,6 +1030,8 @@ def automated_market_scan():
                     setup.get('signal_strength', 0), setup['reason']))
 
                 spot_open_slots = sum(max(1, int(p.get('entries', 1))) for p in active_positions.values())
+                spot_open_slots += sum(1 for p in active_positions.values()
+                                       if p.get('add_attempted') and int(p.get('entries', 1)) < 2)
                 if symbol not in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
                     continue
                 if symbol in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
@@ -1074,7 +1079,7 @@ def automated_market_scan():
                 is_add = pos is not None
                 if is_add:
                     entries = max(1, int(pos.get('entries', 1)))
-                    if entries >= 2:
+                    if entries >= 2 or pos.get('add_attempted'):
                         continue
                     if setup['strategy'] != pos.get('strategy'):
                         print("⏸️ [PYRAMID] {} تجاهل: الاستراتيجية الحالية مختلفة عن صفقة المركز".format(symbol))
@@ -1095,6 +1100,7 @@ def automated_market_scan():
                     # Persist the candle before sending the market order so a timeout
                     # cannot trigger a duplicate add on every scanner pass.
                     pos['last_add_candle'] = str(candle)
+                    pos['add_attempted'] = True
                     save_position(symbol, pos)
                     last_entry_candle[symbol] = candle
                     try:
@@ -1102,7 +1108,7 @@ def automated_market_scan():
                     except Exception as e:
                         print("❌ [PYRAMID ERROR] {}: {}".format(symbol, e))
                         log_event("ERR", "إضافة {}: {}".format(symbol, str(e)[:80]))
-                        send_telegram_message("❌ <b>فشلت إضافة صفقة {}</b>\\n{}".format(symbol, html.escape(str(e))))
+                        send_telegram_message("⚠️ <b>تعذر تأكيد إضافة {}</b>\\nلن يعيد البوت المحاولة تلقائيًا لتجنب تكرار أمر قد يكون وصل إلى Binance. راجع سجل الأوامر في Demo.".format(symbol))
                         continue
 
                     total_amount = float(pos['amount']) + float(fill['amount'])
@@ -1224,7 +1230,8 @@ def api_state():
             'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
             'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', ''),
-            'entries': max(1, int(pos.get('entries', 1)))
+            'entries': max(1, int(pos.get('entries', 1))),
+            'add_pending': bool(pos.get('add_attempted') and int(pos.get('entries', 1)) < 2)
         })
 
     markets = []
@@ -1286,7 +1293,9 @@ def api_state():
         except Exception:
             pass
 
-    spot_open_trade_slots = sum(max(1, int(pos.get('entries', 1))) for pos in active_positions.values())
+    spot_open_trade_slots = sum(max(1, int(pos.get('entries', 1))) for pos in active_positions.values()) + sum(
+        1 for pos in active_positions.values()
+        if pos.get('add_attempted') and int(pos.get('entries', 1)) < 2)
     future_state = futures_engine.public_state() if futures_engine else {
         'connected': False, 'environment': 'demo', 'trading_enabled': False, 'symbols': [],
         'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
