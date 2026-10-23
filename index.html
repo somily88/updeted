@@ -139,7 +139,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .market-group + .market-group { margin-top:10px; }
 .tx-head small { display:block; margin-top:3px; }
 .futures-market-section { margin-top:22px; }
-.futures-market-section .market-cards { grid-template-columns:1fr; }
+.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
 .futures-market-section .mkt { padding:14px; }
 .futures-market-section .mkt-price { font-size:24px; }
 .futures-market-section .mkt-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
@@ -335,6 +335,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
       <h2 class="section-title">الأسواق والإشارات</h2>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
 
+      <section class="futures-market-section" aria-label="عقود Futures Demo">
+        <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
+        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
+      </section>
+
 
     </main>
 
@@ -365,10 +370,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
         <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
       </section>
 
-      <section class="futures-market-section" aria-label="عقود Futures Demo">
-        <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
-        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
-      </section>
+
     </aside>
   </div>
 </div>
