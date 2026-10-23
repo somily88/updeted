@@ -1,4 +1,7 @@
-"""Deterministic multi-timeframe spot strategy selector for Binance Demo."""
+"""Deterministic algorithmic strategy selector for Binance Demo.
+
+Signal strength is a heuristic ranking, not a probability of profit.
+"""
 from math import sqrt
 
 STRATEGY_RISK = {
@@ -83,7 +86,7 @@ def _view(candles):
     }
 
 
-def _candidate(name, timeframe, v, reason, direction="long"):
+def _candidate(name, timeframe, v, reason, direction="long", signal_strength=60.0):
     is_short = direction == "short"
     return {
         "signal": True, "strategy": name, "strategy_label": STRATEGY_LABELS[name],
@@ -91,6 +94,7 @@ def _candidate(name, timeframe, v, reason, direction="long"):
         "rsi": v["rsi"], "ema": v["ema50"], "hist": v["hist"],
         "ref_close": v["ref_close"],
         "candle_ts": v["candles"][-1][0],
+        "signal_strength": round(max(0.0, min(100.0, float(signal_strength))), 1),
         "conds": {
             "ema": v["ref_close"] < v["ema50"] if is_short else v["ref_close"] > v["ema50"],
             "macd": v["hist"] <= 0 if is_short else v["hist"] >= 0,
@@ -98,23 +102,45 @@ def _candidate(name, timeframe, v, reason, direction="long"):
         },
     }
 
+
+def _select_best(candidates):
+    """Choose the strongest qualifying setup, with a deterministic tie break."""
+    if not candidates:
+        return None
+    return max(
+        candidates,
+        key=lambda item: (
+            float(item.get("signal_strength", 0.0)),
+            STRATEGY_RISK[item["strategy"]]["target_atr"]
+            / STRATEGY_RISK[item["strategy"]]["stop_atr"],
+        ),
+    )
+
 def _trend_candidate(exchange, symbol, timeframe, cache, direction="long"):
     v = _view(_load(exchange, symbol, timeframe, cache))
     if not v or not v["atr"]:
         return None
     previous_hist = _macd_hist(v["closes"][:-1])
+    unit = max(v["atr"], v["ref_close"] * 0.0005)
+    spread = abs(v["ema20"] - v["ema50"]) / unit
+    slope = abs(v["ema50"] - v["ema50_old"]) / unit
+    momentum = abs(v["hist"]) / unit
+    strength = min(96.0, 58.0 + min(15.0, spread * 4.0)
+                   + min(14.0, slope * 8.0) + min(9.0, momentum * 20.0))
     if direction == "short":
         falling = v["ema50"] < v["ema50_old"]
-        momentum = v["hist"] <= 0 or v["hist"] < previous_hist
+        momentum_ok = v["hist"] <= 0 or v["hist"] < previous_hist
         if (v["ref_close"] < v["ema50"] and v["ema20"] < v["ema50"]
-                and falling and momentum and 30 <= v["rsi"] <= 55):
-            return _candidate("trend", timeframe, v, "السعر تحت EMA50 والاتجاه والزخم هابطان", "short")
+                and falling and momentum_ok and 30 <= v["rsi"] <= 55):
+            return _candidate("trend", timeframe, v, "السعر تحت EMA50 والاتجاه والزخم هابطان",
+                              "short", strength)
         return None
     rising = v["ema50"] > v["ema50_old"]
-    momentum = v["hist"] >= 0 or v["hist"] > previous_hist
+    momentum_ok = v["hist"] >= 0 or v["hist"] > previous_hist
     if (v["ref_close"] > v["ema50"] and v["ema20"] > v["ema50"]
-            and rising and momentum and 45 <= v["rsi"] <= 70):
-        return _candidate("trend", timeframe, v, "السعر فوق EMA50 والاتجاه والزخم صاعدان", "long")
+            and rising and momentum_ok and 45 <= v["rsi"] <= 70):
+        return _candidate("trend", timeframe, v, "السعر فوق EMA50 والاتجاه والزخم صاعدان",
+                          "long", strength)
     return None
 
 def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
@@ -126,14 +152,29 @@ def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
     average_volume = sum(c[5] for c in previous) / len(previous)
     last = candles[-1]
     volume_ok = average_volume > 0 and last[5] >= average_volume * 1.5
-    if direction == "short":
-        previous_low = min(c[3] for c in previous)
-        if last[4] < previous_low and last[4] < last[1] and volume_ok and v["rsi"] > 25:
-            return _candidate("breakout", timeframe, v, "إغلاق تحت قاع 20 شمعة مع حجم تداول مرتفع", "short")
+    if not volume_ok:
         return None
-    previous_high = max(c[2] for c in previous)
-    if last[4] > previous_high and last[4] > last[1] and volume_ok and v["rsi"] < 75:
-        return _candidate("breakout", timeframe, v, "إغلاق فوق قمة 20 شمعة مع حجم تداول مرتفع", "long")
+    volume_ratio = last[5] / average_volume
+    if direction == "short":
+        level = min(c[3] for c in previous)
+        if last[4] < level and last[4] < last[1] and v["rsi"] > 25:
+            extension = abs(last[4] - level) / v["atr"]
+            strength = (58.0 + min(20.0, max(0.0, (volume_ratio - 1.5) * 12.0))
+                        + min(12.0, max(0.0, 1.0 - extension) * 12.0)
+                        - min(18.0, max(0.0, extension - 1.0) * 8.0))
+            return _candidate("breakout", timeframe, v,
+                              "إغلاق تحت قاع 20 شمعة مع حجم تداول مرتفع",
+                              "short", strength)
+        return None
+    level = max(c[2] for c in previous)
+    if last[4] > level and last[4] > last[1] and v["rsi"] < 75:
+        extension = abs(last[4] - level) / v["atr"]
+        strength = (58.0 + min(20.0, max(0.0, (volume_ratio - 1.5) * 12.0))
+                    + min(12.0, max(0.0, 1.0 - extension) * 12.0)
+                    - min(18.0, max(0.0, extension - 1.0) * 8.0))
+        return _candidate("breakout", timeframe, v,
+                          "إغلاق فوق قمة 20 شمعة مع حجم تداول مرتفع",
+                          "long", strength)
     return None
 
 def _range_ok(v):
@@ -157,36 +198,53 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
     if direction == "short":
         if (prev_upper is not None and upper is not None and candles[-2][2] >= prev_upper
                 and prev_rsi >= 65 and last[4] < candles[-2][4] and last[4] < upper):
-            return _candidate("bounce", timeframe, v, "رفض مؤكد من النطاق العلوي مع RSI مرتفع", "short")
+            reversal_atr = abs(candles[-2][4] - last[4]) / v["atr"]
+            strength = min(95.0, 56.0 + min(22.0, (prev_rsi - 65.0) * 1.1)
+                           + min(16.0, reversal_atr * 10.0))
+            return _candidate("bounce", timeframe, v, "رفض مؤكد من النطاق العلوي مع RSI مرتفع",
+                              "short", strength)
         return None
     if (prev_lower is not None and lower is not None and candles[-2][3] <= prev_lower
             and prev_rsi <= 35 and last[4] > candles[-2][4] and last[4] > lower):
-        return _candidate("bounce", timeframe, v, "ارتداد مؤكد من النطاق السفلي مع RSI منخفض", "long")
+        reversal_atr = abs(last[4] - candles[-2][4]) / v["atr"]
+        strength = min(95.0, 56.0 + min(22.0, (35.0 - prev_rsi) * 1.1)
+                       + min(16.0, reversal_atr * 10.0))
+        return _candidate("bounce", timeframe, v, "ارتداد مؤكد من النطاق السفلي مع RSI منخفض",
+                          "long", strength)
     return None
 
 def evaluate_symbol(exchange, symbol, allow_short=False):
-    """Select a deterministic multi-timeframe setup; short signals are opt-in for Futures Demo."""
+    """Evaluate every strategy/timeframe and return the strongest confirmed setup."""
     directions = ("long", "short") if allow_short else ("long",)
     cache = {}
+    candidates = []
+
+    # Fast breakouts: 1h/15m. Rank both directions instead of taking the first match.
     for timeframe in ("1h", "15m"):
         for direction in directions:
             found = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
             if found:
-                return found
+                candidates.append(found)
 
+    # Swing trend following: daily/4h.
     for timeframe in ("1d", "4h"):
         for direction in directions:
             found = _trend_candidate(exchange, symbol, timeframe, cache, direction)
             if found:
-                return found
+                candidates.append(found)
 
+    # Mean reversion is considered only when the higher-timeframe regime is ranging.
     range_view = _view(_load(exchange, symbol, "4h", cache))
     if _range_ok(range_view):
         for timeframe in ("15m", "5m"):
             for direction in directions:
                 found = _bounce_candidate(exchange, symbol, timeframe, cache, direction)
                 if found:
-                    return found
+                    candidates.append(found)
+
+    selected = _select_best(candidates)
+    if selected:
+        return selected
 
     v = _view(_load(exchange, symbol, "15m", cache))
     if v:
@@ -195,11 +253,14 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
             "direction": "flat", "timeframe": "15m", "reason": "لا تتوفر شروط دخول مكتملة",
             "atr": v["atr"], "rsi": v["rsi"], "ema": v["ema50"], "hist": v["hist"],
             "ref_close": v["ref_close"], "candle_ts": v["candles"][-1][0],
+            "signal_strength": 0.0,
             "conds": {"ema": False, "macd": False, "rsi": False},
         }
     return {
         "signal": False, "strategy": "wait", "strategy_label": "انتظار",
         "direction": "flat", "timeframe": "15m", "reason": "بيانات غير كافية", "atr": 0.0,
         "rsi": 50.0, "ema": 0.0, "hist": 0.0, "ref_close": 0.0,
-        "candle_ts": None, "conds": {"ema": False, "macd": False, "rsi": False},
+        "candle_ts": None, "signal_strength": 0.0,
+        "conds": {"ema": False, "macd": False, "rsi": False},
     }
+
