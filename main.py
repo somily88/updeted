@@ -70,6 +70,9 @@ UNSUPPORTED_SYMBOLS = {}
 FORCE_TEST_TRADE = os.getenv("FORCE_TEST_TRADE", "false").strip().lower() == "true"
 TEST_TRADE_SECONDS = 120
 test_trade_done = False
+FORCE_FUTURES_TEST_TRADE = os.getenv("FORCE_FUTURES_TEST_TRADE", "false").strip().lower() == "true"
+FORCE_FUTURES_TEST_ID = os.getenv("FORCE_FUTURES_TEST_ID", "").strip()
+FORCE_FUTURES_TEST_SIDE = os.getenv("FORCE_FUTURES_TEST_SIDE", "long").strip().lower()
 
 # --- فلتر الأخبار: يوقف الشراء الجديد فقط عند أخبار سلبية قوية (لا يغيّر الاستراتيجية ولا يغلق صفقات مفتوحة) ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
@@ -1090,7 +1093,13 @@ def automated_market_scan():
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
-            futures_engine.scan(TRADE_AMOUNT_USDT, lambda: len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES)
+            futures_engine.scan(
+                TRADE_AMOUNT_USDT,
+                lambda: len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES,
+                force_test_trade=FORCE_FUTURES_TEST_TRADE,
+                force_test_id=FORCE_FUTURES_TEST_ID,
+                force_test_side=FORCE_FUTURES_TEST_SIDE,
+            )
         record_equity()
     except Exception as e:
         print("Error in automated market scan: {}".format(e))

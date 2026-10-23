@@ -70,6 +70,10 @@ class BinanceFuturesDemo:
             trade_columns = {row[1] for row in conn.execute("PRAGMA table_info(futures_trades)")}
             if "side" not in trade_columns:
                 conn.execute("ALTER TABLE futures_trades ADD COLUMN side TEXT NOT NULL DEFAULT 'long'")
+            conn.execute("""CREATE TABLE IF NOT EXISTS futures_test_runs (
+                test_id TEXT PRIMARY KEY, state TEXT NOT NULL, created_at TEXT NOT NULL,
+                symbol TEXT, side TEXT, order_id TEXT, error TEXT
+            )""")
 
     def _load_positions(self):
         try:
@@ -183,6 +187,11 @@ class BinanceFuturesDemo:
                 price = float(self.exchange.fetch_ticker(symbol)["last"])
                 self.snapshot[symbol] = {"symbol": symbol, "price": price, "ready": True,
                                          "in_position": True, "direction": side}
+                if pos.get("strategy") == "forced_test":
+                    opened = datetime.datetime.strptime(pos["opened_at"], "%Y-%m-%d %H:%M:%S")
+                    if (datetime.datetime.now() - opened).total_seconds() >= 120:
+                        self._close(symbol, pos, price, "انتهاء اختبار Futures")
+                        continue
                 if side == "short":
                     pos["highest_price"] = min(pos["highest_price"], price)
                     trailing_stop = pos["highest_price"] + pos["trailing_distance"]
@@ -203,10 +212,140 @@ class BinanceFuturesDemo:
             except Exception as exc:
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
 
-    def scan(self, trade_amount_usdt, can_open):
+    def _claim_test_run(self, test_id):
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            cursor = conn.execute("""INSERT OR IGNORE INTO futures_test_runs
+                (test_id, state, created_at) VALUES (?, 'starting', ?)""", (test_id, now))
+            return cursor.rowcount == 1
+
+    def _finish_test_run(self, test_id, state, symbol=None, side=None, order_id=None, error=None):
+        with self._connect() as conn:
+            conn.execute("""UPDATE futures_test_runs SET state=?, symbol=?, side=?, order_id=?, error=?
+                WHERE test_id=?""", (state, symbol, side, order_id, error, test_id))
+
+    def _run_forced_test(self, trade_amount_usdt, can_open, test_id, side):
+        if not test_id:
+            self.on_event("WARN", "اختبار Futures مفعّل بلا FORCE_FUTURES_TEST_ID؛ لم يُرسل أي أمر")
+            return
+        if side not in ("long", "short"):
+            self.on_event("ERR", "اتجاه اختبار Futures غير صالح؛ استخدم long أو short")
+            return
+        if not can_open():
+            self.on_event("WARN", "تعذر اختبار Futures: بلغ حد المراكز المفتوحة")
+            return
+        if self.positions:
+            self.on_event("WARN", "تعذر الاختبار: أغلق مراكز Futures الحالية أولًا")
+            return
+        symbol = next((s for s in self.symbols if self.exchange.market(s).get("id") == "XAUUSDT"), self.symbols[0])
+        if symbol in self.positions:
+            self.on_event("WARN", "تخطي اختبار Futures: يوجد مركز مُدار على {}".format(symbol))
+            return
+
+        claimed = False
+        order_id = None
+        try:
+            market = self.exchange.market(symbol)
+            external_positions = self.exchange.fetch_positions([symbol])
+            if any(abs(float(p.get("contracts") or 0)) > 0 for p in external_positions):
+                self.on_event("WARN", "تخطي اختبار Futures: يوجد مركز غير مُدار على {}".format(symbol))
+                return
+            account = self.balance(ttl=0)
+            if account.get("error"):
+                raise RuntimeError("تعذرت قراءة رصيد Futures Demo")
+            amount_usdt = float(trade_amount_usdt)
+            if amount_usdt <= 0 or account["free"] < amount_usdt:
+                raise ValueError("الرصيد المتاح أقل من قيمة صفقة الاختبار")
+            price = float(self.exchange.fetch_ticker(symbol)["last"])
+            multiplier = float(market.get("contractSize") or 1)
+            contracts = float(self.exchange.amount_to_precision(symbol, amount_usdt / (price * multiplier)))
+            notional = contracts * multiplier * price
+            minimum = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
+            if contracts <= 0 or notional < minimum:
+                raise ValueError("قيمة الاختبار أقل من الحد الأدنى لهذا العقد")
+
+            if not self._claim_test_run(test_id):
+                self.on_event("WARN", "اختبار Futures بهذا المعرّف نُفذ أو بدأ سابقًا؛ لن يتكرر")
+                return
+            claimed = True
+            try:
+                self.exchange.set_margin_mode("isolated", symbol)
+            except Exception as exc:
+                if "no need to change margin type" not in str(exc).lower():
+                    raise
+            self.exchange.set_leverage(1, symbol)
+            order_side = "sell" if side == "short" else "buy"
+            order = self.exchange.create_order(symbol, "market", order_side, contracts)
+            order_id = order.get("id")
+            if order.get("status") != "closed" and order.get("id"):
+                order = self.exchange.fetch_order(order["id"], symbol)
+            filled = float(order.get("filled") or 0)
+            if filled <= 0:
+                raise RuntimeError("لم يؤكد Binance تنفيذ أمر اختبار Futures")
+            entry = float(order.get("average") or price)
+            actual_cost = filled * multiplier * entry
+            stop_pct = 0.005
+            stop_price = entry * (1 + stop_pct if side == "short" else 1 - stop_pct)
+            target_delta = TAKE_PROFIT_USDT / (filled * multiplier)
+            target_price = entry - target_delta if side == "short" else entry + target_delta
+            opened_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            pos = {
+                "symbol": symbol, "entry_price": entry, "amount": filled * multiplier,
+                "contracts": filled, "cost": actual_cost, "highest_price": entry,
+                "stop_price": stop_price, "target_price": target_price,
+                "trailing_distance": 0.0, "strategy": "forced_test",
+                "timeframe": "demo-test", "opened_at": opened_at, "side": side,
+            }
+            self.positions[symbol] = pos
+            self._save_position(pos)
+            self._finish_test_run(test_id, "opened", symbol, side, order.get("id"))
+            self.on_event("FUTURES", "اختبار Binance Futures Demo: {} {} بقيمة نحو {:.2f} USDT؛ إغلاق تلقائي خلال دقيقتين".format(
+                "Short" if side == "short" else "Long", symbol, actual_cost))
+        except Exception as exc:
+            if claimed:
+                # Recover a possibly filled market order if order confirmation failed.
+                try:
+                    recovered = next((p for p in self.exchange.fetch_positions([symbol])
+                                      if abs(float(p.get("contracts") or 0)) > 0), None)
+                    if recovered:
+                        filled = abs(float(recovered.get("contracts") or 0))
+                        entry = float(recovered.get("entryPrice") or self.exchange.fetch_ticker(symbol)["last"])
+                        recovered_side = str(recovered.get("side") or side).lower()
+                        if recovered_side not in ("long", "short"):
+                            recovered_side = side
+                        multiplier = float(self.exchange.market(symbol).get("contractSize") or 1)
+                        stop_price = entry * (1.005 if recovered_side == "short" else 0.995)
+                        target_delta = TAKE_PROFIT_USDT / (filled * multiplier)
+                        opened_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        pos = {
+                            "symbol": symbol, "entry_price": entry, "amount": filled * multiplier,
+                            "contracts": filled, "cost": filled * multiplier * entry,
+                            "highest_price": entry, "stop_price": stop_price,
+                            "target_price": entry - target_delta if recovered_side == "short" else entry + target_delta,
+                            "trailing_distance": 0.0, "strategy": "forced_test",
+                            "timeframe": "demo-test", "opened_at": opened_at, "side": recovered_side,
+                        }
+                        self.positions[symbol] = pos
+                        self._save_position(pos)
+                        self._finish_test_run(test_id, "opened_recovered", symbol, recovered_side, order_id)
+                        self.on_event("WARN", "تم استرداد مركز اختبار Futures غير مؤكد وربطه بمؤقت الإغلاق")
+                    else:
+                        self._finish_test_run(test_id, "failed", symbol, side, order_id,
+                                              error=type(exc).__name__)
+                except Exception:
+                    self._finish_test_run(test_id, "needs_review", symbol, side, order_id,
+                                          error="confirmation_uncertain")
+            self.on_event("ERR", "فشل اختبار Futures Demo: {}".format(str(exc)[:100]))
+
+    def scan(self, trade_amount_usdt, can_open, force_test_trade=False,
+             force_test_id="", force_test_side="long"):
         if not self.symbols:
             return
         self._monitor_positions()
+        if force_test_trade:
+            self._run_forced_test(trade_amount_usdt, can_open, force_test_id, force_test_side)
+            return
         for symbol in self.symbols:
             try:
                 setup = evaluate_symbol(self.exchange, symbol, allow_short=True)
