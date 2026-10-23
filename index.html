@@ -9,16 +9,18 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg: #050505;
-  --card: #141414;
-  --card-hi: #1b1b1b;
-  --line: #242424;
-  --text: #f5f5f5;
-  --muted: #8c8c8c;
-  --lime: #d4f53c;
-  --up: #d4f53c;
-  --down: #ff6b5e;
-  --bar: #2c2c2c;
+  --bg: #07101c;
+  --card: #0e1a2a;
+  --card-hi: #14253a;
+  --line: #203650;
+  --text: #edf5ff;
+  --muted: #91a5bd;
+  --lime: #4de0bd;
+  --up: #43d6a0;
+  --down: #ff7182;
+  --bar: #263a52;
+  --spot: #38d9bc;
+  --futures: #a78bfa;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { background: var(--bg); }
@@ -237,6 +239,61 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
   .txs { grid-template-columns: 1fr; }
   .wallet-label { font-size: 17px; }
 }
+
+/* ---------- Operations control-room design ---------- */
+body {
+  background:
+    radial-gradient(ellipse at 10% 0%, rgba(32, 91, 124, .22), transparent 35%),
+    radial-gradient(ellipse at 100% 24%, rgba(105, 72, 168, .12), transparent 32%),
+    var(--bg);
+}
+.shell { max-width: 1500px; }
+.top { padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
+.logo { letter-spacing: -.04em; }
+.logo i { color: var(--spot); }
+.grid { grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
+.pill, .stat, .account-card, .wallet-top, .futures-market-section,
+.chart-card, .mkt, .news-card, .risk, .tx, .tx-history {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .14);
+}
+.overview-top { gap: 12px; margin-bottom: 14px; }
+.wallet-top { border-inline-start: 3px solid var(--spot); }
+.futures-market-section { border-inline-start: 3px solid var(--futures); }
+.futures-market-section .market-group-head h3 { color: var(--futures); }
+.futures-market-section .mkt { border: 1px solid rgba(167, 139, 250, .18); }
+.stats { gap: 10px; margin-bottom: 18px; }
+.stat { border: 1px solid var(--line); border-top: 2px solid var(--spot); padding: 15px 16px; }
+.stat:nth-child(2) { border-top-color: var(--futures); }
+.stat:nth-child(3) { border-top-color: #6aa7ff; }
+.stat:nth-child(4) { border-top-color: #f5bd62; }
+.accounts { gap: 10px; margin-bottom: 16px; }
+.account-card { border-inline-start: 3px solid var(--spot); }
+.account-card:nth-child(2) { border-inline-start-color: var(--futures); }
+.account-card:nth-child(2) .account-icon { color: var(--futures); }
+.account-card:first-child .account-icon { color: var(--spot); }
+.market-group { padding: 16px; background: rgba(14, 26, 42, .72); border: 1px solid var(--line); border-radius: 18px; }
+.market-group-head h3 { color: var(--spot); }
+.market-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.mkt { border: 1px solid var(--line); transition: transform .16s ease, border-color .16s ease; }
+.mkt:hover { transform: translateY(-2px); border-color: rgba(77, 224, 189, .42); }
+.risk { border-top: 2px solid var(--futures); }
+.txs { gap: 8px; }
+.tx { min-height: 0; gap: 12px; border: 1px solid var(--line); }
+.tx.hl { border-color: var(--spot); }
+.history-section { margin-top: 16px; }
+.news-ticker { background: rgba(14, 26, 42, .9); }
+@media (max-width: 1100px) {
+  .grid { grid-template-columns: 1fr; }
+  aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+  .risk, .history-section { margin: 0; }
+  aside > section:nth-child(2) { grid-row: span 2; }
+}
+@media (max-width: 720px) {
+  aside { display: flex; flex-direction: column; }
+  .grid { gap: 18px; }
+  .market-group { padding: 12px; }
+  .market-cards { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -438,7 +495,8 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     host.innerHTML = positions.map(function (p) {
       var c = coin(p.symbol), cls = pnlClass(p.pnl_usdt);
       var venue = p.market_type === 'Futures Demo' ? (p.side === 'short' ? 'Futures Demo · شورت' : 'Futures Demo · لونغ') : (p.simulated ? 'محاكاة' : 'منفّذة على Binance');
-      return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue) + '</small></div></div>' +
+      var entryInfo = p.market_type === 'Futures Demo' ? '' : (p.add_pending ? ' · إضافة قيد التحقق' : ' · ' + Math.max(1, Number(p.entries) || 1) + ' دخول');
+      return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
         '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
     }).join('');
   }
@@ -449,7 +507,11 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
     var symbols = Array.isArray(future.symbols) ? future.symbols : [];
     el('spot-balance').textContent = usd(wallet.total, 2);
     el('spot-free').textContent = usd(wallet.free, 2);
-    el('spot-open').textContent = spotPositions.length + ' / ' + (settings.spot_max_concurrent_trades || 6);
+    var spotTradeSlots = spotPositions.reduce(function(total, p) {
+      var entries = Math.max(1, Number(p.entries) || 1);
+      return total + entries + (p.add_pending ? 1 : 0);
+    }, 0);
+    el('spot-open').textContent = spotTradeSlots + ' / ' + (settings.spot_max_concurrent_trades || 6);
     el('spot-pnl').textContent = usd(stats.realized_total, 2);
     el('spot-pnl').className = pnlClass(stats.realized_total);
     var connected = !!future.connected;
