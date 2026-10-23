@@ -409,10 +409,10 @@ class BinanceFuturesDemo:
                 atr = max(float(setup.get("atr") or 0), entry * 0.0005)
                 if direction == "short":
                     stop_price = entry + atr * risk["stop_atr"]
-                    target_price = entry - TAKE_PROFIT_USDT / (filled * multiplier)
+                    target_price = entry - atr * risk["target_atr"]
                 else:
                     stop_price = entry - atr * risk["stop_atr"]
-                    target_price = entry + TAKE_PROFIT_USDT / (filled * multiplier)
+                    target_price = entry + atr * risk["target_atr"]
                 pos = {
                     "symbol": symbol, "entry_price": entry, "amount": filled * multiplier,
                     "contracts": filled, "cost": filled * multiplier * entry,
