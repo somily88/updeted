@@ -100,7 +100,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .range.active { border-color: var(--lime); color: var(--text); }
 
 /* ---------- top wallet and Futures Demo contracts ---------- */
-.overview-top { display:grid; grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr); gap:14px; align-items:stretch; margin-bottom:22px; }
+.overview-top { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(0,1.1fr); gap:14px; align-items:stretch; margin-bottom:22px; }
 .wallet-top { display:flex; align-items:center; min-width:0; padding:22px; background:var(--card); border:1px solid var(--line); border-radius:18px; }
 .wallet-top .wallet-row { width:100%; flex-direction:column; align-items:flex-start; justify-content:center; flex-wrap:nowrap; gap:22px; margin:0; }
 .wallet-top .wallet-value h1 { font-size:clamp(40px,5vw,58px); }
@@ -108,7 +108,7 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .futures-market-section .market-group-head { margin-top:0; }
 .futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); }
 .futures-market-section .mkt { padding:12px; background:var(--card-hi); }
-@media (max-width:720px) { .overview-top { grid-template-columns:1fr; } .wallet-top { padding:18px; } }
+@media (max-width:900px) { .overview-top { grid-template-columns:1fr; } .wallet-top { padding:18px; } }
 
 /* ---------- chart ---------- */
 .chart-card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:0; position:relative; height:180px; overflow:hidden; margin-bottom:20px; }
@@ -149,11 +149,6 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .market-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
 .market-group + .market-group { margin-top:10px; }
 .tx-head small { display:block; margin-top:3px; }
-.futures-market-section { margin-top:22px; }
-.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); }
-.futures-market-section .mkt { padding:14px; }
-.futures-market-section .mkt-price { font-size:24px; }
-.futures-market-section .mkt-grid { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
 @media (max-width:720px) {
   .accounts { grid-template-columns:1fr; }
   .account-metrics { gap:6px; }
