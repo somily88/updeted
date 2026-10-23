@@ -1078,6 +1078,8 @@ def automated_market_scan():
                 pos = active_positions.get(symbol)
                 is_add = pos is not None
                 if is_add:
+                    if BINANCE_ENV != 'demo':
+                        continue
                     entries = max(1, int(pos.get('entries', 1)))
                     if entries >= 2 or pos.get('add_attempted'):
                         continue
@@ -1097,8 +1099,8 @@ def automated_market_scan():
                         print("⏸️ [PYRAMID] {} لم يصل إلى شرط الربح/الحركة المطلوبة".format(symbol))
                         continue
 
-                    # Persist the candle before sending the market order so a timeout
-                    # cannot trigger a duplicate add on every scanner pass.
+                    # Reserve the one allowed add before sending. If the response is
+                    # ambiguous, the bot fails closed instead of risking a duplicate order.
                     pos['last_add_candle'] = str(candle)
                     pos['add_attempted'] = True
                     save_position(symbol, pos)
