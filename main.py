@@ -1108,7 +1108,7 @@ def automated_market_scan():
                     except Exception as e:
                         print("❌ [PYRAMID ERROR] {}: {}".format(symbol, e))
                         log_event("ERR", "إضافة {}: {}".format(symbol, str(e)[:80]))
-                        send_telegram_message("⚠️ <b>تعذر تأكيد إضافة {}</b>\\nلن يعيد البوت المحاولة تلقائيًا لتجنب تكرار أمر قد يكون وصل إلى Binance. راجع سجل الأوامر في Demo.".format(symbol))
+                        send_telegram_message("⚠️ <b>تعذر تأكيد إضافة {}</b>\nلن يعيد البوت المحاولة تلقائيًا لتجنب تكرار أمر قد يكون وصل إلى Binance. راجع سجل الأوامر في Demo.".format(symbol))
                         continue
 
                     total_amount = float(pos['amount']) + float(fill['amount'])
@@ -1135,10 +1135,10 @@ def automated_market_scan():
                     log_event("PYRAMID", "{} · دخول {}/2 · متوسط {:.8g}".format(
                         symbol, pos['entries'], weighted_entry))
                     send_telegram_message(
-                        "➕ <b>إضافة Demo إلى مركز رابح</b>\\n🪙 {}\\n🧭 {} · {}\\n📥 دخول الإضافة: {}\\n📊 متوسط الدخول الجديد: {}\\n🔒 الوقف: {}\\n🎯 الهدف: {}\\n📦 القيمة المضافة: {:.2f} USDT\\n🔢 عدد مرات الدخول: {}/2{}".format(
+                        "➕ <b>إضافة Demo إلى مركز رابح</b>\n🪙 {}\n🧭 {} · {}\n📥 دخول الإضافة: {}\n📊 متوسط الدخول الجديد: {}\n🔒 الوقف: {}\n🎯 الهدف: {}\n📦 القيمة المضافة: {:.2f} USDT\n🔢 عدد مرات الدخول: {}/2{}".format(
                             symbol, setup['strategy_label'], setup['timeframe'], fill['price'],
                             weighted_entry, pos['stop_price'], pos['target_price'], fill['cost'],
-                            pos['entries'], "\\n🧪 محاكاة" if fill['simulated'] else ""))
+                            pos['entries'], "\n🧪 محاكاة" if fill['simulated'] else ""))
                     continue
 
                 last_entry_candle[symbol] = candle
@@ -1147,7 +1147,7 @@ def automated_market_scan():
                 except Exception as e:
                     print("❌ [BUY ERROR] {}: {}".format(symbol, e))
                     log_event("ERR", "شراء {}: {}".format(symbol, str(e)[:80]))
-                    send_telegram_message("❌ <b>فشل شراء {}</b>\\n{}".format(symbol, html.escape(str(e))))
+                    send_telegram_message("❌ <b>فشل شراء {}</b>\n{}".format(symbol, html.escape(str(e))))
                     continue
 
                 entry = fill['price']
@@ -1170,10 +1170,10 @@ def automated_market_scan():
                     symbol, setup['strategy'], setup['timeframe'], entry, stop_price, target_price))
                 log_event("BUY", "{} · {} · {}".format(symbol, setup['strategy'], setup['timeframe']))
                 send_telegram_message(
-                    "🚀 <b>فتح صفقة Demo جديدة</b>\\n🪙 {}\\n🧭 {} · {}\\n💵 الدخول: {}\\n🛑 الوقف: {}\\n🎯 الهدف: {}\\n📦 القيمة: {:.2f} USDT{}".format(
+                    "🚀 <b>فتح صفقة Demo جديدة</b>\n🪙 {}\n🧭 {} · {}\n💵 الدخول: {}\n🛑 الوقف: {}\n🎯 الهدف: {}\n📦 القيمة: {:.2f} USDT{}".format(
                         symbol, setup['strategy_label'], setup['timeframe'], entry,
                         stop_price, target_price, fill['cost'],
-                        "\\n🧪 محاكاة" if fill['simulated'] else ""))
+                        "\n🧪 محاكاة" if fill['simulated'] else ""))
 
             except Exception as e:
                 print("Error scanning {}: {}".format(symbol, e))
