@@ -673,7 +673,7 @@ def place_sell(symbol, pos):
 # =====================================================================
 news_state = {
     'sentiment': 'neutral', 'severity': 0, 'reason': 'لم يُفحص بعد', 'source': '',
-    'checked_at': None, 'blocked_until': 0.0, 'headlines': [], 'alerted': False, 'error': ''
+    'checked_at': None, 'blocked_until': 0.0, 'headlines': [], 'headlines_ar': [], 'alerted': False, 'error': ''
 }
 
 STRONG_NEGATIVE_WORDS = [
@@ -769,7 +769,10 @@ def classify_with_groq(titles):
     system = (
         "You are a crypto market risk analyst. Given recent crypto news headlines, judge the overall "
         "impact on BTC and ETH prices over the next few hours. Respond ONLY with a JSON object: "
-        '{"sentiment":"positive|neutral|negative","severity":1-5,"reason":"one short sentence in Arabic"}. '
+        '{"sentiment":"positive|neutral|negative","severity":1-5,"reason":"one short sentence in Arabic",'
+        '"translated_headlines":["Arabic translation for each input headline, in the same order"]}. '
+        "Translate every headline into clear, concise Modern Standard Arabic. Preserve coin tickers, company names, "
+        "figures, and meaning. Return exactly one translation per input headline. "
         "Use severity 4-5 ONLY for major market-wide negative events such as exchange hacks, major country bans, "
         "large lawsuits or enforcement actions, stablecoin depegs, insolvencies, or protocol exploits affecting BTC or ETH. "
         "Ordinary price drops, opinions, predictions and minor news are severity 1-2."
@@ -799,7 +802,13 @@ def classify_with_groq(titles):
     if sentiment not in ('positive', 'neutral', 'negative'):
         sentiment = 'neutral'
     severity = max(1, min(5, int(result.get('severity', 1))))
-    return sentiment, severity, str(result.get('reason', '')).strip() or 'لا توجد تفاصيل'
+    translated = result.get('translated_headlines', [])
+    if not isinstance(translated, list) or len(translated) != len(titles):
+        translated = []
+    translated = [str(value).strip() for value in translated]
+    if any(not value for value in translated):
+        translated = []
+    return sentiment, severity, str(result.get('reason', '')).strip() or 'لا توجد تفاصيل', translated
 
 
 def classify_with_keywords(titles):
@@ -824,13 +833,14 @@ def check_news():
     try:
         items = fetch_headlines()
         titles = [t for (_, _, t) in items]
+        headline_translations = []
         if not titles:
             sentiment, severity, reason, source = 'neutral', 1, "لا توجد أخبار حديثة ضمن النافذة", "-"
         else:
             try:
                 if not GROQ_API_KEY:
                     raise RuntimeError("no groq key")
-                sentiment, severity, reason = classify_with_groq(titles)
+                sentiment, severity, reason, headline_translations = classify_with_groq(titles)
                 source = "Groq"
             except Exception as e:
                 if GROQ_API_KEY:
@@ -845,7 +855,8 @@ def check_news():
         news_state.update({
             'sentiment': sentiment, 'severity': severity, 'reason': reason, 'source': source,
             'checked_at': datetime.datetime.now().strftime("%H:%M"),
-            'headlines': [(n, t) for (_, n, t) in items[:5]], 'error': ''
+            'headlines': [(n, t) for (_, n, t) in items[:5]],
+            'headlines_ar': headline_translations[:5], 'error': ''
         })
         print("📰 [NEWS] {} | خطورة {} | {} ({})".format(sentiment, severity, reason, source))
         log_event("NEWS", "{} {}/5 ({})".format(sentiment, severity, source))
@@ -1171,7 +1182,7 @@ def api_state():
             'blocked': bool(news_blocked()),
             'blocked_until': datetime.datetime.fromtimestamp(news_state['blocked_until']).strftime("%H:%M") if news_state['blocked_until'] else None,
             'model': _groq_model.get('name') or '',
-            'headlines': [{'source': n, 'title': t} for (n, t) in news_state['headlines']],
+            'headlines': [{'source': n, 'title': t, 'title_ar': (news_state['headlines_ar'][i] if i < len(news_state['headlines_ar']) else '')} for i, (n, t) in enumerate(news_state['headlines'])],
             'error': news_state['error']
         },
         'events': list(event_log)
