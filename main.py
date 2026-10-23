@@ -436,6 +436,8 @@ event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها
 
 def log_event(tag, text):
     event_log.appendleft({'t': datetime.datetime.now().strftime("%H:%M:%S"), 'tag': tag, 'text': text})
+    if tag in ("FUTURES", "FUTURES_SCAN", "WARN", "ERR"):
+        print("[{}] {}".format(tag, text), flush=True)
 scheduler = BackgroundScheduler()
 futures_engine = None
 
@@ -1015,8 +1017,9 @@ def automated_market_scan():
                 setup = dict(setup)
                 setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S")})
                 market_snapshot[symbol] = setup
-                print("📊 {} | {} {} | RSI: {:.2f} | setup: {}".format(
-                    symbol, setup['strategy'], setup['timeframe'], setup['rsi'], setup['reason']))
+                print("📊 {} | {} {} | RSI: {:.2f} | strength: {}/100 | setup: {}".format(
+                    symbol, setup['strategy'], setup['timeframe'], setup['rsi'],
+                    setup.get('signal_strength', 0), setup['reason']))
 
                 if symbol not in active_positions and len(active_positions) >= MAX_SPOT_CONCURRENT_TRADES:
                     continue
@@ -1160,7 +1163,8 @@ def api_state():
             'ref_close': d.get('ref_close', d['price']), 'hist': d['hist'], 'signal': d['signal'], 'conds': d.get('conds', {}),
             'time': d['time'], 'in_position': sym in active_positions,
             'strategy': d.get('strategy', 'wait'), 'strategy_label': d.get('strategy_label', 'انتظار'),
-            'timeframe': d.get('timeframe', '15m'), 'reason': d.get('reason', '')
+            'timeframe': d.get('timeframe', '15m'), 'signal_strength': d.get('signal_strength', 0),
+            'reason': d.get('reason', '')
         })
 
     if futures_engine:
@@ -1185,6 +1189,7 @@ def api_state():
                     'in_position': sym in futures_engine.positions, 'direction': data.get('direction', 'flat'),
                     'strategy': data.get('strategy', 'wait'),
                     'strategy_label': data.get('strategy_label', 'انتظار'), 'timeframe': data.get('timeframe', '15m'),
+                    'signal_strength': data.get('signal_strength', 0),
                     'reason': data.get('reason', ''), 'market_type': 'Futures Demo'})
             else:
                 markets.append({'symbol': sym, 'ready': False, 'supported': True,
