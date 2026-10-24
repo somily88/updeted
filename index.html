@@ -308,6 +308,15 @@ body {
   .market-group { padding: 12px; }
   .market-cards { grid-template-columns: 1fr; }
 }
+
+.tradfi-consent { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.14); display: grid; gap: 9px; }
+.tradfi-consent p, .tradfi-consent small { margin: 0; color: var(--muted); line-height: 1.55; font-size: 12px; }
+.tradfi-consent a { color: var(--spot); text-decoration: underline; }
+.tradfi-consent label { display: flex; gap: 8px; align-items: flex-start; color: var(--text); font-size: 12px; line-height: 1.5; }
+.tradfi-consent input { accent-color: var(--spot); margin-top: 3px; }
+.tradfi-sign-button { justify-self: start; border: 1px solid var(--spot); border-radius: 9px; padding: 9px 12px; background: var(--spot); color: #10120a; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.tradfi-sign-button:disabled { opacity: .45; cursor: not-allowed; }
+.tradfi-status { font-size: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -408,6 +417,14 @@ body {
             <div><small>الربح المحقق</small><b id="futures-pnl">—</b></div>
           </div>
           <div class="account-symbols" id="futures-symbols"></div>
+          <div class="tradfi-consent">
+            <b>اتفاقية TradFi Perps</b>
+            <p>هذا الطلب يوقّع الاتفاقية عبر API لحساب Futures Demo فقط؛ لا يفتح صفقة ولا يفعّل تداول TradFi تلقائيًا.</p>
+            <a href="https://www.binance.com/en-KZ/support/faq/detail/fe7dcdf24f1943d98b368f5f9f744398" target="_blank" rel="noopener noreferrer">راجع معلومات وشروط TradFi لدى Binance</a>
+            <label><input id="tradfi-consent-check" type="checkbox"><span>قرأت الشروط المعمول بها وأوافق على إرسال طلب توقيع الاتفاقية لحساب Demo.</span></label>
+            <button id="tradfi-sign-button" class="tradfi-sign-button" type="button" disabled>توقيع الاتفاقية عبر API</button>
+            <small id="tradfi-agreement-status" class="tradfi-status">يتحقق البوت من حالة الحساب…</small>
+          </div>
         </article>
       </section>
 
@@ -550,6 +567,8 @@ body {
     el('spot-pnl').textContent = usd(stats.realized_total, 2);
     el('spot-pnl').className = pnlClass(stats.realized_total);
     var connected = !!future.connected;
+    window.__sobhitraderFuturesState = future;
+    document.dispatchEvent(new Event('tradfi-state'));
     var state = el('futures-state');
     state.textContent = connected ? (future.trading_enabled ? 'متصل · التنفيذ مفعّل' : 'متصل · محاكاة') : 'بانتظار مفاتيح Futures Demo';
     state.className = 'account-state' + (connected ? ' online' : '');
@@ -796,6 +815,67 @@ body {
 
   setActive();
   load();
+})();
+</script>
+
+<script>
+(function () {
+  var consent = document.getElementById('tradfi-consent-check');
+  var button = document.getElementById('tradfi-sign-button');
+  var status = document.getElementById('tradfi-agreement-status');
+  if (!consent || !button || !status) return;
+  function syncTradfiConsent() {
+    var futures = window.__sobhitraderFuturesState || {};
+    var signed = !!futures.tradfi_agreement_signed;
+    var connected = !!futures.connected;
+    if (signed) {
+      consent.checked = false;
+      consent.disabled = true;
+      button.disabled = true;
+      button.textContent = 'تم توقيع الاتفاقية';
+      status.textContent = 'أكد Binance توقيع الاتفاقية لهذا المفتاح التجريبي.';
+    } else {
+      consent.disabled = !connected;
+      button.disabled = !connected || !consent.checked;
+      button.textContent = 'توقيع الاتفاقية عبر API';
+      if (!connected) status.textContent = 'اربط Binance Futures Demo أولًا.';
+      else if (!status.dataset.pending) status.textContent = 'لم يُسجّل توقيع الاتفاقية لهذا المفتاح.';
+    }
+  }
+  consent.addEventListener('change', syncTradfiConsent);
+  document.addEventListener('tradfi-state', syncTradfiConsent);
+  button.addEventListener('click', async function () {
+    if (!consent.checked || button.disabled) return;
+    var confirmed = window.confirm('أؤكد أنني راجعت شروط Binance وأوافق على إرسال طلب توقيع اتفاقية TradFi Perps إلى حساب Futures Demo. لن يُرسل هذا الطلب أي أمر تداول. هل تريد المتابعة؟');
+    if (!confirmed) return;
+    button.disabled = true;
+    status.dataset.pending = 'true';
+    status.textContent = 'جارٍ إرسال طلب الاتفاقية إلى Binance Demo…';
+    try {
+      var response = await fetch('/api/platforms/binance-futures/tradfi-agreement', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ accepted: true })
+      });
+      var data = await response.json().catch(function () { return {}; });
+      if (!response.ok || !data.ok) {
+        var detail = data.detail || {};
+        var message = typeof detail === 'string' ? detail :
+          [detail.message, detail.reason].filter(Boolean).join(' — ');
+        throw new Error(message || 'تعذر إتمام الطلب عبر Binance Demo.');
+      }
+      status.textContent = 'قبل Binance طلب التوقيع على حساب Demo. لم تُرسل أي صفقة.';
+      consent.checked = false;
+      consent.disabled = true;
+      button.textContent = 'تم توقيع الاتفاقية';
+    } catch (error) {
+      status.textContent = error.message || 'تعذر الاتصال بـ Binance Demo.';
+      status.dataset.pending = '';
+      consent.disabled = false;
+      button.disabled = !consent.checked;
+    }
+  });
+  syncTradfiConsent();
 })();
 </script>
 </body>
