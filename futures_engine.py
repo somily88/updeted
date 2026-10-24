@@ -12,7 +12,7 @@ import time
 import ccxt
 from strategy_engine import evaluate_symbol, STRATEGY_RISK
 
-TARGET_IDS = ("CLUSDT", "BZUSDT", "XAUUSDT")
+TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUSDT","TSLAUSDT","SNDKUSDT","METAUSDT","AMDUSDT","MSFTUSDT","BEUSDT","AMZNUSDT"]
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
 
 
@@ -32,13 +32,17 @@ class BinanceFuturesDemo:
             raise RuntimeError("Installed ccxt does not support Binance Demo Trading")
         self.exchange.enable_demo_trading(True)
         self.exchange.load_markets()
+        available_ids = set()
         self.symbols = []
         for market in self.exchange.markets.values():
             if (market.get("id") in TARGET_IDS and market.get("active") is not False
                     and market.get("swap") and market.get("linear")
                     and market.get("quote") == "USDT"):
                 self.symbols.append(market["symbol"])
+                available_ids.add(market.get("id"))
         self.symbols.sort()
+        self.unavailable_symbols = [symbol_id for symbol_id in TARGET_IDS
+                                    if symbol_id not in available_ids]
         self.snapshot = {}
         self.last_entry_candle = {}
         self._balance_cache = {"time": 0.0, "value": None}
@@ -122,7 +126,8 @@ class BinanceFuturesDemo:
         balance = self.balance()
         return {
             "connected": True, "environment": "demo", "trading_enabled": True,
-            "symbols": self.symbols, "open_positions": len(self.positions),
+            "symbols": self.symbols, "unavailable_symbols": self.unavailable_symbols,
+            "open_positions": len(self.positions),
             "balance": balance["total"], "free_balance": balance["free"],
             **stats,
         }
