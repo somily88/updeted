@@ -320,6 +320,21 @@ body {
 .tradfi-sign-button { justify-self: start; border: 1px solid var(--spot); border-radius: 9px; padding: 9px 12px; background: var(--spot); color: #10120a; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
 .tradfi-sign-button:disabled { opacity: .45; cursor: not-allowed; }
 .tradfi-status { font-size: 12px; color: var(--muted); }
+
+/* ---------- balanced overview layout ---------- */
+.overview-top { grid-template-columns:minmax(0,1fr); }
+.wallet-top { min-height:190px; }
+.wallet-top .wallet-row { flex-direction:row; align-items:center; justify-content:space-between; gap:22px; }
+.wallet-top .wallet-value h1 { font-size:clamp(44px,5vw,64px); }
+.futures-market-section { margin:0 0 18px; }
+.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+.futures-market-section .mkt { min-height:230px; }
+@media (max-width:720px) {
+  .wallet-top { min-height:0; }
+  .wallet-top .wallet-row { flex-direction:column; align-items:flex-start; gap:18px; }
+  .wallet-top .ranges { width:100%; }
+  .wallet-top .range { flex:1; }
+}
 </style>
 </head>
 <body>
@@ -366,10 +381,6 @@ body {
           </div>
         </div>
         </div>
-        <section class="futures-market-section" aria-label="عقود Futures Demo">
-          <div class="market-group-head"><h3>عقود Futures Demo</h3><small>حساب تجريبي</small></div>
-          <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
-        </section>
       </div>
 
       <div class="stats">
@@ -429,6 +440,11 @@ body {
             <small id="tradfi-agreement-status" class="tradfi-status">يتحقق البوت من حالة الحساب…</small>
           </div>
         </article>
+      </section>
+
+      <section class="futures-market-section" aria-label="عقود Futures Demo">
+        <div class="market-group-head"><h3>مراقبة عقود Futures Demo</h3><small>أسعار وإشارات الحساب التجريبي</small></div>
+        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
       </section>
 
       <div class="chart-card">
