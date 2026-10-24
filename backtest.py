@@ -22,8 +22,8 @@ TIMEFRAME_MS = {
     "1d": 24 * 60 * 60_000,
 }
 REQUIRED_TIMEFRAMES = ("5m", "15m", "1h", "4h", "1d")
-SPOT_SYMBOLS = ("BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT")
-FUTURES_SYMBOLS = tuple(s + ":USDT" for s in SPOT_SYMBOLS)
+SPOT_SYMBOLS = ('BTC/USDT','ETH/USDT','BNB/USDT','SOL/USDT','XRP/USDT','ADA/USDT','DOGE/USDT','LINK/USDT','AVAX/USDT','DOT/USDT','LTC/USDT','BCH/USDT','TRX/USDT','NEAR/USDT')
+FUTURES_SYMBOLS = ("BTC/USDT:USDT", "ETH/USDT:USDT", "BNB/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "ADA/USDT:USDT")
 PROFILES = {
     "baseline": {"stop": 1.0, "target": 1.0, "trail": 1.0},
     "cautious": {"stop": 0.90, "target": 0.90, "trail": 0.85},
@@ -42,12 +42,22 @@ class HistoricalExchange:
     def fetch_ohlcv(self, symbol, timeframe="1m", limit=90, since=None, params=None):
         duration = TIMEFRAME_MS[timeframe]
         all_candles = self.candles_by_symbol.get(symbol, {}).get(timeframe, [])
-        closed = [row for row in all_candles if row[0] + duration <= self.now_ms]
-        if not closed:
+        # Candle rows are sorted by open time. Binary-search the last candle
+        # closed at this historical timestamp instead of rescanning all history.
+        cutoff_ms = self.now_ms - duration
+        lo, hi = 0, len(all_candles)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if all_candles[mid][0] <= cutoff_ms:
+                lo = mid + 1
+            else:
+                hi = mid
+        end = lo
+        if end == 0:
             return []
         # Production strategy_engine drops the final (still-open) candle. Add a
         # harmless synthetic open candle so its 90-candle window behaves alike.
-        closed = closed[-max(1, int(limit) - 1):]
+        closed = all_candles[max(0, end - max(1, int(limit) - 1)):end]
         last = float(closed[-1][4])
         synthetic_open = [self.now_ms, last, last, last, last, 0.0]
         return closed + [synthetic_open]
