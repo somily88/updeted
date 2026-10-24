@@ -1,5 +1,7 @@
 import os
 import secrets
+import hashlib
+import hmac
 import time
 import html
 import ccxt
@@ -9,6 +11,7 @@ import threading
 from collections import deque
 import urllib.request
 import urllib.error
+import urllib.parse
 import json
 import re
 from cryptography.fernet import Fernet
@@ -527,6 +530,10 @@ class BinanceCredentials(BaseModel):
 class FuturesCredentials(BaseModel):
     api_key: str = Field(min_length=8, max_length=256)
     secret_key: str = Field(min_length=8, max_length=256)
+
+
+class TradFiAgreementConsent(BaseModel):
+    accepted: bool
 _balance_cache = {'t': 0.0, 'v': (0.0, 0.0)}
 
 
@@ -1302,6 +1309,17 @@ def api_state():
         'connected': False, 'environment': 'demo', 'trading_enabled': False, 'symbols': [],
         'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
         'wins': 0, 'losses': 0, 'realized_pnl': 0.0}
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            agreement_row = conn.execute(
+                "SELECT value FROM bot_settings WHERE key = 'tradfi_agreement_key_fingerprint'"
+            ).fetchone()
+        current_fingerprint = hashlib.sha256(BINANCE_FUTURES_API_KEY.encode()).hexdigest() if BINANCE_FUTURES_API_KEY else ''
+        future_state['tradfi_agreement_signed'] = bool(
+            agreement_row and current_fingerprint and secrets.compare_digest(agreement_row[0], current_fingerprint)
+        )
+    except Exception:
+        future_state['tradfi_agreement_signed'] = False
     return {
         'futures': future_state,
         'env': BINANCE_ENV,
@@ -1445,6 +1463,65 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         log_event('PLATFORM', 'تم ربط Binance Futures Demo')
         return {'ok': True, 'platform': 'binance_futures', 'environment': 'demo', 'symbols': candidate.symbols,
             'message': 'Binance Futures Demo credentials saved encrypted'}
+    finally:
+        scan_lock.release()
+
+
+@app.post("/api/platforms/binance-futures/tradfi-agreement", dependencies=[Depends(require_dashboard_auth)])
+def sign_binance_tradfi_agreement(payload: TradFiAgreementConsent):
+    if payload.accepted is not True:
+        raise HTTPException(status_code=400, detail="Explicit agreement confirmation is required")
+    if BINANCE_ENV != "demo":
+        raise HTTPException(status_code=409, detail="TradFi agreement signing is restricted to Binance Demo mode")
+    if not futures_engine or not BINANCE_FUTURES_API_KEY or not BINANCE_FUTURES_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Binance Futures Demo API credentials are unavailable")
+    if not scan_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
+    try:
+        params = urllib.parse.urlencode({
+            "timestamp": int(time.time() * 1000),
+            "recvWindow": 5000,
+        })
+        signature = hmac.new(
+            BINANCE_FUTURES_SECRET_KEY.encode("utf-8"),
+            params.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        url = "https://demo-fapi.binance.com/fapi/v1/stock/contract?{}&signature={}".format(params, signature)
+        request = urllib.request.Request(
+            url,
+            data=b"",
+            method="POST",
+            headers={"X-MBX-APIKEY": BINANCE_FUTURES_API_KEY},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:
+                response_body = response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as exc:
+            try:
+                error_data = json.loads(exc.read().decode("utf-8", errors="replace"))
+                message = str(error_data.get("msg") or "Binance rejected the request")[:180]
+                code = error_data.get("code")
+            except Exception:
+                message, code = "Binance rejected the request", None
+            detail = {"message": "لم يقبل Binance طلب توقيع الاتفاقية في Demo", "reason": message}
+            if code is not None:
+                detail["binance_code"] = code
+            raise HTTPException(status_code=400, detail=detail)
+        except Exception:
+            raise HTTPException(status_code=502, detail="تعذر الاتصال بواجهة Binance Futures Demo")
+        try:
+            result = json.loads(response_body) if response_body else {}
+        except ValueError:
+            result = {}
+        fingerprint = hashlib.sha256(BINANCE_FUTURES_API_KEY.encode()).hexdigest()
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)",
+                ("tradfi_agreement_key_fingerprint", fingerprint),
+            )
+        log_event("PLATFORM", "أُرسل طلب توقيع اتفاقية TradFi إلى Binance Futures Demo بعد موافقة المستخدم")
+        return {"ok": True, "environment": "demo", "result": result}
     finally:
         scan_lock.release()
 
