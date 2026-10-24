@@ -340,6 +340,18 @@ body {
   .wallet-top .ranges { width:100%; }
   .wallet-top .range { flex:1; }
 }
+
+/* ---------- full-width open positions ---------- */
+.open-positions-section { margin:0 0 20px; padding:16px; background:rgba(14,26,42,.62); border:1px solid var(--line); border-radius:18px; }
+.open-positions-section .tx-head-row { margin-bottom:12px; }
+.open-positions-section .txs { grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; }
+.open-positions-section .tx.position-card { min-height:160px; }
+.open-positions-section .tx.position-card.spot-position { border:1px solid rgba(56,217,188,.5); border-inline-start:3px solid var(--spot); }
+.open-positions-section .tx.position-card.futures-position { border:1px solid rgba(167,139,250,.58); border-inline-start:3px solid var(--futures); }
+@media (max-width:720px) {
+  .open-positions-section { padding:12px; }
+  .open-positions-section .txs { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
+}
 </style>
 </head>
 <body>
@@ -411,6 +423,14 @@ body {
         </div>
       </div>
 
+      <section class="open-positions-section" aria-label="الصفقات المفتوحة">
+        <div class="tx-head-row">
+          <h3>الصفقات المفتوحة</h3>
+          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> تحديث تلقائي</span></div>
+        </div>
+        <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
+      </section>
+
       <section class="accounts" id="accounts" aria-label="ملخص المنصات">
         <article class="account-card">
           <div class="account-top">
@@ -480,13 +500,6 @@ body {
         <p class="risk-text"><b><bdi id="exposure-pct">0%</bdi></b> من المحفظة في صفقات مفتوحة. <span id="exposure-note">بانتظار بيانات البوت</span>.</p>
       </section>
 
-      <section>
-        <div class="tx-head-row">
-          <h3>الصفقات</h3>
-          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> تحديث تلقائي</span></div>
-        </div>
-        <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
-      </section>
 
 <section class="history-section">
         <div class="tx-head-row"><h3>سجل الصفقات</h3></div>
@@ -560,6 +573,7 @@ body {
       var entryInfo = p.market_type === 'Futures Demo' ? '' : (p.add_pending ? ' · إضافة قيد التحقق' : ' · ' + Math.max(1, Number(p.entries) || 1) + ' دخول');
       var key = String(p.market_type || 'Spot') + '|' + String(p.symbol || '') + '|' + String(p.side || 'long');
       var pnl = Number(p.pnl_usdt) || 0, price = Number(p.price) || 0;
+      var marketClass = p.market_type === 'Futures Demo' ? 'futures-position' : 'spot-position';
       var previous = previousPositionSnapshot[key], motion = 'position-enter';
       if (previous) {
         var pnlDelta = pnl - previous.pnl;
@@ -571,7 +585,7 @@ body {
         }
       }
       nextPositionSnapshot[key] = { pnl: pnl, price: price };
-      return '<article class="tx position-card ' + motion + '"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
+      return '<article class="tx position-card ' + marketClass + ' ' + motion + '"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
         '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
     }).join('');
     previousPositionSnapshot = nextPositionSnapshot;
