@@ -211,6 +211,20 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .tx-head-row span { font-size: 14px; color: var(--lime); }
 .txs { display:grid; grid-template-columns:1fr; gap:10px; }
 .tx { background: var(--card); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 22px; min-height: 172px; }
+.tx.position-card { border:1px solid rgba(77,224,189,.14); transition:border-color .25s ease, box-shadow .25s ease; }
+.tx.position-enter { animation:position-enter .45s ease both; }
+.tx.position-tick-up { animation:position-tick-up .85s ease; }
+.tx.position-tick-down { animation:position-tick-down .85s ease; }
+.tx.position-tick { animation:position-tick .65s ease; }
+.positions-meta { display:flex; align-items:center; gap:12px; }
+.positions-live { display:inline-flex; align-items:center; gap:6px; color:var(--muted)!important; font-size:10px!important; white-space:nowrap; }
+.positions-live i { width:7px; height:7px; border-radius:50%; background:var(--lime); box-shadow:0 0 8px var(--lime); animation:live-pulse 1.6s ease-in-out infinite; }
+@keyframes position-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+@keyframes position-tick-up { 0% { border-color:rgba(67,214,160,.85); box-shadow:0 0 0 0 rgba(67,214,160,.32); } 100% { border-color:rgba(77,224,189,.14); box-shadow:0 0 0 8px transparent; } }
+@keyframes position-tick-down { 0% { border-color:rgba(255,113,130,.9); box-shadow:0 0 0 0 rgba(255,113,130,.3); } 100% { border-color:rgba(77,224,189,.14); box-shadow:0 0 0 8px transparent; } }
+@keyframes position-tick { 0% { border-color:rgba(167,139,250,.9); } 100% { border-color:rgba(77,224,189,.14); } }
+@keyframes live-pulse { 50% { opacity:.35; box-shadow:0 0 2px var(--lime); } }
+@media (prefers-reduced-motion:reduce) { .tx.position-enter,.tx.position-tick-up,.tx.position-tick-down,.tx.position-tick,.positions-live i { animation:none!important; } }
 .tx-head { display: flex; align-items: center; gap: 10px; }
 .tx-head b { display: block; font-size: 13px; font-weight: 500; }
 .tx-head small { font-size: 11px; }
@@ -428,7 +442,7 @@ body {
       <section>
         <div class="tx-head-row">
           <h3>الصفقات</h3>
-          <span id="open-count">0 مفتوحة</span>
+          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> متابعة حية</span></div>
         </div>
         <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
       </section>
@@ -446,8 +460,8 @@ body {
 <script>
 (function () {
   var busy = false;
-  var labels = { BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: 'X', ADA: '₳', PAXG: 'Au', XAU: 'Au', CL: 'O', BZ: 'O' };
-  var colors = { BTC: '#f7931a', ETH: '#627eea', BNB: '#f3ba2f', SOL: '#9945ff', XRP: '#346aa9', ADA: '#3468d4', PAXG: '#c6a85b', XAU: '#c6a85b', CL: '#5886a8', BZ: '#5886a8' };
+  var labels = { BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: 'X', ADA: '₳', DOGE: 'Ð', LINK: 'L', AVAX: 'A', DOT: '●', LTC: 'Ł', BCH: '₿', TRX: 'T', NEAR: 'N', PAXG: 'Au', XAU: 'Au', CL: 'O', BZ: 'O' };
+  var colors = { BTC: '#f7931a', ETH: '#627eea', BNB: '#f3ba2f', SOL: '#9945ff', XRP: '#346aa9', ADA: '#3468d4', DOGE: '#c2a633', LINK: '#2a5ada', AVAX: '#e84142', DOT: '#e6007a', LTC: '#345d9d', BCH: '#8dc351', TRX: '#ff0013', NEAR: '#111827', PAXG: '#c6a85b', XAU: '#c6a85b', CL: '#5886a8', BZ: '#5886a8' };
   function el(id) { return document.getElementById(id); }
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]; }); }
   function num(v, digits) { var n = Number(v); return Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '—'; }
@@ -488,17 +502,38 @@ body {
     host.innerHTML = group('عملات Spot', spot, 'Binance Spot');
     futuresHost.innerHTML = futures.length ? futures.map(card).join('') : '<div class="empty">لا توجد عقود Futures Demo متاحة حاليًا.</div>';
   }
+  var previousPositionSnapshot = Object.create(null);
   function renderPositions(positions) {
     var host = el('tx-cards');
-    el('open-count').textContent = (positions || []).length + ' مفتوحة';
-    if (!positions || !positions.length) { host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>'; return; }
+    positions = Array.isArray(positions) ? positions : [];
+    el('open-count').textContent = positions.length + ' مفتوحة';
+    if (!positions.length) {
+      previousPositionSnapshot = Object.create(null);
+      host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>';
+      return;
+    }
+    var nextPositionSnapshot = Object.create(null);
     host.innerHTML = positions.map(function (p) {
       var c = coin(p.symbol), cls = pnlClass(p.pnl_usdt);
       var venue = p.market_type === 'Futures Demo' ? (p.side === 'short' ? 'Futures Demo · شورت' : 'Futures Demo · لونغ') : (p.simulated ? 'محاكاة' : 'منفّذة على Binance');
       var entryInfo = p.market_type === 'Futures Demo' ? '' : (p.add_pending ? ' · إضافة قيد التحقق' : ' · ' + Math.max(1, Number(p.entries) || 1) + ' دخول');
-      return '<article class="tx"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
+      var key = String(p.market_type || 'Spot') + '|' + String(p.symbol || '') + '|' + String(p.side || 'long');
+      var pnl = Number(p.pnl_usdt) || 0, price = Number(p.price) || 0;
+      var previous = previousPositionSnapshot[key], motion = 'position-enter';
+      if (previous) {
+        var pnlDelta = pnl - previous.pnl;
+        var priceDelta = price - previous.price;
+        if (Math.abs(pnlDelta) > 0.000001 || Math.abs(priceDelta) > 0.00000001) {
+          motion = pnlDelta > 0.000001 ? 'position-tick-up' : (pnlDelta < -0.000001 ? 'position-tick-down' : 'position-tick');
+        } else {
+          motion = '';
+        }
+      }
+      nextPositionSnapshot[key] = { pnl: pnl, price: price };
+      return '<article class="tx position-card ' + motion + '"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
         '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
     }).join('');
+    previousPositionSnapshot = nextPositionSnapshot;
   }
   function renderAccounts(d) {
     var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {}, settings = d.settings || {};
