@@ -145,6 +145,9 @@ small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .account-metrics b { font-size:14px; font-weight:500; }
 .account-symbols { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
 .account-symbols span { padding:5px 8px; border-radius:8px; border:1px solid var(--line); color:#c8c8c8; font-size:11px; direction:ltr; }
+.account-symbols-unavailable { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:2px; }
+.account-symbols-unavailable small { flex-basis:100%; color:var(--muted); font-size:10px; }
+.account-symbols-unavailable span { padding:4px 7px; border:1px dashed var(--line); border-radius:8px; color:var(--muted); font-size:10px; direction:ltr; }
 .market-group { grid-column:1/-1; min-width:0; }
 .market-group-head { display:flex; justify-content:space-between; align-items:center; margin:3px 0 10px; }
 .market-group-head h3 { font-size:15px; font-weight:600; }
@@ -579,7 +582,8 @@ body {
     el('futures-pnl').textContent = usd(future.realized_pnl, 2);
     el('futures-pnl').className = pnlClass(future.realized_pnl);
     el('futures-symbols').innerHTML = (symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>') +
-      (unavailableSymbols.length ? '<small class="account-market-unavailable">غير متاح في Demo: ' + unavailableSymbols.map(esc).join('، ') + '</small>' : '');
+      (unavailableSymbols.length ? '<div class="account-symbols-unavailable"><small>غير متاح حاليًا في Demo</small>' +
+        unavailableSymbols.map(function(s){ return '<span title="غير متاح في Binance Futures Demo">' + esc(s) + '</span>'; }).join('') + '</div>' : '');
   }
   function renderHistory(trades) {
     var host = el('trade-history');
