@@ -1,7 +1,7 @@
 services:
   trading_bot:
     container_name: telegram_crypto_bot
-    build: .
+    build: https://github.com/somily88/updeted.git#main
     ports:
       - "127.0.0.1:8010:8000"
     env_file:
