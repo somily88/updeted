@@ -131,14 +131,14 @@ def _trend_candidate(exchange, symbol, timeframe, cache, direction="long"):
         falling = v["ema50"] < v["ema50_old"]
         momentum_ok = v["hist"] <= 0 or v["hist"] < previous_hist
         if (v["ref_close"] < v["ema50"] and v["ema20"] < v["ema50"]
-                and falling and momentum_ok and 30 <= v["rsi"] <= 55):
+                and falling and momentum_ok and 27 <= v["rsi"] <= 58):
             return _candidate("trend", timeframe, v, "السعر تحت EMA50 والاتجاه والزخم هابطان",
                               "short", strength)
         return None
     rising = v["ema50"] > v["ema50_old"]
     momentum_ok = v["hist"] >= 0 or v["hist"] > previous_hist
     if (v["ref_close"] > v["ema50"] and v["ema20"] > v["ema50"]
-            and rising and momentum_ok and 45 <= v["rsi"] <= 70):
+            and rising and momentum_ok and 42 <= v["rsi"] <= 73):
         return _candidate("trend", timeframe, v, "السعر فوق EMA50 والاتجاه والزخم صاعدان",
                           "long", strength)
     return None
@@ -151,7 +151,7 @@ def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
     previous = candles[-21:-1]
     average_volume = sum(c[5] for c in previous) / len(previous)
     last = candles[-1]
-    volume_ok = average_volume > 0 and last[5] >= average_volume * 1.5
+    volume_ok = average_volume > 0 and last[5] >= average_volume * 1.25
     if not volume_ok:
         return None
     volume_ratio = last[5] / average_volume
@@ -182,7 +182,7 @@ def _range_ok(v):
         return False
     slope = abs(v["ema50"] / v["ema50_old"] - 1.0)
     distance = abs(v["ref_close"] / v["ema50"] - 1.0)
-    return slope <= 0.004 and distance <= 0.02
+    return slope <= 0.006 and distance <= 0.025
 
 
 def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
@@ -197,17 +197,17 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
     last = candles[-1]
     if direction == "short":
         if (prev_upper is not None and upper is not None and candles[-2][2] >= prev_upper
-                and prev_rsi >= 65 and last[4] < candles[-2][4] and last[4] < upper):
+                and prev_rsi >= 62 and last[4] < candles[-2][4] and last[4] < upper):
             reversal_atr = abs(candles[-2][4] - last[4]) / v["atr"]
-            strength = min(95.0, 56.0 + min(22.0, (prev_rsi - 65.0) * 1.1)
+            strength = min(95.0, 56.0 + min(22.0, (prev_rsi - 62.0) * 1.1)
                            + min(16.0, reversal_atr * 10.0))
             return _candidate("bounce", timeframe, v, "رفض مؤكد من النطاق العلوي مع RSI مرتفع",
                               "short", strength)
         return None
     if (prev_lower is not None and lower is not None and candles[-2][3] <= prev_lower
-            and prev_rsi <= 35 and last[4] > candles[-2][4] and last[4] > lower):
+            and prev_rsi <= 38 and last[4] > candles[-2][4] and last[4] > lower):
         reversal_atr = abs(last[4] - candles[-2][4]) / v["atr"]
-        strength = min(95.0, 56.0 + min(22.0, (35.0 - prev_rsi) * 1.1)
+        strength = min(95.0, 56.0 + min(22.0, (38.0 - prev_rsi) * 1.1)
                        + min(16.0, reversal_atr * 10.0))
         return _candidate("bounce", timeframe, v, "ارتداد مؤكد من النطاق السفلي مع RSI منخفض",
                           "long", strength)
