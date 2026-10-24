@@ -420,7 +420,7 @@ body {
           <div class="tradfi-consent">
             <b>اتفاقية TradFi Perps</b>
             <p>هذا الطلب يوقّع الاتفاقية عبر API لحساب Futures Demo فقط؛ لا يفتح صفقة ولا يفعّل تداول TradFi تلقائيًا.</p>
-            <a href="https://www.binance.com/en-KZ/support/faq/detail/fe7dcdf24f1943d98b368f5f9f744398" target="_blank" rel="noopener noreferrer">راجع معلومات وشروط TradFi لدى Binance</a>
+            <div><a href="https://www.binance.com/en-KZ/support/faq/detail/fe7dcdf24f1943d98b368f5f9f744398" target="_blank" rel="noopener noreferrer">معلومات TradFi Perps</a> · <a href="https://www.binance.com/en-KZ/terms" target="_blank" rel="noopener noreferrer">شروط الاستخدام</a> · <a href="https://www.binance.com/en-KZ/about-legal/exchange-rules" target="_blank" rel="noopener noreferrer">قواعد التداول</a> · <a href="https://www.binance.com/en-KZ/about-legal/clearing-rules" target="_blank" rel="noopener noreferrer">قواعد التسوية</a></div>
             <label><input id="tradfi-consent-check" type="checkbox"><span>قرأت الشروط المعمول بها وأوافق على إرسال طلب توقيع الاتفاقية لحساب Demo.</span></label>
             <button id="tradfi-sign-button" class="tradfi-sign-button" type="button" disabled>توقيع الاتفاقية عبر API</button>
             <small id="tradfi-agreement-status" class="tradfi-status">يتحقق البوت من حالة الحساب…</small>
@@ -839,10 +839,14 @@ body {
       button.disabled = !connected || !consent.checked;
       button.textContent = 'توقيع الاتفاقية عبر API';
       if (!connected) status.textContent = 'اربط Binance Futures Demo أولًا.';
-      else if (!status.dataset.pending) status.textContent = 'لم يُسجّل توقيع الاتفاقية لهذا المفتاح.';
+      else if (!status.dataset.pending && !status.dataset.error) status.textContent = 'لم يُسجّل توقيع الاتفاقية لهذا المفتاح.';
     }
   }
-  consent.addEventListener('change', syncTradfiConsent);
+  consent.addEventListener('change', function () {
+    status.dataset.pending = '';
+    status.dataset.error = '';
+    syncTradfiConsent();
+  });
   document.addEventListener('tradfi-state', syncTradfiConsent);
   button.addEventListener('click', async function () {
     if (!consent.checked || button.disabled) return;
@@ -871,6 +875,7 @@ body {
     } catch (error) {
       status.textContent = error.message || 'تعذر الاتصال بـ Binance Demo.';
       status.dataset.pending = '';
+      status.dataset.error = 'true';
       consent.disabled = false;
       button.disabled = !consent.checked;
     }
