@@ -557,6 +557,7 @@ body {
     var positions = Array.isArray(d.positions) ? d.positions : [];
     var spotPositions = positions.filter(function(p){ return p.market_type !== 'Futures Demo'; });
     var symbols = Array.isArray(future.symbols) ? future.symbols : [];
+    var unavailableSymbols = Array.isArray(future.unavailable_symbols) ? future.unavailable_symbols : [];
     el('spot-balance').textContent = usd(wallet.total, 2);
     el('spot-free').textContent = usd(wallet.free, 2);
     var spotTradeSlots = spotPositions.reduce(function(total, p) {
@@ -577,7 +578,8 @@ body {
     el('futures-open').textContent = (future.open_positions || 0) + ' / ' + (settings.futures_max_concurrent_trades || 6);
     el('futures-pnl').textContent = usd(future.realized_pnl, 2);
     el('futures-pnl').className = pnlClass(future.realized_pnl);
-    el('futures-symbols').innerHTML = symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>';
+    el('futures-symbols').innerHTML = (symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>') +
+      (unavailableSymbols.length ? '<small class="account-market-unavailable">غير متاح في Demo: ' + unavailableSymbols.map(esc).join('، ') + '</small>' : '');
   }
   function renderHistory(trades) {
     var host = el('trade-history');
