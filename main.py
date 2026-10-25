@@ -24,7 +24,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from strategy_engine import evaluate_symbol, STRATEGY_RISK
+from strategy_engine import evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional
 from futures_engine import BinanceFuturesDemo
 
 # =====================================================================
@@ -663,26 +663,33 @@ def _parse_fill(order, symbol):
     return filled, cost, avg, _fees_in(order, base), _fees_in(order, quote)
 
 
-def place_buy(symbol, ref_price):
-    """يرجع dict فيه: price, amount (الصافي بعد العمولة), cost, simulated"""
+def place_buy(symbol, ref_price, stop_distance=None):
+    """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if not TRADING_ENABLED:
         return {'price': ref_price, 'amount': TRADE_AMOUNT_USDT / ref_price,
                 'cost': TRADE_AMOUNT_USDT, 'simulated': True}
 
+    amount_usdt = float(TRADE_AMOUNT_USDT)
+    if stop_distance is not None:
+        _, total_equity = get_binance_balance(ttl=0)
+        amount_usdt = risk_sized_notional(
+            total_equity, ref_price, stop_distance, TRADE_AMOUNT_USDT, RISK_PER_TRADE_PCT)
+
     market = exchange.market(symbol)
     min_cost = ((market.get('limits') or {}).get('cost') or {}).get('min')
-    if min_cost and TRADE_AMOUNT_USDT < float(min_cost):
-        raise ValueError("حجم الصفقة {} أقل من الحد الأدنى {} USDT".format(TRADE_AMOUNT_USDT, min_cost))
+    if min_cost and amount_usdt < float(min_cost):
+        raise ValueError("حجم الصفقة المحسوب {:.2f} USDT أقل من الحد الأدنى {} USDT".format(amount_usdt, min_cost))
 
     free_usdt = float(exchange.fetch_balance().get('free', {}).get('USDT', 0.0) or 0.0)
-    if free_usdt < TRADE_AMOUNT_USDT:
-        raise ValueError("الرصيد المتاح {:.2f} USDT أقل من حجم الصفقة".format(free_usdt))
+    if free_usdt < amount_usdt:
+        raise ValueError("الرصيد المتاح {:.2f} USDT أقل من حجم الصفقة المحسوب {:.2f} USDT".format(free_usdt, amount_usdt))
 
-    amount = float(exchange.amount_to_precision(symbol, TRADE_AMOUNT_USDT / ref_price))
+    amount = float(exchange.amount_to_precision(symbol, amount_usdt / ref_price))
     order = exchange.create_order(symbol, 'market', 'buy', amount)
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, quote_fee = _parse_fill(order, symbol)
-    return {'price': avg, 'amount': filled - base_fee, 'cost': cost + quote_fee, 'simulated': False}
+    return {'price': avg, 'amount': filled - base_fee, 'cost': cost + quote_fee,
+            'notional_cap': TRADE_AMOUNT_USDT, 'risk_sized_notional': amount_usdt, 'simulated': False}
 
 
 def place_sell(symbol, pos):
@@ -1113,7 +1120,8 @@ def automated_market_scan():
                     save_position(symbol, pos)
                     last_entry_candle[symbol] = candle
                     try:
-                        fill = place_buy(symbol, current_price)
+                        add_stop_distance = atr * STRATEGY_RISK[pos['strategy']]['stop_atr']
+                        fill = place_buy(symbol, current_price, add_stop_distance)
                     except Exception as e:
                         print("❌ [PYRAMID ERROR] {}: {}".format(symbol, e))
                         log_event("ERR", "إضافة {}: {}".format(symbol, str(e)[:80]))
@@ -1151,8 +1159,10 @@ def automated_market_scan():
                     continue
 
                 last_entry_candle[symbol] = candle
+                entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
+                entry_stop_distance = entry_atr * STRATEGY_RISK[setup['strategy']]['stop_atr']
                 try:
-                    fill = place_buy(symbol, current_price)
+                    fill = place_buy(symbol, current_price, entry_stop_distance)
                 except Exception as e:
                     print("❌ [BUY ERROR] {}: {}".format(symbol, e))
                     log_event("ERR", "شراء {}: {}".format(symbol, str(e)[:80]))
