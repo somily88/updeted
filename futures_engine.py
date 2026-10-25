@@ -10,7 +10,8 @@ import sqlite3
 import time
 
 import ccxt
-from strategy_engine import evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional
+from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
+                             risk_sized_notional, market_liquidity_check, retry_api_read)
 
 TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUSDT","TSLAUSDT","SNDKUSDT","METAUSDT","AMDUSDT","MSFTUSDT","BEUSDT","AMZNUSDT"]
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
@@ -64,6 +65,13 @@ class BinanceFuturesDemo:
             position_columns = {row[1] for row in conn.execute("PRAGMA table_info(futures_positions)")}
             if "side" not in position_columns:
                 conn.execute("ALTER TABLE futures_positions ADD COLUMN side TEXT NOT NULL DEFAULT 'long'")
+            for column, definition in (("risk_distance", "REAL"),
+                                       ("partial_taken", "INTEGER NOT NULL DEFAULT 0"),
+                                       ("partial_attempted", "INTEGER NOT NULL DEFAULT 0"),
+                                       ("partial_pnl_usdt", "REAL NOT NULL DEFAULT 0"),
+                                       ("initial_cost", "REAL")):
+                if column not in position_columns:
+                    conn.execute("ALTER TABLE futures_positions ADD COLUMN {} {}".format(column, definition))
             conn.execute("""CREATE TABLE IF NOT EXISTS futures_trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL,
                 entry_price REAL NOT NULL, exit_price REAL NOT NULL, pnl_pct REAL NOT NULL,
@@ -84,13 +92,17 @@ class BinanceFuturesDemo:
             with self._connect() as conn:
                 rows = conn.execute("""SELECT symbol, entry_price, amount, contracts, cost,
                     highest_price, stop_price, target_price, trailing_distance, strategy,
-                    timeframe, opened_at, side FROM futures_positions""").fetchall()
+                    timeframe, opened_at, side, risk_distance, partial_taken,
+                    partial_attempted, partial_pnl_usdt, initial_cost FROM futures_positions""").fetchall()
             return {row[0]: {
                 "symbol": row[0], "entry_price": row[1], "amount": row[2],
                 "contracts": row[3], "cost": row[4], "highest_price": row[5],
                 "stop_price": row[6], "target_price": row[7],
                 "trailing_distance": row[8], "strategy": row[9],
                 "timeframe": row[10], "opened_at": row[11], "side": row[12] or "long",
+                "risk_distance": float(row[13] or 0.0), "partial_taken": bool(row[14]),
+                "partial_attempted": bool(row[15]), "partial_pnl_usdt": float(row[16] or 0.0),
+                "initial_cost": float(row[17] or row[4] or 0.0),
             } for row in rows}
         except sqlite3.OperationalError:
             return {}
@@ -101,7 +113,7 @@ class BinanceFuturesDemo:
         if cached["value"] is not None and now - cached["time"] < ttl:
             return dict(cached["value"])
         try:
-            data = self.exchange.fetch_balance()
+            data = retry_api_read(self.exchange.fetch_balance)
             value = {
                 "free": float((data.get("free") or {}).get("USDT") or 0),
                 "total": float((data.get("total") or {}).get("USDT") or 0),
@@ -129,67 +141,94 @@ class BinanceFuturesDemo:
             "symbols": self.symbols, "unavailable_symbols": self.unavailable_symbols,
             "open_positions": len(self.positions),
             "balance": balance["total"], "free_balance": balance["free"],
-            **stats,
+            "realized_pnl": stats["realized_pnl"] + sum(float(p.get("partial_pnl_usdt") or 0.0) for p in self.positions.values()),
+            **{key: value for key, value in stats.items() if key != "realized_pnl"},
         }
 
     def _save_position(self, pos):
         with self._connect() as conn:
             conn.execute("""INSERT OR REPLACE INTO futures_positions
                 (symbol, entry_price, amount, contracts, cost, highest_price, stop_price,
-                 target_price, trailing_distance, strategy, timeframe, opened_at, side)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 target_price, trailing_distance, strategy, timeframe, opened_at, side,
+                 risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (pos["symbol"], pos["entry_price"], pos["amount"], pos["contracts"],
                  pos["cost"], pos["highest_price"], pos["stop_price"], pos["target_price"],
                  pos["trailing_distance"], pos["strategy"], pos["timeframe"], pos["opened_at"],
-                 pos.get("side", "long")))
+                 pos.get("side", "long"), pos.get("risk_distance"),
+                 1 if pos.get("partial_taken") else 0,
+                 1 if pos.get("partial_attempted") else 0, float(pos.get("partial_pnl_usdt") or 0.0),
+                 float(pos.get("initial_cost") or pos.get("cost") or 0.0)))
 
-    def _close(self, symbol, pos, price, reason):
+    def _close(self, symbol, pos, price, reason, contracts_to_close=None, partial=False):
         side = pos.get("side", "long")
         close_side = "buy" if side == "short" else "sell"
+        previous_contracts = float(pos["contracts"])
+        requested = min(previous_contracts, float(contracts_to_close or previous_contracts))
+        requested = float(self.exchange.amount_to_precision(symbol, requested))
+        if requested <= 0:
+            raise ValueError("كمية الإغلاق أقل من دقة العقد")
+        # Never retry create_order; only read the status of the submitted order.
         order = self.exchange.create_order(
-            symbol, "market", close_side, pos["contracts"], None, {"reduceOnly": True})
+            symbol, "market", close_side, requested, None, {"reduceOnly": True})
         if order.get("status") != "closed" and order.get("id"):
-            order = self.exchange.fetch_order(order["id"], symbol)
+            order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
         filled = float(order.get("filled") or 0)
         if filled <= 0:
-            raise RuntimeError("أمر الإغلاق لم يُنفذ؛ ستتم إعادة المحاولة لاحقًا")
+            raise RuntimeError("أمر الإغلاق لم يُؤكد؛ لن يُعاد إرساله تلقائيًا")
         exit_price = float(order.get("average") or price)
-        market = self.exchange.market(symbol)
-        multiplier = float(market.get("contractSize") or 1)
-        previous_contracts = pos["contracts"]
+        multiplier = float(self.exchange.market(symbol).get("contractSize") or 1)
         closed_contracts = min(filled, previous_contracts)
         direction = -1.0 if side == "short" else 1.0
-        pnl = direction * (exit_price - pos["entry_price"]) * closed_contracts * multiplier
-        closed_cost = pos["cost"] * closed_contracts / previous_contracts
-        pnl_pct = pnl / closed_cost * 100 if closed_cost else 0.0
-        status = "WIN" if pnl > 0 else "LOSS"
-        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        tranche_pnl = direction * (exit_price - pos["entry_price"]) * closed_contracts * multiplier
+        closed_cost = float(pos["cost"]) * closed_contracts / previous_contracts
         remaining = max(previous_contracts - closed_contracts, 0.0)
-        with self._connect() as conn:
-            if remaining <= 0:
-                conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
-            else:
-                pos["contracts"] = remaining
-                pos["amount"] = remaining * multiplier
-                pos["cost"] -= closed_cost
-                conn.execute("""UPDATE futures_positions SET amount = ?, contracts = ?, cost = ?,
-                    highest_price = ? WHERE symbol = ?""",
-                    (pos["amount"], pos["contracts"], pos["cost"], pos["highest_price"], symbol))
-            conn.execute("""INSERT INTO futures_trades
-                (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
-                 strategy, timeframe, side) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (symbol, pos["entry_price"], exit_price, pnl_pct, pnl, status, now,
-                 pos["strategy"], pos["timeframe"], side))
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if remaining > 0:
+            pos["contracts"] = remaining
+            pos["amount"] = remaining * multiplier
+            pos["cost"] = max(float(pos["cost"]) - closed_cost, 0.0)
+        if partial:
+            pos["partial_taken"] = True
+            pos["partial_pnl_usdt"] = float(pos.get("partial_pnl_usdt") or 0.0) + tranche_pnl
+            pos["stop_price"] = (min(float(pos["stop_price"]), float(pos["entry_price"]))
+                                 if side == "short"
+                                 else max(float(pos["stop_price"]), float(pos["entry_price"])))
+            self._save_position(pos)
+            self.on_event("FUTURES", "جني جزئي {} {} · {:+.2f} USDT عند 1R · الوقف للتعادل".format(
+                symbol, "Short" if side == "short" else "Long", tranche_pnl))
+            return
         if remaining <= 0:
+            total_pnl = float(pos.get("partial_pnl_usdt") or 0.0) + tranche_pnl
+            basis = float(pos.get("initial_cost") or (pos["cost"] + closed_cost) or 0.0)
+            pnl_pct = total_pnl / basis * 100.0 if basis else 0.0
+            status = "WIN" if total_pnl > 0 else "LOSS"
+            with self._connect() as conn:
+                conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
+                conn.execute("""INSERT INTO futures_trades
+                    (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
+                     strategy, timeframe, side) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (symbol, pos["entry_price"], exit_price, pnl_pct, total_pnl, status, now,
+                     pos["strategy"], pos["timeframe"], side))
             self.positions.pop(symbol, None)
-        self.on_event("FUTURES", "إغلاق {} {} {} ({:+.2f} USDT)".format(
-            symbol, "Short" if side == "short" else "Long", reason, pnl))
+            self.on_event("FUTURES", "إغلاق {} {} {} (إجمالي {:+.2f} USDT)".format(
+                symbol, "Short" if side == "short" else "Long", reason, total_pnl))
+        else:
+            pos["partial_pnl_usdt"] = float(pos.get("partial_pnl_usdt") or 0.0) + tranche_pnl
+            with self._connect() as conn:
+                conn.execute("""UPDATE futures_positions SET amount=?, contracts=?, cost=?,
+                    highest_price=?, partial_pnl_usdt=? WHERE symbol=?""",
+                    (pos["amount"], pos["contracts"], pos["cost"], pos["highest_price"],
+                     pos["partial_pnl_usdt"], symbol))
+            self.on_event("WARN", "إغلاق {} نُفذ جزئيًا؛ سيُتابع المتبقي دون تكرار الأمر".format(symbol))
 
     def _monitor_positions(self):
         for symbol, pos in list(self.positions.items()):
             try:
                 side = pos.get("side", "long")
-                price = float(self.exchange.fetch_ticker(symbol)["last"])
+                if pos.get("partial_attempted") and not pos.get("partial_taken"):
+                    continue  # ambiguous tranche order: require reconciliation before another order
+                price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
                 self.snapshot[symbol] = {"symbol": symbol, "price": price, "ready": True,
                                          "in_position": True, "direction": side}
                 if pos.get("strategy") == "forced_test":
@@ -214,6 +253,23 @@ class BinanceFuturesDemo:
                     self._close(symbol, pos, price, "هدف الربح")
                 elif hit_stop:
                     self._close(symbol, pos, price, "وقف الخسارة")
+                elif (pos.get("strategy") != "forced_test" and not pos.get("partial_taken")
+                      and not pos.get("partial_attempted")
+                      and float(pos.get("risk_distance") or 0.0) > 0):
+                    reached_1r = (price <= pos["entry_price"] - pos["risk_distance"] if side == "short"
+                                  else price >= pos["entry_price"] + pos["risk_distance"])
+                    if reached_1r:
+                        requested = float(self.exchange.amount_to_precision(symbol, pos["contracts"] * 0.5))
+                        market = self.exchange.market(symbol)
+                        min_cost = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
+                        if requested > 0 and requested * float(market.get("contractSize") or 1) * price >= min_cost:
+                            pos["partial_attempted"] = True
+                            self._save_position(pos)
+                            self._close(symbol, pos, price, "جني 50% عند 1R", requested, partial=True)
+                        else:
+                            pos["partial_attempted"] = True
+                            self._save_position(pos)
+                            self.on_event("WARN", "تخطي الجني الجزئي {}: نصف المركز أقل من الحد الأدنى".format(symbol))
             except Exception as exc:
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
 
@@ -252,7 +308,7 @@ class BinanceFuturesDemo:
         order_id = None
         try:
             market = self.exchange.market(symbol)
-            external_positions = self.exchange.fetch_positions([symbol])
+            external_positions = retry_api_read(self.exchange.fetch_positions, [symbol])
             if any(abs(float(p.get("contracts") or 0)) > 0 for p in external_positions):
                 self.on_event("WARN", "تخطي اختبار Futures: يوجد مركز غير مُدار على {}".format(symbol))
                 return
@@ -262,7 +318,7 @@ class BinanceFuturesDemo:
             amount_usdt = float(trade_amount_usdt)
             if amount_usdt <= 0 or account["free"] < amount_usdt:
                 raise ValueError("الرصيد المتاح أقل من قيمة صفقة الاختبار")
-            price = float(self.exchange.fetch_ticker(symbol)["last"])
+            price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
             multiplier = float(market.get("contractSize") or 1)
             contracts = float(self.exchange.amount_to_precision(symbol, amount_usdt / (price * multiplier)))
             notional = contracts * multiplier * price
@@ -284,7 +340,7 @@ class BinanceFuturesDemo:
             order = self.exchange.create_order(symbol, "market", order_side, contracts)
             order_id = order.get("id")
             if order.get("status") != "closed" and order.get("id"):
-                order = self.exchange.fetch_order(order["id"], symbol)
+                order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
             filled = float(order.get("filled") or 0)
             if filled <= 0:
                 raise RuntimeError("لم يؤكد Binance تنفيذ أمر اختبار Futures")
@@ -299,7 +355,9 @@ class BinanceFuturesDemo:
                 "symbol": symbol, "entry_price": entry, "amount": filled * multiplier,
                 "contracts": filled, "cost": actual_cost, "highest_price": entry,
                 "stop_price": stop_price, "target_price": target_price,
-                "trailing_distance": 0.0, "strategy": "forced_test",
+                "trailing_distance": 0.0, "risk_distance": abs(entry - stop_price),
+                "partial_taken": True, "partial_pnl_usdt": 0.0, "initial_cost": actual_cost,
+                "strategy": "forced_test",
                 "timeframe": "demo-test", "opened_at": opened_at, "side": side,
             }
             self.positions[symbol] = pos
@@ -311,11 +369,11 @@ class BinanceFuturesDemo:
             if claimed:
                 # Recover a possibly filled market order if order confirmation failed.
                 try:
-                    recovered = next((p for p in self.exchange.fetch_positions([symbol])
+                    recovered = next((p for p in retry_api_read(self.exchange.fetch_positions, [symbol])
                                       if abs(float(p.get("contracts") or 0)) > 0), None)
                     if recovered:
                         filled = abs(float(recovered.get("contracts") or 0))
-                        entry = float(recovered.get("entryPrice") or self.exchange.fetch_ticker(symbol)["last"])
+                        entry = float(recovered.get("entryPrice") or retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
                         recovered_side = str(recovered.get("side") or side).lower()
                         if recovered_side not in ("long", "short"):
                             recovered_side = side
@@ -328,7 +386,9 @@ class BinanceFuturesDemo:
                             "contracts": filled, "cost": filled * multiplier * entry,
                             "highest_price": entry, "stop_price": stop_price,
                             "target_price": entry - target_delta if recovered_side == "short" else entry + target_delta,
-                            "trailing_distance": 0.0, "strategy": "forced_test",
+                            "trailing_distance": 0.0, "risk_distance": abs(entry - stop_price),
+                            "partial_taken": True, "partial_pnl_usdt": 0.0,
+                            "initial_cost": filled * multiplier * entry, "strategy": "forced_test",
                             "timeframe": "demo-test", "opened_at": opened_at, "side": recovered_side,
                         }
                         self.positions[symbol] = pos
@@ -354,7 +414,7 @@ class BinanceFuturesDemo:
         for symbol in self.symbols:
             try:
                 setup = evaluate_symbol(self.exchange, symbol, allow_short=True)
-                price = float(self.exchange.fetch_ticker(symbol)["last"])
+                price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
                 direction = str((setup or {}).get("direction", "flat")).lower()
                 self.snapshot[symbol] = {
                     "symbol": symbol, "price": price, "ready": bool(setup),
@@ -377,8 +437,12 @@ class BinanceFuturesDemo:
                 if direction not in ("long", "short"):
                     self.on_event("WARN", "تخطي {}: اتجاه إشارة غير معروف".format(symbol))
                     continue
+                liquid, liquidity_reason = market_liquidity_check(self.exchange, symbol, "Futures Demo")
+                if not liquid:
+                    self.on_event("GATE", "تخطي Futures {}: {}".format(symbol, liquidity_reason))
+                    continue
                 # Fail closed if the account has an unmanaged position on this contract.
-                exchange_positions = self.exchange.fetch_positions([symbol])
+                exchange_positions = retry_api_read(self.exchange.fetch_positions, [symbol])
                 unmanaged = [p for p in exchange_positions if abs(float(p.get("contracts") or 0)) > 0]
                 if unmanaged:
                     self.on_event("WARN", "تخطي {}: توجد صفقة Futures خارج إدارة البوت".format(symbol))
@@ -411,7 +475,7 @@ class BinanceFuturesDemo:
                 order_side = "sell" if direction == "short" else "buy"
                 order = self.exchange.create_order(symbol, "market", order_side, contracts)
                 if order.get("status") != "closed" and order.get("id"):
-                    order = self.exchange.fetch_order(order["id"], symbol)
+                    order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
                 filled = float(order.get("filled") or 0)
                 if filled <= 0:
                     raise RuntimeError("أمر الدخول لم يُنفذ؛ لن تُسجل الصفقة كمفتوحة")
@@ -428,6 +492,8 @@ class BinanceFuturesDemo:
                     "contracts": filled, "cost": filled * multiplier * entry,
                     "highest_price": entry, "stop_price": stop_price,
                     "target_price": target_price, "trailing_distance": atr * risk["trail_atr"],
+                    "risk_distance": stop_distance, "partial_taken": False, "partial_pnl_usdt": 0.0,
+                    "initial_cost": filled * multiplier * entry,
                     "strategy": setup["strategy"], "timeframe": setup["timeframe"],
                     "opened_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "side": direction,
