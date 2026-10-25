@@ -389,7 +389,8 @@ body {
         <div class="wallet-top">
         <div class="wallet-row">
           <div>
-            <div class="wallet-label">قيمة المحفظة</div>
+            <div class="wallet-label">قيمة المحفظة · نقد + مراكز</div>
+            <div class="sub wallet-market-status" id="wallet-market-status">بانتظار تحديث الأسعار</div>
             <div class="wallet-value">
               <h1 id="wallet-value">—</h1>
               <span class="change flat" id="change" dir="ltr"></span>
@@ -670,6 +671,13 @@ body {
     if (d.balance_status === 'stale') el('free-usdt').title = 'تعذّر جلب رصيد حديث؛ المعروض آخر رصيد ناجح قبل ' + Math.floor((d.balance_age_seconds || 0) / 60) + ' دقيقة';
     else if (balanceMissing) el('free-usdt').title = 'لا توجد قراءة ناجحة للرصيد حتى الآن';
     else el('free-usdt').removeAttribute('title');
+    var walletStatus = el('wallet-market-status');
+    if (walletStatus) {
+      if (balanceMissing) walletStatus.textContent = 'تعذّر جلب قيمة موثوقة';
+      else if (d.balance_status === 'stale') walletStatus.textContent = 'بيانات الرصيد قديمة';
+      else if (wallet.price_status === 'stale') walletStatus.textContent = 'تعذّر تحديث سعر مركز';
+      else walletStatus.textContent = usd(wallet.cash, 2) + ' نقدًا · ' + usd(wallet.positions_value, 2) + ' قيمة المراكز';
+    }
     el('realized-pl').textContent = usd(stats.realized_total, 2);
     el('realized-pl').className = pnlClass(stats.realized_total);
     el('realized-sub').textContent = 'اليوم ' + usd(stats.realized_today, 2);
