@@ -24,7 +24,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional,
+from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
+                             TRAILING_ACTIVATION_PCT, risk_sized_notional,
                              market_liquidity_check, retry_api_read)
 from futures_engine import BinanceFuturesDemo
 
@@ -986,20 +987,21 @@ def check_and_close_positions():
                 pos['highest_price'] = highest_price
                 save_position(symbol, pos)
 
-            target = pos.get('target_price') or entry_price + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12)
+            target = pos.get('target_price')
+            if not pos.get('partial_taken') and target is None:
+                target = entry_price + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12)
             initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
-            trailing_distance = pos.get('trailing_distance')
-            active_stop = max(initial_stop, highest_price - trailing_distance) if trailing_distance else max(
-                entry_price * (1 - INITIAL_SL_PCT / 100),
-                highest_price * (1 - TRAILING_SL_PCT / 100)
-            )
+            trailing_distance = float(pos.get('trailing_distance') or entry_price * TRAILING_SL_PCT / 100)
+            trail_armed = (bool(pos.get('partial_taken'))
+                           and highest_price >= entry_price * (1 + TRAILING_ACTIVATION_PCT / 100))
+            active_stop = max(initial_stop, highest_price - trailing_distance) if trail_armed else initial_stop
 
             reason = None
             if pos.get('test'):
                 opened = datetime.datetime.strptime(pos['time'], "%Y-%m-%d %H:%M:%S")
                 if (datetime.datetime.now() - opened).total_seconds() >= TEST_TRADE_SECONDS:
                     reason = "TEST"
-            elif current_price >= target:
+            elif not pos.get('partial_taken') and target is not None and current_price >= target:
                 reason = "TP"
             elif current_price <= active_stop:
                 reason = "SL"
@@ -1012,8 +1014,11 @@ def check_and_close_positions():
                         min_cost = float((((exchange.market(symbol).get('limits') or {}).get('cost') or {}).get('min')) or 0.0)
                         if min_cost and tranche * float(current_price) < min_cost:
                             pos['partial_attempted'] = True
+                            pos['partial_taken'] = True  # no partial is possible below exchange minimum
+                            pos['target_price'] = None
+                            pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
                             save_position(symbol, pos)
-                            log_event("GATE", "تخطي الجني الجزئي {}: نصف المركز دون الحد الأدنى".format(symbol))
+                            log_event("GATE", "تخطي الجني الجزئي {}: نصف المركز دون الحد الأدنى؛ متابعة الوقف فقط".format(symbol))
                             continue
                         pos['partial_attempted'] = True
                         save_position(symbol, pos)
@@ -1026,6 +1031,7 @@ def check_and_close_positions():
                             pos['cost'] = max(float(pos['cost']) - cost_sold, 0.0)
                             pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + partial_pnl
                             pos['partial_taken'] = True
+                            pos['target_price'] = None  # let the remaining half run under the trailing stop
                             pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
                             active_positions[symbol] = pos
                             save_position(symbol, pos)
