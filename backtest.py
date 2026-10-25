@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 
 import ccxt
-from strategy_engine import STRATEGY_RISK, evaluate_symbol
+from strategy_engine import STRATEGY_RISK, RISK_PER_TRADE_PCT, evaluate_symbol, risk_sized_notional
 
 TIMEFRAME_MS = {
     "5m": 5 * 60_000,
@@ -260,10 +260,14 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             raw_entry = float(entry_bar[1])
             direction = "short" if allow_short and setup.get("direction") == "short" else "long"
             entry_price = raw_entry * (1.0 + slippage_rate if direction == "long" else 1.0 - slippage_rate)
-            quantity = notional / entry_price
-            entry_fee = quantity * entry_price * fee_rate
             atr = max(float(setup.get("atr") or 0.0), entry_price * 0.0005)
             risk = adjusted_risk(setup["strategy"], profile)
+            current_equity = float(capital) + sum(float(t["net_pnl_usdt"]) for t in trades)
+            sized_notional = risk_sized_notional(
+                current_equity, entry_price, atr * risk["stop_atr"], notional,
+                RISK_PER_TRADE_PCT)
+            quantity = sized_notional / entry_price
+            entry_fee = quantity * entry_price * fee_rate
             if direction == "long":
                 stop = entry_price - atr * risk["stop_atr"]
                 target = entry_price + atr * risk["target_atr"]
@@ -278,7 +282,7 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 "signal_strength": setup.get("signal_strength", 0),
                 "signal_time_utc": iso_utc(now_ms), "entry_time_utc": iso_utc(now_ms),
                 "entry_ms": now_ms, "entry_price": entry_price, "quantity": quantity,
-                "notional": notional, "entry_fee": entry_fee, "stop_price": stop,
+                "notional": sized_notional, "entry_fee": entry_fee, "stop_price": stop,
                 "target_price": target, "trailing_distance": atr * risk["trail_atr"],
                 "extreme": extreme,
             }
