@@ -548,18 +548,65 @@ class FuturesCredentials(BaseModel):
 
 class TradFiAgreementConsent(BaseModel):
     accepted: bool
-_balance_cache = {'t': 0.0, 'v': (0.0, 0.0)}
+_balance_cache = {'t': 0.0, 'v': (0.0, 0.0), 'error': False}
+_position_price_cache = {}
+_position_price_lock = threading.Lock()
+
+
+def get_spot_mark_price(symbol, fallback_price=None, ttl=5):
+    """Fresh Demo ticker for portfolio marks, with a short cache and stale fallback."""
+    now = time.time()
+    with _position_price_lock:
+        cached = _position_price_cache.get(symbol)
+        if cached and now - cached['time'] < ttl:
+            return float(cached['price']), True
+    try:
+        price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
+        if price <= 0:
+            raise ValueError("non-positive ticker")
+        with _position_price_lock:
+            _position_price_cache[symbol] = {'price': price, 'time': now}
+        snapshot = market_snapshot.get(symbol)
+        if isinstance(snapshot, dict):
+            snapshot['price'] = price
+            snapshot['price_updated_at'] = now
+        return price, True
+    except Exception as exc:
+        snapshot = market_snapshot.get(symbol) or {}
+        stale = snapshot.get('price')
+        print("Spot mark price unavailable for {} ({})".format(symbol, type(exc).__name__))
+        if isinstance(stale, (int, float)) and stale > 0:
+            return float(stale), False
+        if fallback_price and float(fallback_price) > 0:
+            return float(fallback_price), False
+        raise
 
 
 def get_binance_balance(ttl=10):
+    """Return free cash and Spot equity marked with current prices for managed holdings."""
     now = time.time()
-    if now - _balance_cache['t'] < ttl:
-        return _balance_cache['v']
-    value = _get_binance_balance_uncached()
-    if value != (0.0, 0.0):
-        _balance_cache['t'] = now
-        _balance_cache['v'] = value
-    return value
+    cache_fresh = _balance_cache['v'] != (0.0, 0.0) and now - _balance_cache['t'] < ttl
+    if cache_fresh:
+        free_cash, cash_total = _balance_cache['v']
+    else:
+        value = _get_binance_balance_uncached()
+        if value != (0.0, 0.0):
+            _balance_cache.update({'t': now, 'v': value, 'error': False})
+            free_cash, cash_total = value
+        elif _balance_cache['v'] != (0.0, 0.0):
+            _balance_cache['error'] = True
+            free_cash, cash_total = _balance_cache['v']
+        else:
+            _balance_cache['error'] = True
+            free_cash, cash_total = 0.0, 0.0
+
+    holdings_value = 0.0
+    for symbol, pos in list(active_positions.items()):
+        if pos.get('simulated'):
+            continue
+        price, _ = get_spot_mark_price(symbol, pos.get('entry_price'))
+        holdings_value += float(pos.get('amount') or 0.0) * price
+    return free_cash, cash_total + holdings_value
 
 
 def _get_binance_balance_uncached():
@@ -568,32 +615,22 @@ def _get_binance_balance_uncached():
         free_usdt = float(balance.get('free', {}).get('USDT', 0.0) or 0.0)
         free_usdc = float(balance.get('free', {}).get('USDC', 0.0) or 0.0)
         total_usdt = float(balance.get('total', {}).get('USDT', 0.0) or 0.0) + float(balance.get('total', {}).get('USDC', 0.0) or 0.0)
-
         if 'info' in balance and 'balances' in balance['info']:
             total_usdt = 0.0
-            for b in balance['info']['balances']:
-                asset = b.get('asset')
-                free_val = float(b.get('free', 0.0))
-                locked_val = float(b.get('locked', 0.0))
+            for item in balance['info']['balances']:
+                asset = item.get('asset')
+                free_val = float(item.get('free', 0.0))
+                locked_val = float(item.get('locked', 0.0))
                 if asset == 'USDT':
                     free_usdt = free_val
                     total_usdt += free_val + locked_val
                 elif asset == 'USDC':
                     free_usdc = free_val
                     total_usdt += free_val + locked_val
-
-        # أضف قيمة العملات المحتفظ بها في الصفقات المفتوحة الفعلية
-        for sym, pos in active_positions.items():
-            if pos.get('simulated'):
-                continue
-            price = market_snapshot.get(sym, {}).get('price')
-            if isinstance(price, (int, float)):
-                total_usdt += pos['amount'] * price
-
-        available_total = free_usdt if free_usdt > 0 else free_usdc
-        return available_total, total_usdt if total_usdt > 0 else available_total
-    except Exception as e:
-        print("Balance Fetch Error details: {}".format(e))
+        available_cash = free_usdt if free_usdt > 0 else free_usdc
+        return available_cash, total_usdt if total_usdt > 0 else available_cash
+    except Exception as exc:
+        print("Balance Fetch Error details: {}".format(type(exc).__name__))
         return 0.0, 0.0
 
 
@@ -1288,6 +1325,7 @@ def read_root():
 
 @app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
 def api_state():
+    spot_prices_fresh = True
     total, wins, losses, win_rate, total_pnl, best, worst = get_performance_stats()
     realized_total, realized_today = get_realized_stats()
     free_usdt, total_usdt = get_binance_balance()
@@ -1295,12 +1333,15 @@ def api_state():
     positions = []
     invested = 0.0
     unrealized = 0.0
+    spot_position_value = 0.0
     for sym, pos in active_positions.items():
         entry = pos['entry_price']
         high = pos.get('highest_price', entry)
-        price = market_snapshot.get(sym, {}).get('price')
-        price = price if isinstance(price, (int, float)) else entry
+        price, price_fresh = get_spot_mark_price(sym, entry)
+        spot_prices_fresh = spot_prices_fresh and price_fresh
         pnl_usdt = pos['amount'] * price - pos['cost']
+        if not pos.get('simulated'):
+            spot_position_value += float(pos.get('amount') or 0.0) * price
         invested += pos['cost']
         unrealized += pnl_usdt
         positions.append({
@@ -1406,7 +1447,15 @@ def api_state():
             'futures_active_trades': len(futures_engine.positions) if futures_engine else 0,
             'active_trades': spot_open_trade_slots + (len(futures_engine.positions) if futures_engine else 0),
         },
-        'wallet': {'total': total_usdt, 'free': free_usdt},
+        'wallet': {
+            'total': total_usdt, 'free': free_usdt,
+            'cash': max(0.0, total_usdt - spot_position_value),
+            'positions_value': spot_position_value,
+            'price_status': 'fresh' if spot_prices_fresh else 'stale',
+        },
+        'balance_status': ('unavailable' if _balance_cache['v'] == (0.0, 0.0)
+                           else 'stale' if _balance_cache.get('error') else 'fresh'),
+        'balance_age_seconds': int(max(0.0, time.time() - _balance_cache['t'])) if _balance_cache['t'] else None,
         'stats': {
             'realized_total': realized_total, 'realized_today': realized_today,
             'unrealized': unrealized, 'wins': wins, 'losses': losses, 'total': total,
