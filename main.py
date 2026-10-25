@@ -24,7 +24,8 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from strategy_engine import evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional
+from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional,
+                             market_liquidity_check, retry_api_read)
 from futures_engine import BinanceFuturesDemo
 
 # =====================================================================
@@ -158,6 +159,11 @@ def init_db():
             ('entries', 'INTEGER NOT NULL DEFAULT 1'),
             ('last_add_candle', 'TEXT'),
             ('add_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+            ('risk_distance', 'REAL'),
+            ('partial_taken', 'INTEGER NOT NULL DEFAULT 0'),
+            ('partial_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+            ('partial_pnl_usdt', 'REAL NOT NULL DEFAULT 0'),
+            ('initial_cost', 'REAL'),
         ]:
             existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
             if column not in existing:
@@ -370,14 +376,18 @@ def save_position(symbol, pos):
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
             (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
-             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
+             risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
               pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
               pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
               pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance'),
               max(1, int(pos.get('entries', 1))), pos.get('last_add_candle'),
-              1 if pos.get('add_attempted') else 0))
+              1 if pos.get('add_attempted') else 0, pos.get('risk_distance'),
+              1 if pos.get('partial_taken') else 0, 1 if pos.get('partial_attempted') else 0,
+              float(pos.get('partial_pnl_usdt') or 0.0),
+              float(pos.get('initial_cost') or pos.get('cost') or 0.0)))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -401,7 +411,8 @@ def load_positions():
         cursor = conn.cursor()
         cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
                           simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
-                          entries, last_add_candle, add_attempted
+                          entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
+                          partial_pnl_usdt, initial_cost
                           FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
@@ -410,7 +421,9 @@ def load_positions():
                 'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
                 'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
                 'entries': max(1, int(r[12] or 1)), 'last_add_candle': r[13],
-                'add_attempted': bool(r[14]),
+                'add_attempted': bool(r[14]), 'risk_distance': float(r[15] or 0.0),
+                'partial_taken': bool(r[16]), 'partial_attempted': bool(r[17]),
+                'partial_pnl_usdt': float(r[18] or 0.0), 'initial_cost': float(r[19] or r[3] or 0.0),
             }
         conn.close()
     except Exception as e:
@@ -550,7 +563,7 @@ def get_binance_balance(ttl=10):
 
 def _get_binance_balance_uncached():
     try:
-        balance = exchange.fetch_balance()
+        balance = retry_api_read(exchange.fetch_balance)
         free_usdt = float(balance.get('free', {}).get('USDT', 0.0) or 0.0)
         free_usdc = float(balance.get('free', {}).get('USDC', 0.0) or 0.0)
         total_usdt = float(balance.get('total', {}).get('USDT', 0.0) or 0.0) + float(balance.get('total', {}).get('USDC', 0.0) or 0.0)
@@ -649,7 +662,7 @@ def _complete_order(order, symbol):
     """تأكد أن الأمر نُفّذ بالكامل وفيه بيانات التنفيذ."""
     if order.get('status') != 'closed' or not order.get('cost'):
         time.sleep(1)
-        order = exchange.fetch_order(order['id'], symbol)
+        order = retry_api_read(exchange.fetch_order, order['id'], symbol)
     return order
 
 
@@ -680,7 +693,7 @@ def place_buy(symbol, ref_price, stop_distance=None):
     if min_cost and amount_usdt < float(min_cost):
         raise ValueError("حجم الصفقة المحسوب {:.2f} USDT أقل من الحد الأدنى {} USDT".format(amount_usdt, min_cost))
 
-    free_usdt = float(exchange.fetch_balance().get('free', {}).get('USDT', 0.0) or 0.0)
+    free_usdt = float(retry_api_read(exchange.fetch_balance).get('free', {}).get('USDT', 0.0) or 0.0)
     if free_usdt < amount_usdt:
         raise ValueError("الرصيد المتاح {:.2f} USDT أقل من حجم الصفقة المحسوب {:.2f} USDT".format(free_usdt, amount_usdt))
 
@@ -692,24 +705,25 @@ def place_buy(symbol, ref_price, stop_distance=None):
             'notional_cap': TRADE_AMOUNT_USDT, 'risk_sized_notional': amount_usdt, 'simulated': False}
 
 
-def place_sell(symbol, pos):
-    """يرجع dict فيه: price, proceeds (الصافي بعد العمولة)"""
+def place_sell(symbol, pos, amount_to_sell=None):
+    """Sell a requested tranche once; order creation is never retried."""
+    requested = min(float(pos['amount']), float(amount_to_sell or pos['amount']))
     if not TRADING_ENABLED or pos.get('simulated'):
-        price = exchange.fetch_ticker(symbol)['last']
-        return {'price': price, 'proceeds': pos['amount'] * price}
+        price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
+        return {'price': price, 'proceeds': requested * price, 'filled': requested}
 
     base = symbol.split('/')[0]
-    free_base = float(exchange.fetch_balance().get('free', {}).get(base, 0.0) or 0.0)
-    amount = float(exchange.amount_to_precision(symbol, min(pos['amount'], free_base)))
+    free_base = float(retry_api_read(exchange.fetch_balance).get('free', {}).get(base, 0.0) or 0.0)
+    amount = float(exchange.amount_to_precision(symbol, min(requested, free_base)))
     if amount <= 0:
         raise ValueError("لا يوجد رصيد كافٍ من {} للبيع".format(base))
-
     order = exchange.create_order(symbol, 'market', 'sell', amount)
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, quote_fee = _parse_fill(order, symbol)
-    # الكمية التي لم تُبع بسبب تقريب Binance لخطوة الكمية (dust) ما زالت ملكاً لك في الحساب، فتُحسب بسعر الخروج
-    dust = max(pos['amount'] - filled, 0.0)
-    return {'price': avg, 'proceeds': cost - quote_fee + dust * avg}
+    proceeds = cost - quote_fee
+    if amount_to_sell is None:
+        proceeds += max(float(pos['amount']) - filled, 0.0) * avg
+    return {'price': avg, 'proceeds': proceeds, 'filled': min(filled + base_fee, requested)}
 
 
 # =====================================================================
@@ -962,7 +976,9 @@ def check_and_close_positions():
     for symbol in list(active_positions.keys()):
         try:
             pos = active_positions[symbol]
-            current_price = exchange.fetch_ticker(symbol)['last']
+            if pos.get('partial_attempted') and not pos.get('partial_taken'):
+                continue  # ambiguous tranche order: freeze automated exits until the Demo order is reconciled
+            current_price = retry_api_read(exchange.fetch_ticker, symbol)['last']
             entry_price = pos['entry_price']
 
             highest_price = max(pos.get('highest_price', entry_price), current_price)
@@ -988,6 +1004,38 @@ def check_and_close_positions():
             elif current_price <= active_stop:
                 reason = "SL"
 
+            if not reason and not pos.get('test') and not pos.get('partial_taken') and not pos.get('partial_attempted'):
+                risk_distance = float(pos.get('risk_distance') or max(entry_price - initial_stop, entry_price * 0.0005))
+                if risk_distance > 0 and current_price >= entry_price + risk_distance:
+                    try:
+                        tranche = float(pos['amount']) * 0.5
+                        min_cost = float((((exchange.market(symbol).get('limits') or {}).get('cost') or {}).get('min')) or 0.0)
+                        if min_cost and tranche * float(current_price) < min_cost:
+                            pos['partial_attempted'] = True
+                            save_position(symbol, pos)
+                            log_event("GATE", "تخطي الجني الجزئي {}: نصف المركز دون الحد الأدنى".format(symbol))
+                            continue
+                        pos['partial_attempted'] = True
+                        save_position(symbol, pos)
+                        partial_sale = place_sell(symbol, pos, tranche)
+                        sold = float(partial_sale.get('filled') or 0.0)
+                        if sold > 0:
+                            cost_sold = float(pos['cost']) * min(sold / float(pos['amount']), 1.0)
+                            partial_pnl = float(partial_sale['proceeds']) - cost_sold
+                            pos['amount'] = max(float(pos['amount']) - sold, 0.0)
+                            pos['cost'] = max(float(pos['cost']) - cost_sold, 0.0)
+                            pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + partial_pnl
+                            pos['partial_taken'] = True
+                            pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
+                            active_positions[symbol] = pos
+                            save_position(symbol, pos)
+                            log_event("PARTIAL", "{} · بيع 50% عند 1R · {:+.2f} USDT · الوقف للتعادل".format(symbol, partial_pnl))
+                            send_telegram_message("✅ <b>جني جزئي Spot عند 1R</b>\n🪙 {}\n💰 المحقق: {:+.2f} USDT\n🔒 تم رفع الوقف إلى نقطة الدخول".format(symbol, partial_pnl))
+                            continue
+                    except Exception as exc:
+                        log_event("ERR", "تعذر الجني الجزئي {}: {}".format(symbol, type(exc).__name__))
+                        continue
+
             if not reason:
                 continue
 
@@ -1001,14 +1049,16 @@ def check_and_close_positions():
                     send_telegram_message("❌ <b>فشل بيع {}</b>\n{}".format(symbol, html.escape(str(e))))
                 continue
 
-            realized_pnl = ((sale['proceeds'] - pos['cost']) / pos['cost']) * 100
-            status = "WIN" if realized_pnl > 0 else "LOSS"
+            total_pnl = float(pos.get('partial_pnl_usdt') or 0.0) + sale['proceeds'] - pos['cost']
+            pnl_basis = float(pos.get('initial_cost') or pos['cost'] or 0.0)
+            realized_pnl = (total_pnl / pnl_basis * 100.0) if pnl_basis else 0.0
+            status = "WIN" if total_pnl > 0 else "LOSS"
             title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار"}.get(reason, "🛑 إغلاق بوقف الخسارة")
             print("{} [{}] {} | PnL: {:+.2f}% | {} ({})".format(
                 title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
             log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
-            log_trade(symbol, entry_price, sale['price'], realized_pnl, status, sale['proceeds'] - pos['cost'])
+            log_trade(symbol, entry_price, sale['price'], realized_pnl, status, total_pnl)
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -1033,7 +1083,7 @@ def automated_market_scan():
                 if symbol not in SUPPORTED_SYMBOLS:
                     continue
                 setup = evaluate_symbol(exchange, symbol)
-                current_price = exchange.fetch_ticker(symbol)['last']
+                current_price = retry_api_read(exchange.fetch_ticker, symbol)['last']
                 if not setup:
                     continue
                 setup = dict(setup)
@@ -1074,6 +1124,10 @@ def automated_market_scan():
                     continue
 
                 if not setup['signal']:
+                    continue
+                liquid, liquidity_reason = market_liquidity_check(exchange, symbol, "Spot")
+                if not liquid:
+                    log_event("GATE", "تخطي Spot {}: {}".format(symbol, liquidity_reason))
                     continue
                 candle = setup.get('candle_ts')
                 if last_entry_candle.get(symbol) == candle:
@@ -1144,6 +1198,7 @@ def automated_market_scan():
                             atr * risk['trail_atr']),
                         'entries': entries + 1,
                         'simulated': bool(pos.get('simulated') or fill['simulated']),
+                        'initial_cost': float(pos.get('initial_cost') or pos['cost']) + float(fill['cost']),
                     })
                     active_positions[symbol] = pos
                     save_position(symbol, pos)
@@ -1181,6 +1236,8 @@ def automated_market_scan():
                     'simulated': fill['simulated'], 'strategy': setup['strategy'],
                     'timeframe': setup['timeframe'], 'stop_price': stop_price,
                     'target_price': target_price, 'trailing_distance': trailing_distance,
+                    'risk_distance': entry_atr * risk['stop_atr'], 'partial_taken': False,
+                    'partial_pnl_usdt': 0.0, 'initial_cost': fill['cost'],
                     'entries': 1, 'last_add_candle': None,
                 }
                 active_positions[symbol] = pos
