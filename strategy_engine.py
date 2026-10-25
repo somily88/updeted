@@ -2,7 +2,31 @@
 
 Signal strength is a heuristic ranking, not a probability of profit.
 """
+import os
 from math import sqrt
+
+RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "2.0"))
+if not 0.0 < RISK_PER_TRADE_PCT <= 2.0:
+    raise ValueError("RISK_PER_TRADE_PCT must be greater than 0 and at most 2")
+
+
+def risk_sized_notional(equity, entry_price, stop_distance, max_notional,
+                        risk_percent=RISK_PER_TRADE_PCT):
+    """Size a position so a stop hit risks at most risk_percent of equity,
+    while keeping max_notional as a hard cap.
+    """
+    equity = float(equity)
+    entry_price = float(entry_price)
+    stop_distance = float(stop_distance)
+    max_notional = float(max_notional)
+    risk_percent = float(risk_percent)
+    if (equity <= 0 or entry_price <= 0 or stop_distance <= 0
+            or max_notional <= 0 or not 0 < risk_percent <= 2.0):
+        raise ValueError("Invalid equity, stop, price, notional cap, or risk percent")
+    risk_budget = equity * risk_percent / 100.0
+    stop_fraction = stop_distance / entry_price
+    return min(max_notional, risk_budget / stop_fraction)
+
 
 STRATEGY_RISK = {
     "trend": {"stop_atr": 1.5, "target_atr": 3.0, "trail_atr": 1.5},
