@@ -456,6 +456,10 @@ active_positions = load_positions()
 market_snapshot = {}
 last_entry_candle = {}   # آخر شمعة تمت محاولة الدخول عليها لكل عملة (لمنع تكرار الدخول على نفس الشمعة)
 scan_lock = threading.Lock()
+scanner_state = {
+    'status': 'waiting', 'last_started_at': None, 'last_completed_at': None,
+    'last_error': None, 'duration_seconds': None
+}
 event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها في لوحة التحكم
 
 
@@ -1118,6 +1122,13 @@ def automated_market_scan():
         print("⏳ [SCANNER] فحص آخر قيد التنفيذ، تم التخطي")
         return
     try:
+        scan_started = time.time()
+        scanner_state.update({
+            'status': 'running',
+            'last_started_at': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'last_error': None,
+        })
+        scan_succeeded = False
         print("🔄 [SCANNER] فحص الاستراتيجيات الآلية الثلاث ({} | Demo-only safety)...".format(BINANCE_ENV))
         check_and_close_positions()
 
@@ -1130,7 +1141,8 @@ def automated_market_scan():
                 if not setup:
                     continue
                 setup = dict(setup)
-                setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S")})
+                setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S"),
+                               'updated_at': time.time()})
                 market_snapshot[symbol] = setup
                 print("📊 {} | {} {} | RSI: {:.2f} | strength: {}/100 | setup: {}".format(
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'],
@@ -1305,9 +1317,16 @@ def automated_market_scan():
                 force_test_side=FORCE_FUTURES_TEST_SIDE,
             )
         record_equity()
+        scan_succeeded = True
     except Exception as e:
-        print("Error in automated market scan: {}".format(e))
+        print("Error in automated market scan: {}".format(type(e).__name__))
+        scanner_state['last_error'] = type(e).__name__
     finally:
+        scanner_state.update({
+            'status': 'idle' if scan_succeeded else 'error',
+            'last_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat() if scan_succeeded else scanner_state.get('last_completed_at'),
+            'duration_seconds': round(time.time() - scan_started, 1),
+        })
         scan_lock.release()
 
 
@@ -1368,7 +1387,9 @@ def api_state():
         markets.append({
             'symbol': sym, 'ready': True, 'price': d['price'], 'rsi': d['rsi'], 'ema': d['ema'],
             'ref_close': d.get('ref_close', d['price']), 'hist': d['hist'], 'signal': d['signal'], 'conds': d.get('conds', {}),
-            'time': d['time'], 'in_position': sym in active_positions,
+            'time': d['time'],
+            'age_seconds': int(max(0.0, time.time() - float(d.get('updated_at') or time.time()))),
+            'in_position': sym in active_positions,
             'strategy': d.get('strategy', 'wait'), 'strategy_label': d.get('strategy_label', 'انتظار'),
             'timeframe': d.get('timeframe', '15m'), 'signal_strength': d.get('signal_strength', 0),
             'reason': d.get('reason', '')
@@ -1397,6 +1418,7 @@ def api_state():
                     'strategy': data.get('strategy', 'wait'),
                     'strategy_label': data.get('strategy_label', 'انتظار'), 'timeframe': data.get('timeframe', '15m'),
                     'signal_strength': data.get('signal_strength', 0),
+                    'age_seconds': int(max(0.0, time.time() - float(data.get('updated_at') or time.time()))),
                     'reason': data.get('reason', ''), 'market_type': 'Futures Demo'})
             else:
                 markets.append({'symbol': sym, 'ready': False, 'supported': True,
@@ -1435,6 +1457,8 @@ def api_state():
     except Exception:
         future_state['tradfi_agreement_signed'] = False
     return {
+        'as_of': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'scanner': dict(scanner_state),
         'futures': future_state,
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
