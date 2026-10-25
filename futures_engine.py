@@ -231,7 +231,8 @@ class BinanceFuturesDemo:
                     continue  # ambiguous tranche order: require reconciliation before another order
                 price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
                 self.snapshot[symbol] = {"symbol": symbol, "price": price, "ready": True,
-                                         "in_position": True, "direction": side}
+                                         "in_position": True, "direction": side,
+                                         "updated_at": time.time()}
                 if pos.get("strategy") == "forced_test":
                     opened = datetime.datetime.strptime(pos["opened_at"], "%Y-%m-%d %H:%M:%S")
                     if (datetime.datetime.now() - opened).total_seconds() >= 120:
@@ -431,6 +432,7 @@ class BinanceFuturesDemo:
                     "timeframe": (setup or {}).get("timeframe", "15m"),
                     "signal_strength": (setup or {}).get("signal_strength", 0),
                     "reason": (setup or {}).get("reason", ""),
+                    "updated_at": time.time(),
                     "in_position": symbol in self.positions,
                 }
                 self.on_event("FUTURES_SCAN", "{} | {} {} | strength {}/100 | {}".format(
