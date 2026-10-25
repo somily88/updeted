@@ -661,10 +661,16 @@ body {
     var stats = d.stats || {}, wallet = d.wallet || {}, scanner = d.scanner || {};
     var scanDate = scanner.last_completed_at ? new Date(scanner.last_completed_at) : null;
     var scanAge = scanDate && !Number.isNaN(scanDate.getTime()) ? (Date.now() - scanDate.getTime()) / 1000 : null;
-    var stale = scanAge == null || scanAge > 150;
-    setPill(el('connection-pill'), stale ? 'البيانات قديمة' : 'البوت متصل', stale ? 'pill-off' : 'pill-on');
+    var scanRunning = scanner.status === 'running';
+    var scanError = scanner.status === 'error';
+    var stale = !scanRunning && (scanAge == null || scanAge > 150 || scanError);
+    var scanLabel = scanRunning ? 'فحص السوق جارٍ' : (scanError ? 'تعذّر إكمال الفحص' :
+      (scanAge == null ? 'بانتظار أول فحص' : (stale ? 'البيانات قديمة' : 'البوت متصل')));
+    setPill(el('connection-pill'), scanLabel, scanRunning ? 'pill-on' : (stale ? 'pill-off' : 'pill-on'));
     setPill(el('mode-pill'), (String(d.env || 'demo').toUpperCase()) + (d.trading_enabled ? ' · تنفيذ مفعّل' : ' · محاكاة'), d.env === 'live' ? 'pill-off' : '');
-    el('last-update').textContent = 'تحديث اللوحة: ' + localTime(d.as_of) + (scanAge == null ? ' · لم يكتمل فحص بعد' : (stale ? ' · آخر فحص منذ ' + Math.floor(scanAge / 60) + ' د' : ' · السوق محدث'));
+    el('last-update').textContent = 'تحديث اللوحة: ' + localTime(d.as_of) +
+      (scanRunning ? ' · الفحص يعمل' : (scanAge == null ? ' · لم يكتمل فحص بعد' :
+      (scanError ? ' · آخر فحص تعثّر' : (stale ? ' · آخر فحص منذ ' + Math.floor(scanAge / 60) + ' د' : ' · السوق محدث'))));
     var balanceMissing = d.balance_status === 'unavailable' || d.balance_status === 'waiting';
     el('wallet-value').textContent = balanceMissing ? '—' : usd(wallet.total, 2);
     el('free-usdt').textContent = balanceMissing ? '—' : usd(wallet.free, 2);
