@@ -6,6 +6,10 @@ import os
 import time
 from math import sqrt
 
+TRAILING_ACTIVATION_PCT = float(os.getenv("TRAILING_ACTIVATION_PCT", "1.0"))
+if not 0.0 < TRAILING_ACTIVATION_PCT <= 5.0:
+    raise ValueError("TRAILING_ACTIVATION_PCT must be greater than 0 and at most 5")
+
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "2.0"))
 if not 0.0 < RISK_PER_TRADE_PCT <= 2.0:
     raise ValueError("RISK_PER_TRADE_PCT must be greater than 0 and at most 2")
