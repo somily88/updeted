@@ -11,7 +11,8 @@ import time
 
 import ccxt
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
-                             risk_sized_notional, market_liquidity_check, retry_api_read)
+                             TRAILING_ACTIVATION_PCT, risk_sized_notional,
+                             market_liquidity_check, retry_api_read)
 
 TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUSDT","TSLAUSDT","SNDKUSDT","METAUSDT","AMDUSDT","MSFTUSDT","BEUSDT","AMZNUSDT"]
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
@@ -238,15 +239,19 @@ class BinanceFuturesDemo:
                         continue
                 if side == "short":
                     pos["highest_price"] = min(pos["highest_price"], price)
+                    trail_armed = (bool(pos.get("partial_taken"))
+                                   and pos["highest_price"] <= pos["entry_price"] * (1 - TRAILING_ACTIVATION_PCT / 100))
                     trailing_stop = pos["highest_price"] + pos["trailing_distance"]
-                    active_stop = min(pos["stop_price"], trailing_stop)
-                    hit_target = price <= pos["target_price"]
+                    active_stop = min(pos["stop_price"], trailing_stop) if trail_armed else pos["stop_price"]
+                    hit_target = not pos.get("partial_taken") and price <= pos["target_price"]
                     hit_stop = price >= active_stop
                 else:
                     pos["highest_price"] = max(pos["highest_price"], price)
+                    trail_armed = (bool(pos.get("partial_taken"))
+                                   and pos["highest_price"] >= pos["entry_price"] * (1 + TRAILING_ACTIVATION_PCT / 100))
                     trailing_stop = pos["highest_price"] - pos["trailing_distance"]
-                    active_stop = max(pos["stop_price"], trailing_stop)
-                    hit_target = price >= pos["target_price"]
+                    active_stop = max(pos["stop_price"], trailing_stop) if trail_armed else pos["stop_price"]
+                    hit_target = not pos.get("partial_taken") and price >= pos["target_price"]
                     hit_stop = price <= active_stop
                 self._save_position(pos)
                 if hit_target:
@@ -268,8 +273,10 @@ class BinanceFuturesDemo:
                             self._close(symbol, pos, price, "جني 50% عند 1R", requested, partial=True)
                         else:
                             pos["partial_attempted"] = True
+                            pos["partial_taken"] = True
+                            pos["stop_price"] = min(pos["stop_price"], pos["entry_price"]) if side == "short" else max(pos["stop_price"], pos["entry_price"])
                             self._save_position(pos)
-                            self.on_event("WARN", "تخطي الجني الجزئي {}: نصف المركز أقل من الحد الأدنى".format(symbol))
+                            self.on_event("WARN", "تخطي البيع الجزئي {}: نصف المركز أقل من الحد الأدنى؛ ستتم متابعة الوقف فقط".format(symbol))
             except Exception as exc:
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
 
