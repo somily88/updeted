@@ -3,11 +3,63 @@
 Signal strength is a heuristic ranking, not a probability of profit.
 """
 import os
+import time
 from math import sqrt
 
 RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "2.0"))
 if not 0.0 < RISK_PER_TRADE_PCT <= 2.0:
     raise ValueError("RISK_PER_TRADE_PCT must be greater than 0 and at most 2")
+
+MIN_SPOT_QUOTE_VOLUME_USDT = float(os.getenv("MIN_SPOT_QUOTE_VOLUME_USDT", "1000000"))
+MIN_FUTURES_QUOTE_VOLUME_USDT = float(os.getenv("MIN_FUTURES_QUOTE_VOLUME_USDT", "100000"))
+MAX_SPOT_SPREAD_PCT = float(os.getenv("MAX_SPOT_SPREAD_PCT", "0.15"))
+MAX_FUTURES_SPREAD_PCT = float(os.getenv("MAX_FUTURES_SPREAD_PCT", "0.25"))
+
+
+def retry_api_read(operation, *args, attempts=3, **kwargs):
+    """Retry only transient read errors; never use this wrapper for order creation."""
+    for attempt in range(max(1, int(attempts))):
+        try:
+            return operation(*args, **kwargs)
+        except Exception as exc:
+            name = type(exc).__name__.lower()
+            transient = any(token in name for token in (
+                "network", "timeout", "ratelimit", "ddos", "exchangeunavailable", "internalerror"
+            )) or getattr(exc, "status_code", None) in (429, 500, 502, 503, 504)
+            if not transient or attempt + 1 >= attempts:
+                raise
+            time.sleep(min(0.25 * (2 ** attempt), 1.0))
+
+
+def market_liquidity_check(exchange, symbol, market_type):
+    """Fail closed on thin 24h volume or an excessively wide live spread."""
+    ticker = retry_api_read(exchange.fetch_ticker, symbol)
+    price = float(ticker.get("last") or 0.0)
+    quote_volume = float(ticker.get("quoteVolume") or 0.0)
+    if quote_volume <= 0:
+        base_volume = float(ticker.get("baseVolume") or 0.0)
+        quote_volume = base_volume * price
+    min_volume = (MIN_FUTURES_QUOTE_VOLUME_USDT if market_type == "Futures Demo"
+                  else MIN_SPOT_QUOTE_VOLUME_USDT)
+    if price <= 0 or quote_volume < min_volume:
+        return False, "حجم 24 ساعة أقل من الحد الأدنى ({:.0f} USDT)".format(min_volume)
+
+    bid = float(ticker.get("bid") or 0.0)
+    ask = float(ticker.get("ask") or 0.0)
+    if bid <= 0 or ask <= 0 or ask < bid:
+        book = retry_api_read(exchange.fetch_order_book, symbol, limit=5)
+        bids, asks = book.get("bids") or [], book.get("asks") or []
+        bid = float(bids[0][0]) if bids else 0.0
+        ask = float(asks[0][0]) if asks else 0.0
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return False, "تعذر التحقق من فرق سعر العرض والطلب"
+    spread_pct = (ask - bid) / ((ask + bid) / 2.0) * 100.0
+    max_spread = MAX_FUTURES_SPREAD_PCT if market_type == "Futures Demo" else MAX_SPOT_SPREAD_PCT
+    if spread_pct > max_spread:
+        return False, "فرق السعر {:.3f}% يتجاوز الحد {:.3f}%".format(spread_pct, max_spread)
+    return True, "سيولة مناسبة · حجم 24 ساعة {:.0f} USDT · فرق {:.3f}%".format(
+        quote_volume, spread_pct)
+
 
 
 def risk_sized_notional(equity, entry_price, stop_distance, max_notional,
@@ -93,7 +145,7 @@ def _macd_hist(values):
 
 def _load(exchange, symbol, timeframe, cache):
     if timeframe not in cache:
-        candles = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=90)
+        candles = retry_api_read(exchange.fetch_ohlcv, symbol, timeframe=timeframe, limit=90)
         cache[timeframe] = candles[:-1]
     return cache[timeframe]
 
@@ -237,6 +289,21 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
                           "long", strength)
     return None
 
+def _higher_timeframe_confirms(exchange, symbol, cache, direction):
+    """Require the 4h trend to agree with 15m/1h breakout entries."""
+    v = _view(_load(exchange, symbol, "4h", cache))
+    if not v or not v["atr"]:
+        return False
+    previous_hist = _macd_hist(v["closes"][:-1])
+    if direction == "short":
+        return (v["ref_close"] < v["ema50"] and v["ema20"] < v["ema50"]
+                and v["ema50"] < v["ema50_old"]
+                and (v["hist"] <= 0 or v["hist"] < previous_hist))
+    return (v["ref_close"] > v["ema50"] and v["ema20"] > v["ema50"]
+            and v["ema50"] > v["ema50_old"]
+            and (v["hist"] >= 0 or v["hist"] > previous_hist))
+
+
 def evaluate_symbol(exchange, symbol, allow_short=False):
     """Evaluate every strategy/timeframe and return the strongest confirmed setup."""
     directions = ("long", "short") if allow_short else ("long",)
@@ -247,7 +314,7 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
     for timeframe in ("1h", "15m"):
         for direction in directions:
             found = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
-            if found:
+            if found and _higher_timeframe_confirms(exchange, symbol, cache, direction):
                 candidates.append(found)
 
     # Swing trend following: daily/4h.
