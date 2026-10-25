@@ -10,7 +10,7 @@ import sqlite3
 import time
 
 import ccxt
-from strategy_engine import evaluate_symbol, STRATEGY_RISK
+from strategy_engine import evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT, risk_sized_notional
 
 TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUSDT","TSLAUSDT","SNDKUSDT","METAUSDT","AMDUSDT","MSFTUSDT","BEUSDT","AMZNUSDT"]
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
@@ -383,19 +383,25 @@ class BinanceFuturesDemo:
                 if unmanaged:
                     self.on_event("WARN", "تخطي {}: توجد صفقة Futures خارج إدارة البوت".format(symbol))
                     continue
-                account = self.balance()
+                account = self.balance(ttl=0)
                 if account.get("error"):
                     raise RuntimeError("تعذر قراءة رصيد Futures Demo")
-                if account["free"] < trade_amount_usdt:
-                    raise ValueError("رصيد Futures Demo المتاح غير كافٍ")
                 market = self.exchange.market(symbol)
                 multiplier = float(market.get("contractSize") or 1)
+                risk = STRATEGY_RISK[setup["strategy"]]
+                atr = max(float(setup.get("atr") or 0), price * 0.0005)
+                stop_distance = atr * risk["stop_atr"]
+                amount_usdt = risk_sized_notional(
+                    account["total"], price, stop_distance,
+                    float(trade_amount_usdt), RISK_PER_TRADE_PCT)
+                if account["free"] < amount_usdt:
+                    raise ValueError("رصيد Futures Demo المتاح أقل من قيمة المركز المحسوبة {:.2f} USDT".format(amount_usdt))
                 contracts = float(self.exchange.amount_to_precision(
-                    symbol, trade_amount_usdt / (price * multiplier)))
+                    symbol, amount_usdt / (price * multiplier)))
                 notional = contracts * multiplier * price
                 minimum = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
                 if contracts <= 0 or notional < minimum:
-                    raise ValueError("قيمة الصفقة أقل من الحد الأدنى لهذا العقد")
+                    raise ValueError("قيمة المركز المحسوبة أقل من الحد الأدنى لهذا العقد")
                 try:
                     self.exchange.set_margin_mode("isolated", symbol)
                 except Exception as exc:
@@ -410,7 +416,6 @@ class BinanceFuturesDemo:
                 if filled <= 0:
                     raise RuntimeError("أمر الدخول لم يُنفذ؛ لن تُسجل الصفقة كمفتوحة")
                 entry = float(order.get("average") or price)
-                risk = STRATEGY_RISK[setup["strategy"]]
                 atr = max(float(setup.get("atr") or 0), entry * 0.0005)
                 if direction == "short":
                     stop_price = entry + atr * risk["stop_atr"]
@@ -430,8 +435,8 @@ class BinanceFuturesDemo:
                 self.positions[symbol] = pos
                 self._save_position(pos)
                 self.last_entry_candle[symbol] = setup.get("candle_ts")
-                self.on_event("FUTURES", "فتح Demo {} {} · {} · رافعة 1x".format(
+                self.on_event("FUTURES", "فتح Demo {} {} · {} · {:.2f} USDT · مخاطرة مستهدفة ≤{:.1f}% · رافعة 1x".format(
                     "Short" if direction == "short" else "Long", symbol,
-                    setup.get("strategy_label", setup["strategy"])))
+                    setup.get("strategy_label", setup["strategy"]), notional, RISK_PER_TRADE_PCT))
             except Exception as exc:
                 self.on_event("ERR", "Futures {}: {}".format(symbol, str(exc)[:100]))
