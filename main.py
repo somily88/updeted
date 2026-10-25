@@ -1335,11 +1335,19 @@ def automated_market_scan():
 # =====================================================================
 @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
 def read_root():
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
     try:
         with open("index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+            return HTMLResponse(content=f.read(), headers=no_cache_headers)
     except Exception as e:
-        return HTMLResponse(content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))))
+        return HTMLResponse(
+            content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))),
+            headers=no_cache_headers,
+        )
 
 
 @app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
