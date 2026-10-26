@@ -21,11 +21,12 @@ TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
 
 
 class BinanceFuturesDemo:
-    def __init__(self, api_key, secret_key, db_path, on_event=None):
+    def __init__(self, api_key, secret_key, db_path, on_event=None, on_decision=None):
         if not api_key or not secret_key:
             raise ValueError("Futures Demo API credentials are required")
         self.db_path = db_path
         self.on_event = on_event or (lambda tag, message: None)
+        self.on_decision = on_decision or (lambda *args, **kwargs: None)
         self.exchange = ccxt.binance({
             "apiKey": api_key,
             "secret": secret_key,
@@ -192,9 +193,16 @@ class BinanceFuturesDemo:
             order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
         filled = float(order.get("filled") or 0)
         if filled <= 0:
+            self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
+                             'timeframe': pos.get('timeframe')}, price, 'تعذر تأكيد أمر الإغلاق',
+                             reason, order_status=order.get('status') or 'غير مؤكد',
+                             order_id=order.get('id'))
             raise RuntimeError("أمر الإغلاق لم يُؤكد؛ لن يُعاد إرساله تلقائيًا")
         exit_price = float(order.get("average") or price)
         multiplier = float(self.exchange.market(symbol).get("contractSize") or 1)
+        self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
+                         'timeframe': pos.get('timeframe')}, price, 'تم إرسال أمر إغلاق', reason,
+                         order_status=order.get('status'), order_id=order.get('id'))
         closed_contracts = min(filled, previous_contracts)
         direction = -1.0 if side == "short" else 1.0
         tranche_pnl = direction * (exit_price - pos["entry_price"]) * closed_contracts * multiplier
@@ -241,6 +249,7 @@ class BinanceFuturesDemo:
 
     def _monitor_positions(self):
         for symbol, pos in list(self.positions.items()):
+            order = None
             try:
                 side = pos.get("side", "long")
                 if pos.get("partial_attempted") and not pos.get("partial_taken"):
@@ -295,6 +304,12 @@ class BinanceFuturesDemo:
                             self._save_position(pos)
                             self.on_event("WARN", "تخطي البيع الجزئي {}: نصف المركز أقل من الحد الأدنى؛ ستتم متابعة الوقف فقط".format(symbol))
             except Exception as exc:
+                snapshot = self.snapshot.get(symbol) or {}
+                self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
+                                 'timeframe': pos.get('timeframe')}, snapshot.get('price'),
+                                 'خطأ في متابعة مركز Futures', 'تعذر تحديث السعر أو متابعة الوقف',
+                                 order_status='غير مؤكد' if order is not None else 'لم يُرسل',
+                                 api_message=exc, price_updated_at=snapshot.get('price_updated_at'))
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
 
     def _claim_test_run(self, test_id):
@@ -311,24 +326,31 @@ class BinanceFuturesDemo:
                 WHERE test_id=?""", (state, symbol, side, order_id, error, test_id))
 
     def _run_forced_test(self, trade_amount_usdt, can_open, test_id, side):
+        symbol = next((s for s in self.symbols if self.exchange.market(s).get("id") == "XAUUSDT"), self.symbols[0])
+        setup = {'signal': True, 'direction': side, 'strategy': 'forced_test', 'timeframe': 'demo-test'}
+        price, price_updated_at = None, None
         if not test_id:
+            self.on_decision('Futures Demo', symbol, setup, outcome='اختبار مرفوض', reason='لم يتم تحديد معرف اختبار فريد', order_status='لم يُرسل')
             self.on_event("WARN", "اختبار Futures مفعّل بلا FORCE_FUTURES_TEST_ID؛ لم يُرسل أي أمر")
             return
         if side not in ("long", "short"):
+            self.on_decision('Futures Demo', symbol, setup, outcome='اختبار مرفوض', reason='اتجاه الاختبار غير صالح', order_status='لم يُرسل')
             self.on_event("ERR", "اتجاه اختبار Futures غير صالح؛ استخدم long أو short")
             return
         if not can_open():
+            self.on_decision('Futures Demo', symbol, setup, outcome='اختبار مرفوض', reason='بلغ حد المراكز المفتوحة', order_status='لم يُرسل')
             self.on_event("WARN", "تعذر اختبار Futures: بلغ حد المراكز المفتوحة")
             return
         if self.positions:
+            self.on_decision('Futures Demo', symbol, setup, outcome='اختبار مرفوض', reason='توجد مراكز Futures مفتوحة بالفعل', order_status='لم يُرسل')
             self.on_event("WARN", "تعذر الاختبار: أغلق مراكز Futures الحالية أولًا")
             return
-        symbol = next((s for s in self.symbols if self.exchange.market(s).get("id") == "XAUUSDT"), self.symbols[0])
         if symbol in self.positions:
             self.on_event("WARN", "تخطي اختبار Futures: يوجد مركز مُدار على {}".format(symbol))
             return
 
         claimed = False
+        order_attempted = False
         order_id = None
         try:
             market = self.exchange.market(symbol)
@@ -343,6 +365,7 @@ class BinanceFuturesDemo:
             if amount_usdt <= 0 or account["free"] < amount_usdt:
                 raise ValueError("الرصيد المتاح أقل من قيمة صفقة الاختبار")
             price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
+            price_updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
             multiplier = float(market.get("contractSize") or 1)
             contracts = float(self.exchange.amount_to_precision(symbol, amount_usdt / (price * multiplier)))
             notional = contracts * multiplier * price
@@ -361,6 +384,8 @@ class BinanceFuturesDemo:
                     raise
             self.exchange.set_leverage(1, symbol)
             order_side = "sell" if side == "short" else "buy"
+            self.on_decision('Futures Demo', symbol, setup, price, 'إرسال أمر اختبار ' + side, 'اختبار يدوي مفعّل؛ انتظار رد Binance', order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
+            order_attempted = True
             order = self.exchange.create_order(symbol, "market", order_side, contracts)
             order_id = order.get("id")
             if order.get("status") != "closed" and order.get("id"):
@@ -387,6 +412,7 @@ class BinanceFuturesDemo:
             self.positions[symbol] = pos
             self._save_position(pos)
             self._finish_test_run(test_id, "opened", symbol, side, order.get("id"))
+            self.on_decision('Futures Demo', symbol, setup, price, 'تم فتح صفقة الاختبار', 'تأكد التنفيذ وحُفظ المركز', order.get('status'), order.get('id'), price_updated_at=price_updated_at)
             self.on_event("FUTURES", "اختبار Binance Futures Demo: {} {} بقيمة نحو {:.2f} USDT؛ إغلاق تلقائي خلال دقيقتين".format(
                 "Short" if side == "short" else "Long", symbol, actual_cost))
         except Exception as exc:
@@ -418,6 +444,7 @@ class BinanceFuturesDemo:
                         self.positions[symbol] = pos
                         self._save_position(pos)
                         self._finish_test_run(test_id, "opened_recovered", symbol, recovered_side, order_id)
+                        self.on_decision('Futures Demo', symbol, setup, entry, 'استعادة مركز اختبار بعد رد ملتبس', 'تمت مطابقة المركز من حساب Binance', 'مستعاد', order_id, price_updated_at=price_updated_at)
                         self.on_event("WARN", "تم استرداد مركز اختبار Futures غير مؤكد وربطه بمؤقت الإغلاق")
                     else:
                         self._finish_test_run(test_id, "failed", symbol, side, order_id,
@@ -425,6 +452,7 @@ class BinanceFuturesDemo:
                 except Exception:
                     self._finish_test_run(test_id, "needs_review", symbol, side, order_id,
                                           error="confirmation_uncertain")
+            self.on_decision('Futures Demo', symbol, setup, price, 'فشل أو لم يتأكد أمر الاختبار', 'راجع سجل Binance قبل أي إعادة', order_status='غير مؤكد' if order_attempted else 'لم يُرسل', order_id=order_id, api_message=exc, price_updated_at=price_updated_at)
             self.on_event("ERR", "فشل اختبار Futures Demo: {}".format(str(exc)[:100]))
 
     def scan(self, trade_amount_usdt, can_open, force_test_trade=False,
@@ -461,12 +489,16 @@ class BinanceFuturesDemo:
                 self._run_forced_test(trade_amount_usdt, can_open, force_test_id, force_test_side)
             return
         for symbol in self.symbols:
+            order = None
+            order_attempted = False
             try:
                 setup = evaluate_symbol(self.exchange, symbol, allow_short=True)
                 price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
                 direction = str((setup or {}).get("direction", "flat")).lower()
+                price_updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 self.snapshot[symbol] = {
                     "symbol": symbol, "price": price, "ready": bool(setup),
+                    "price_updated_at": price_updated_at,
                     "signal": bool(setup and setup.get("signal")),
                     "direction": direction,
                     "strategy": (setup or {}).get("strategy", "wait"),
@@ -481,23 +513,51 @@ class BinanceFuturesDemo:
                     (setup or {}).get("timeframe", "15m"),
                     (setup or {}).get("signal_strength", 0),
                     (setup or {}).get("reason", "بيانات غير كافية")))
-                if self.daily_risk_state.get("blocked"):
+                if not setup or not setup.get("signal"):
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مراقبة',
+                                     (setup or {}).get('reason') or 'لا توجد إشارة مكتملة',
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
-                if (not setup or not setup.get("signal") or symbol in self.positions
-                        or not can_open() or self.last_entry_candle.get(symbol) == setup.get("candle_ts")):
+                if self.daily_risk_state.get("blocked"):
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',
+                                     self.daily_risk_state.get('reason') or 'بلغ حد الخسارة اليومي',
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                if symbol in self.positions:
+                    self.on_decision('Futures Demo', symbol, setup, price, 'تجاهل الإشارة',
+                                     'يوجد مركز مفتوح على هذا العقد', order_status='لم يُرسل',
+                                     price_updated_at=price_updated_at)
+                    continue
+                if not can_open():
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',
+                                     'بلغت المراكز حد صفقات Futures المفتوحة', order_status='لم يُرسل',
+                                     price_updated_at=price_updated_at)
+                    continue
+                if self.last_entry_candle.get(symbol) == setup.get('candle_ts'):
+                    self.on_decision('Futures Demo', symbol, setup, price, 'تجاهل مكرر',
+                                     'سبق فحص أو تنفيذ إشارة هذه الشمعة', order_status='لم يُرسل',
+                                     price_updated_at=price_updated_at)
                     continue
                 if direction not in ("long", "short"):
-                    self.on_event("WARN", "تخطي {}: اتجاه إشارة غير معروف".format(symbol))
+                    reason = 'اتجاه إشارة غير معروف'
+                    self.on_event("WARN", "تخطي {}: {}".format(symbol, reason))
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', reason,
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 liquid, liquidity_reason = market_liquidity_check(self.exchange, symbol, "Futures Demo")
                 if not liquid:
                     self.on_event("GATE", "تخطي Futures {}: {}".format(symbol, liquidity_reason))
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', liquidity_reason,
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 # Fail closed if the account has an unmanaged position on this contract.
                 exchange_positions = retry_api_read(self.exchange.fetch_positions, [symbol])
                 unmanaged = [p for p in exchange_positions if abs(float(p.get("contracts") or 0)) > 0]
                 if unmanaged:
-                    self.on_event("WARN", "تخطي {}: توجد صفقة Futures خارج إدارة البوت".format(symbol))
+                    reason = 'توجد صفقة Futures على الزوج خارج إدارة البوت'
+                    self.on_event("WARN", "تخطي {}: {}".format(symbol, reason))
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', reason,
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 account = self.balance(ttl=0)
                 if account.get("error"):
@@ -525,6 +585,10 @@ class BinanceFuturesDemo:
                         raise
                 self.exchange.set_leverage(1, symbol)
                 order_side = "sell" if direction == "short" else "buy"
+                self.on_decision('Futures Demo', symbol, setup, price, 'إرسال أمر ' + direction,
+                                 'اجتازت الإشارة فلاتر المخاطر والسيولة والحساب',
+                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
+                order_attempted = True
                 order = self.exchange.create_order(symbol, "market", order_side, contracts)
                 if order.get("status") != "closed" and order.get("id"):
                     order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
@@ -553,8 +617,16 @@ class BinanceFuturesDemo:
                 self.positions[symbol] = pos
                 self._save_position(pos)
                 self.last_entry_candle[symbol] = setup.get("candle_ts")
+                self.on_decision('Futures Demo', symbol, setup, price, 'تم فتح المركز',
+                                 'تأكد التنفيذ وحُفظ المركز', order.get('status'), order.get('id'),
+                                 price_updated_at=price_updated_at)
                 self.on_event("FUTURES", "فتح Demo {} {} · {} · {:.2f} USDT · مخاطرة مستهدفة ≤{:.1f}% · رافعة 1x".format(
                     "Short" if direction == "short" else "Long", symbol,
                     setup.get("strategy_label", setup["strategy"]), notional, RISK_PER_TRADE_PCT))
             except Exception as exc:
+                snapshot = self.snapshot.get(symbol) or {}
+                self.on_decision('Futures Demo', symbol, snapshot, snapshot.get('price'),
+                                 'خطأ في فحص أو أمر Futures', 'تعذر إكمال القرار؛ راجع رسالة API',
+                                 order_status='غير مؤكد' if order_attempted else 'لم يُرسل',
+                                 api_message=exc, price_updated_at=snapshot.get('price_updated_at'))
                 self.on_event("ERR", "Futures {}: {}".format(symbol, str(exc)[:100]))
