@@ -53,3 +53,4 @@ def get_recent_trades(limit=10):
             SELECT symbol, entry_price, exit_price, pnl_pct, status, timestamp
             FROM trades ORDER BY id DESC LIMIT ?
         ''', (limit,)).fetchall()
+
