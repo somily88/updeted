@@ -372,6 +372,7 @@ body {
     <div class="top-actions">
       <span class="pill" id="connection-pill">جارٍ الاتصال</span>
       <span class="pill" id="mode-pill">—</span>
+      <span class="pill" id="risk-pill">حد الخسارة اليومي: —</span>
       <span class="pill" id="last-update">آخر تحديث: —</span>
       <a class="btn-scan" href="/check">افحص السوق الآن</a>
     </div>
@@ -668,6 +669,15 @@ body {
       (scanAge == null ? 'بانتظار أول فحص' : (stale ? 'البيانات قديمة' : 'البوت متصل')));
     setPill(el('connection-pill'), scanLabel, scanRunning ? 'pill-on' : (stale ? 'pill-off' : 'pill-on'));
     setPill(el('mode-pill'), (String(d.env || 'demo').toUpperCase()) + (d.trading_enabled ? ' · تنفيذ مفعّل' : ' · محاكاة'), d.env === 'live' ? 'pill-off' : '');
+    var risk = d.daily_risk || {}, riskMarkets = Object.keys(risk);
+    var blockedMarkets = riskMarkets.filter(function (k) { return risk[k] && risk[k].blocked; });
+    var riskLabel = blockedMarkets.length ? 'الدخول موقوف: حد الخسارة' :
+      (riskMarkets.length && riskMarkets.every(function (k) { return risk[k]; }) ? 'حد الخسارة اليومي: ضمن الحد' : 'حد الخسارة اليومي: بانتظار التحقق');
+    setPill(el('risk-pill'), riskLabel, blockedMarkets.length ? 'pill-off' : 'pill-on');
+    el('risk-pill').title = riskMarkets.map(function (k) {
+      var r = risk[k];
+      return r ? k.toUpperCase() + ': ' + (r.loss_pct == null ? r.reason : num(r.loss_pct, 2) + '% من حد ' + num(r.limit_pct, 1) + '%') : k.toUpperCase() + ': بانتظار التحقق';
+    }).join(' · ');
     el('last-update').textContent = 'تحديث اللوحة: ' + localTime(d.as_of) +
       (scanRunning ? ' · الفحص يعمل' : (scanAge == null ? ' · لم يكتمل فحص بعد' :
       (scanError ? ' · آخر فحص تعثّر' : (stale ? ' · آخر فحص منذ ' + Math.floor(scanAge / 60) + ' د' : ' · السوق محدث'))));
