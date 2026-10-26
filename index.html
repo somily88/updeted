@@ -671,8 +671,9 @@ body {
     setPill(el('mode-pill'), (String(d.env || 'demo').toUpperCase()) + (d.trading_enabled ? ' · تنفيذ مفعّل' : ' · محاكاة'), d.env === 'live' ? 'pill-off' : '');
     var risk = d.daily_risk || {}, riskMarkets = Object.keys(risk);
     var blockedMarkets = riskMarkets.filter(function (k) { return risk[k] && risk[k].blocked; });
+    var availableMarkets = riskMarkets.filter(function (k) { return !!risk[k]; });
     var riskLabel = blockedMarkets.length ? 'الدخول موقوف: حد الخسارة' :
-      (riskMarkets.length && riskMarkets.every(function (k) { return risk[k]; }) ? 'حد الخسارة اليومي: ضمن الحد' : 'حد الخسارة اليومي: بانتظار التحقق');
+      (availableMarkets.length ? 'حد الخسارة اليومي: ضمن الحد' : 'حد الخسارة اليومي: بانتظار التحقق');
     setPill(el('risk-pill'), riskLabel, blockedMarkets.length ? 'pill-off' : 'pill-on');
     el('risk-pill').title = riskMarkets.map(function (k) {
       var r = risk[k];
