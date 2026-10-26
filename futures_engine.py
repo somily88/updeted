@@ -630,3 +630,4 @@ class BinanceFuturesDemo:
                                  order_status='غير مؤكد' if order_attempted else 'لم يُرسل',
                                  api_message=exc, price_updated_at=snapshot.get('price_updated_at'))
                 self.on_event("ERR", "Futures {}: {}".format(symbol, str(exc)[:100]))
+
