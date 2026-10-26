@@ -49,7 +49,7 @@ def market_liquidity_check(exchange, symbol, market_type):
     min_volume = (MIN_FUTURES_QUOTE_VOLUME_USDT if market_type == "Futures Demo"
                   else MIN_SPOT_QUOTE_VOLUME_USDT)
     if price <= 0 or quote_volume < min_volume:
-        return False, "𘀭𘀬𙀅 24 𘀳𘀧𘀹𘀩 𘀣𙀂𙀄 𙀅𙀆 𘀧𙀄𘀭𘀯 𘀧𙀄𘀣𘀯𙀆𙀉 ({:.0f} USDT)".format(min_volume)
+        return False, "حجم 24 ساعة أقل من الحد الأدنى ({:.0f} USDT)".format(min_volume)
 
     bid = float(ticker.get("bid") or 0.0)
     ask = float(ticker.get("ask") or 0.0)
@@ -59,12 +59,12 @@ def market_liquidity_check(exchange, symbol, market_type):
         bid = float(bids[0][0]) if bids else 0.0
         ask = float(asks[0][0]) if asks else 0.0
     if bid <= 0 or ask <= 0 or ask < bid:
-        return False, "𘀪𘀹𘀰𘀱 𘀧𙀄𘀪𘀭𙀂𙀂 𙀅𙀆 𙀁𘀱𙀂 𘀳𘀹𘀱 𘀧𙀄𘀹𘀱𘀶 𙀈𘀧𙀄𘀷𙀄𘀨"
+        return False, "تعذر التحقق من فرق سعر العرض والطلب"
     spread_pct = (ask - bid) / ((ask + bid) / 2.0) * 100.0
     max_spread = MAX_FUTURES_SPREAD_PCT if market_type == "Futures Demo" else MAX_SPOT_SPREAD_PCT
     if spread_pct > max_spread:
-        return False, "𙀁𘀱𙀂 𘀧𙀄𘀳𘀹𘀱 {:.3f}% 𙀊𘀪𘀬𘀧𙀈𘀲 𘀧𙀄𘀭𘀯 {:.3f}%".format(spread_pct, max_spread)
-    return True, "𘀳𙀊𙀈𙀄𘀩 𙀅𙀆𘀧𘀳𘀨𘀩 ‷ 𘀭𘀬𙀅 24 𘀳𘀧𘀹𘀩 {:.0f} USDT ‷ 𙀁𘀱𙀂 {:.3f}%".format(
+        return False, "فرق السعر {:.3f}% يتجاوز الحد {:.3f}%".format(spread_pct, max_spread)
+    return True, "سيولة مناسبة · حجم 24 ساعة {:.0f} USDT · فرق {:.3f}%".format(
         quote_volume, spread_pct)
 
 
@@ -92,7 +92,7 @@ STRATEGY_RISK = {
     "breakout": {"stop_atr": 1.0, "target_atr": 2.0, "trail_atr": 1.0},
     "bounce": {"stop_atr": 1.0, "target_atr": 1.5, "trail_atr": 0.75},
 }
-STRATEGY_LABELS = {"trend": "𘀪𘀪𘀨𙀑𘀹 𘀧𙀄𘀧𘀪𘀬𘀧𙀇", "breakout": "𘀧𙀄𘀧𘀮𘀪𘀱𘀧𙀂", "bounce": "𘀧𙀄𘀧𘀱𘀪𘀯𘀧𘀯"}
+STRATEGY_LABELS = {"trend": "تتبّع الاتجاه", "breakout": "الاختراق", "bounce": "الارتداد"}
 
 
 def _ema(values, period):
@@ -215,14 +215,14 @@ def _trend_candidate(exchange, symbol, timeframe, cache, direction="long"):
         momentum_ok = v["hist"] <= 0 or v["hist"] < previous_hist
         if (v["ref_close"] < v["ema50"] and v["ema20"] < v["ema50"]
                 and falling and momentum_ok and 27 <= v["rsi"] <= 58):
-            return _candidate("trend", timeframe, v, "𘀧𙀄𘀳𘀹𘀱 𘀪𘀭𘀪 EMA50 𙀈𘀧𙀄𘀧𘀪𘀬𘀧𙀇 𙀈𘀧𙀄𘀲𘀮𙀅 𙀇𘀧𘀨𘀷𘀧𙀆",
+            return _candidate("trend", timeframe, v, "السعر دون المتوسط المتحرك الأسي لآخر 50 شمعة، ومتوسط 20 شمعة أدنى منه؛ الاتجاه والزخم هابطان",
                               "short", strength)
         return None
     rising = v["ema50"] > v["ema50_old"]
     momentum_ok = v["hist"] >= 0 or v["hist"] > previous_hist
     if (v["ref_close"] > v["ema50"] and v["ema20"] > v["ema50"]
             and rising and momentum_ok and 42 <= v["rsi"] <= 73):
-        return _candidate("trend", timeframe, v, "𘀧𙀄𘀳𘀹𘀱 𙀁𙀈𙀂 EMA50 𙀈𘀧𙀄𘀧𘀪𘀬𘀧𙀇 𙀈𘀧𙀄𘀲𘀮𙀅 𘀵𘀧𘀹𘀯𘀧𙀆",
+        return _candidate("trend", timeframe, v, "السعر أعلى من المتوسط المتحرك الأسي لآخر 50 شمعة، ومتوسط 20 شمعة أعلى منه؛ الاتجاه والزخم صاعدان",
                           "long", strength)
     return None
 
@@ -246,7 +246,7 @@ def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
                         + min(12.0, max(0.0, 1.0 - extension) * 12.0)
                         - min(18.0, max(0.0, extension - 1.0) * 8.0))
             return _candidate("breakout", timeframe, v,
-                              "𘀥𘀺𙀄𘀧𙀂 𘀪𘀭𘀪 𙀂𘀧𘀹 20 𘀴𙀅𘀹𘀩 𙀅𘀹 𘀭𘀬𙀅 𘀪𘀯𘀧𙀈𙀄 𙀅𘀱𘀪𙀁𘀹",
+                              "أغلق السعر دون أدنى سعر خلال آخر 20 شمعة، مع حجم تداول أعلى من المعتاد",
                               "short", strength)
         return None
     level = max(c[2] for c in previous)
@@ -256,7 +256,7 @@ def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
                     + min(12.0, max(0.0, 1.0 - extension) * 12.0)
                     - min(18.0, max(0.0, extension - 1.0) * 8.0))
         return _candidate("breakout", timeframe, v,
-                          "𘀥𘀺𙀄𘀧𙀂 𙀁𙀈𙀂 𙀂𙀅𘀩 20 𘀴𙀅𘀹𘀩 𙀅𘀹 𘀭𘀬𙀅 𘀪𘀯𘀧𙀈𙀄 𙀅𘀱𘀪𙀁𘀹",
+                          "أغلق السعر فوق أعلى سعر خلال آخر 20 شمعة، مع حجم تداول أعلى من المعتاد",
                           "long", strength)
     return None
 
@@ -284,7 +284,7 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
             reversal_atr = abs(candles[-2][4] - last[4]) / v["atr"]
             strength = min(95.0, 56.0 + min(22.0, (prev_rsi - 62.0) * 1.1)
                            + min(16.0, reversal_atr * 10.0))
-            return _candidate("bounce", timeframe, v, "𘀱𙀁𘀶 𙀅𘀤𙀃𘀯 𙀅𙀆 𘀧𙀄𙀆𘀷𘀧𙀂 𘀧𙀄𘀹𙀄𙀈𙀊 𙀅𘀹 RSI 𙀅𘀱𘀪𙀁𘀹",
+            return _candidate("bounce", timeframe, v, "تراجع السعر بعد ملامسة النطاق العلوي مع ارتفاع مؤشر RSI",
                               "short", strength)
         return None
     if (prev_lower is not None and lower is not None and candles[-2][3] <= prev_lower
@@ -292,7 +292,7 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
         reversal_atr = abs(last[4] - candles[-2][4]) / v["atr"]
         strength = min(95.0, 56.0 + min(22.0, (38.0 - prev_rsi) * 1.1)
                        + min(16.0, reversal_atr * 10.0))
-        return _candidate("bounce", timeframe, v, "𘀧𘀱𘀪𘀯𘀧𘀯 𙀅𘀤𙀃𘀯 𙀅𙀆 𘀧𙀄𙀆𘀷𘀧𙀂 𘀧𙀄𘀳𙀁𙀄𙀊 𙀅𘀹 RSI 𙀅𙀆𘀮𙀁𘀶",
+        return _candidate("bounce", timeframe, v, "ارتفع السعر بعد ملامسة النطاق السفلي مع انخفاض مؤشر RSI",
                           "long", strength)
     return None
 
@@ -347,18 +347,19 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
     v = _view(_load(exchange, symbol, "15m", cache))
     if v:
         return {
-            "signal": False, "strategy": "wait", "strategy_label": "𘀧𙀆𘀪𘀸𘀧𘀱",
-            "direction": "flat", "timeframe": "15m", "reason": "𙀄𘀧 𘀪𘀪𙀈𙀁𘀱 𘀴𘀱𙀈𘀷 𘀯𘀮𙀈𙀄 𙀅𙀃𘀪𙀅𙀄𘀩",
+            "signal": False, "strategy": "wait", "strategy_label": "انتظار",
+            "direction": "flat", "timeframe": "15m", "reason": "لم تكتمل شروط أي من الاستراتيجيات الثلاث للدخول",
             "atr": v["atr"], "rsi": v["rsi"], "ema": v["ema50"], "hist": v["hist"],
             "ref_close": v["ref_close"], "candle_ts": v["candles"][-1][0],
             "signal_strength": 0.0,
             "conds": {"ema": False, "macd": False, "rsi": False},
         }
     return {
-        "signal": False, "strategy": "wait", "strategy_label": "𘀧𙀆𘀪𘀸𘀧𘀱",
-        "direction": "flat", "timeframe": "15m", "reason": "𘀨𙀊𘀧𙀆𘀧𘀪 𘀺𙀊𘀱 𙀃𘀧𙀁𙀊𘀩", "atr": 0.0,
+        "signal": False, "strategy": "wait", "strategy_label": "انتظار",
+        "direction": "flat", "timeframe": "15m", "reason": "لا تتوفر بيانات كافية لحساب المؤشرات", "atr": 0.0,
         "rsi": 50.0, "ema": 0.0, "hist": 0.0, "ref_close": 0.0,
         "candle_ts": None, "signal_strength": 0.0,
         "conds": {"ema": False, "macd": False, "rsi": False},
     }
+
 
