@@ -1453,7 +1453,10 @@ def api_state():
     return {
         'as_of': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'scanner': dict(scanner_state),
-        'daily_risk': {key: dict(value) if value else None for key, value in daily_risk_state.items()},
+        'daily_risk': {
+            'spot': dict(daily_risk_state['spot']) if daily_risk_state.get('spot') else None,
+            'futures': dict(future_state['daily_risk']) if future_state.get('daily_risk') else None,
+        },
         'futures': future_state,
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
