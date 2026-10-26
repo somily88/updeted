@@ -4,6 +4,7 @@ Execution is isolated to Binance Demo mode. The engine uses 1x isolated margin,
 long and short entries, and keeps a direction-aware ATR stop/target monitor. It must never be
 constructed with live credentials or a live endpoint.
 """
+import contextlib
 import datetime
 import os
 import sqlite3
@@ -12,7 +13,8 @@ import time
 import ccxt
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, risk_sized_notional,
-                             market_liquidity_check, retry_api_read)
+                             market_liquidity_check, retry_api_read, MAX_DAILY_LOSS_PCT)
+from risk_controls import daily_loss_status
 
 TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUSDT","TSLAUSDT","SNDKUSDT","METAUSDT","AMDUSDT","MSFTUSDT","BEUSDT","AMZNUSDT"]
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
@@ -50,9 +52,22 @@ class BinanceFuturesDemo:
         self._balance_cache = {"time": 0.0, "value": None}
         self._init_db()
         self.positions = self._load_positions()
+        self.daily_risk_state = None
+        self._daily_risk_block_reported = False
 
+    @contextlib.contextmanager
     def _connect(self):
-        return sqlite3.connect(self.db_path, timeout=20)
+        """Yield one transaction and always close the SQLite connection."""
+        conn = sqlite3.connect(self.db_path, timeout=20)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._connect() as conn:
@@ -144,6 +159,7 @@ class BinanceFuturesDemo:
             "balance": balance["total"], "free_balance": balance["free"],
             "realized_pnl": stats["realized_pnl"] + sum(float(p.get("partial_pnl_usdt") or 0.0) for p in self.positions.values()),
             **{key: value for key, value in stats.items() if key != "realized_pnl"},
+            "daily_risk": self.daily_risk_state,
         }
 
     def _save_position(self, pos):
@@ -416,8 +432,33 @@ class BinanceFuturesDemo:
         if not self.symbols:
             return
         self._monitor_positions()
+        account = self.balance(ttl=0)
+        try:
+            if account.get("error") or float(account.get("total") or 0.0) <= 0:
+                raise RuntimeError("رصيد Futures Demo غير متاح")
+            equity = float(account["total"])
+            for symbol, pos in self.positions.items():
+                price = float(retry_api_read(self.exchange.fetch_ticker, symbol)["last"])
+                market = self.exchange.market(symbol)
+                multiplier = float(market.get("contractSize") or 1)
+                direction = -1.0 if pos.get("side") == "short" else 1.0
+                equity += direction * (price - float(pos["entry_price"])) * float(pos["contracts"]) * multiplier
+            self.daily_risk_state = daily_loss_status(
+                self.db_path, "futures", equity, MAX_DAILY_LOSS_PCT)
+        except Exception as exc:
+            self.daily_risk_state = {"market": "futures", "blocked": True,
+                "equity": 0.0, "baseline": None, "loss_pct": None,
+                "limit_pct": MAX_DAILY_LOSS_PCT,
+                "reason": "تعذر التحقق من حد خسارة Futures اليومي ({})".format(type(exc).__name__)}
+        if self.daily_risk_state.get("blocked"):
+            if not self._daily_risk_block_reported:
+                self.on_event("GATE", "Futures: {}".format(self.daily_risk_state["reason"]))
+                self._daily_risk_block_reported = True
+        else:
+            self._daily_risk_block_reported = False
         if force_test_trade:
-            self._run_forced_test(trade_amount_usdt, can_open, force_test_id, force_test_side)
+            if not self.daily_risk_state.get("blocked"):
+                self._run_forced_test(trade_amount_usdt, can_open, force_test_id, force_test_side)
             return
         for symbol in self.symbols:
             try:
@@ -440,6 +481,8 @@ class BinanceFuturesDemo:
                     (setup or {}).get("timeframe", "15m"),
                     (setup or {}).get("signal_strength", 0),
                     (setup or {}).get("reason", "بيانات غير كافية")))
+                if self.daily_risk_state.get("blocked"):
+                    continue
                 if (not setup or not setup.get("signal") or symbol in self.positions
                         or not can_open() or self.last_entry_candle.get(symbol) == setup.get("candle_ts")):
                     continue
