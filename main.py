@@ -179,6 +179,23 @@ def init_db():
             ('futures_max_concurrent_trades', str(MAX_FUTURES_CONCURRENT_TRADES))
         ])
         cursor.execute('CREATE TABLE IF NOT EXISTS platform_credentials (platform TEXT PRIMARY KEY, api_key_enc TEXT NOT NULL, secret_enc TEXT NOT NULL, updated_at TEXT NOT NULL)')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS decision_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL,
+            market TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            signal TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            timeframe TEXT NOT NULL,
+            price REAL,
+            price_updated_at TEXT,
+            outcome TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            order_status TEXT,
+            order_id TEXT,
+            api_message TEXT
+        )''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_decision_log_created_at ON decision_log(id DESC)')
         try:
             cursor.execute('ALTER TABLE trades ADD COLUMN pnl_usdt REAL')
         except sqlite3.OperationalError:
@@ -468,6 +485,68 @@ def log_event(tag, text):
     event_log.appendleft({'t': datetime.datetime.now().strftime("%H:%M:%S"), 'tag': tag, 'text': text})
     if tag in ("FUTURES", "FUTURES_SCAN", "WARN", "ERR"):
         print("[{}] {}".format(tag, text), flush=True)
+
+
+def _safe_decision_text(value, limit=300):
+    text = str(value or '').replace('\x00', '').strip()
+    for secret in (BINANCE_API_KEY, BINANCE_SECRET_KEY, BINANCE_FUTURES_API_KEY,
+                   BINANCE_FUTURES_SECRET_KEY, DASHBOARD_PASSWORD, GROQ_API_KEY,
+                   TELEGRAM_BOT_TOKEN, CREDENTIAL_ENCRYPTION_KEY):
+        if secret:
+            text = text.replace(str(secret), '[محجوب]')
+    return text[:limit]
+
+
+def record_decision(market, symbol, setup=None, price=None, outcome='مراقبة', reason='',
+                    order_status=None, order_id=None, api_message=None, price_updated_at=None):
+    setup = setup or {}
+    created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    direction = str(setup.get('direction') or ('long' if setup.get('signal') else 'none'))
+    if not setup.get('signal'):
+        direction = 'none'
+    values = (
+        created_at, str(market), str(symbol), direction,
+        str(setup.get('strategy_label') or setup.get('strategy') or '—'),
+        str(setup.get('timeframe') or '—'),
+        float(price) if price is not None else None,
+        price_updated_at or setup.get('price_updated_at'),
+        _safe_decision_text(outcome, 80), _safe_decision_text(reason, 400),
+        _safe_decision_text(order_status, 80) if order_status else None,
+        _safe_decision_text(order_id, 100) if order_id else None,
+        _safe_decision_text(api_message, 300) if api_message else None,
+    )
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_NAME, timeout=10.0)
+        conn.execute('''INSERT INTO decision_log
+            (created_at, market, symbol, signal, strategy, timeframe, price, price_updated_at,
+             outcome, reason, order_status, order_id, api_message)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', values)
+        conn.execute('''DELETE FROM decision_log WHERE id NOT IN
+            (SELECT id FROM decision_log ORDER BY id DESC LIMIT 10000)''')
+        conn.commit()
+    except Exception as exc:
+        print('[DECISION_LOG] تعذر حفظ سجل القرار: {}'.format(type(exc).__name__), flush=True)
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_recent_decisions(limit=80):
+    conn = sqlite3.connect(DB_NAME, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    try:
+        rows = conn.execute('''SELECT created_at, market, symbol, signal, strategy, timeframe,
+            price, price_updated_at, outcome, reason, order_status, order_id, api_message
+            FROM decision_log ORDER BY id DESC LIMIT ?''', (max(1, min(int(limit), 200)),)).fetchall()
+        return [dict(row) for row in rows]
+    except Exception as exc:
+        print('[DECISION_LOG] تعذر قراءة سجل القرارات: {}'.format(type(exc).__name__), flush=True)
+        return []
+    finally:
+        conn.close()
 scheduler = BackgroundScheduler()
 futures_engine = None
 
@@ -492,7 +571,7 @@ async def lifespan(app: FastAPI):
     global futures_engine
     if BINANCE_ENV == 'demo' and BINANCE_FUTURES_API_KEY and BINANCE_FUTURES_SECRET_KEY:
         try:
-            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event)
+            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event, record_decision)
             print('✅ [FUTURES DEMO] Active contracts: {}'.format(', '.join(futures_engine.symbols) or 'none'))
             if not futures_engine.symbols:
                 log_event('WARN', 'Binance Futures Demo لا يعرض عقود CL/BZ/XAU المطلوبة')
@@ -698,7 +777,7 @@ def place_buy(symbol, ref_price, stop_distance=None):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if not TRADING_ENABLED:
         return {'price': ref_price, 'amount': TRADE_AMOUNT_USDT / ref_price,
-                'cost': TRADE_AMOUNT_USDT, 'simulated': True}
+                'cost': TRADE_AMOUNT_USDT, 'simulated': True, 'order_status': 'simulated', 'order_id': None}
 
     amount_usdt = float(TRADE_AMOUNT_USDT)
     if stop_distance is not None:
@@ -720,7 +799,8 @@ def place_buy(symbol, ref_price, stop_distance=None):
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, quote_fee = _parse_fill(order, symbol)
     return {'price': avg, 'amount': filled - base_fee, 'cost': cost + quote_fee,
-            'notional_cap': TRADE_AMOUNT_USDT, 'risk_sized_notional': amount_usdt, 'simulated': False}
+            'notional_cap': TRADE_AMOUNT_USDT, 'risk_sized_notional': amount_usdt, 'simulated': False,
+            'order_status': order.get('status'), 'order_id': order.get('id')}
 
 
 def place_sell(symbol, pos, amount_to_sell=None):
@@ -728,7 +808,7 @@ def place_sell(symbol, pos, amount_to_sell=None):
     requested = min(float(pos['amount']), float(amount_to_sell or pos['amount']))
     if not TRADING_ENABLED or pos.get('simulated'):
         price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
-        return {'price': price, 'proceeds': requested * price, 'filled': requested}
+        return {'price': price, 'proceeds': requested * price, 'filled': requested, 'order_status': 'simulated', 'order_id': None}
 
     base = symbol.split('/')[0]
     free_base = float(retry_api_read(exchange.fetch_balance).get('free', {}).get(base, 0.0) or 0.0)
@@ -741,7 +821,8 @@ def place_sell(symbol, pos, amount_to_sell=None):
     proceeds = cost - quote_fee
     if amount_to_sell is None:
         proceeds += max(float(pos['amount']) - filled, 0.0) * avg
-    return {'price': avg, 'proceeds': proceeds, 'filled': min(filled + base_fee, requested)}
+    return {'price': avg, 'proceeds': proceeds, 'filled': min(filled + base_fee, requested),
+            'order_status': order.get('status'), 'order_id': order.get('id')}
 
 
 # =====================================================================
@@ -992,9 +1073,11 @@ def check_news():
 # =====================================================================
 def check_and_close_positions():
     for symbol in list(active_positions.keys()):
+        current_price, sale = None, None
         try:
             pos = active_positions[symbol]
             if pos.get('partial_attempted') and not pos.get('partial_taken'):
+                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'أمر بيع جزئي غير مؤكد؛ يلزم مطابقته مع Binance قبل المتابعة', order_status='غير مؤكد')
                 continue  # ambiguous tranche order: freeze automated exits until the Demo order is reconciled
             current_price = retry_api_read(exchange.fetch_ticker, symbol)['last']
             entry_price = pos['entry_price']
@@ -1040,6 +1123,7 @@ def check_and_close_positions():
                         pos['partial_attempted'] = True
                         save_position(symbol, pos)
                         partial_sale = place_sell(symbol, pos, tranche)
+                        record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ جني جزئي', 'بيع نصف المركز عند 1R', partial_sale.get('order_status'), partial_sale.get('order_id'))
                         sold = float(partial_sale.get('filled') or 0.0)
                         if sold > 0:
                             cost_sold = float(pos['cost']) * min(sold / float(pos['amount']), 1.0)
@@ -1056,6 +1140,7 @@ def check_and_close_positions():
                             send_telegram_message("✅ <b>جني جزئي Spot عند 1R</b>\n🪙 {}\n💰 المحقق: {:+.2f} USDT\n🔒 تم رفع الوقف إلى نقطة الدخول".format(symbol, partial_pnl))
                             continue
                     except Exception as exc:
+                        record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'فشل أو لم يتأكد أمر الجني الجزئي', 'راجع سجل Binance قبل أي إعادة', order_status='غير مؤكد', api_message=exc)
                         log_event("ERR", "تعذر الجني الجزئي {}: {}".format(symbol, type(exc).__name__))
                         continue
 
@@ -1064,7 +1149,9 @@ def check_and_close_positions():
 
             try:
                 sale = place_sell(symbol, pos)
+                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ الإغلاق', reason, sale.get('order_status'), sale.get('order_id'))
             except Exception as e:
+                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'فشل أو لم يتأكد أمر البيع', 'راجع سجل Binance قبل أي إعادة', order_status='غير مؤكد', api_message=e)
                 print("❌ [SELL ERROR] {}: {}".format(symbol, e))
                 log_event("ERR", "بيع {}: {}".format(symbol, str(e)[:80]))
                 if not pos.get('sell_error_notified'):
@@ -1090,6 +1177,8 @@ def check_and_close_positions():
             del active_positions[symbol]
             delete_position(symbol)
         except Exception as e:
+            record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'خطأ في متابعة المركز', 'تعذر تحديث السعر أو تنفيذ إدارة المركز', order_status='غير مؤكد' if sale is not None else 'لم يُرسل', api_message=e)
+            log_event('ERR', 'متابعة Spot {}: {}'.format(symbol, type(e).__name__))
             print("Error in position monitoring ({}): {}".format(symbol, e))
 
 
@@ -1117,18 +1206,28 @@ def automated_market_scan():
                 'reason': 'تعذر التحقق من حد الخسارة اليومية؛ أُوقف فتح الصفقات ({})'.format(type(exc).__name__)})
 
         for symbol in SYMBOLS:
+            setup, current_price, price_updated_at = None, None, None
             try:
                 if symbol not in SUPPORTED_SYMBOLS:
+                    record_decision('Spot', symbol, outcome='مرفوض', reason='الزوج غير مدعوم في الإعداد الحالي')
                     continue
                 setup = evaluate_symbol(exchange, symbol)
-                current_price = retry_api_read(exchange.fetch_ticker, symbol)['last']
+                current_price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
+                price_updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 if not setup:
+                    record_decision('Spot', symbol, outcome='تعذر التقييم',
+                                    reason='لم تكتمل بيانات المؤشرات لتكوين إشارة', price=current_price,
+                                    price_updated_at=price_updated_at)
                     continue
                 setup = dict(setup)
                 setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S"),
-                               'updated_at': time.time()})
+                               'updated_at': time.time(), 'price_updated_at': price_updated_at})
                 market_snapshot[symbol] = setup
-                if daily_risk_state['spot'] and daily_risk_state['spot'].get('blocked'):
+                if (setup.get('signal') and daily_risk_state['spot']
+                        and daily_risk_state['spot'].get('blocked')):
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    daily_risk_state['spot'].get('reason', 'بلغ حد الخسارة اليومي'),
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 print("📊 {} | {} {} | RSI: {:.2f} | strength: {}/100 | setup: {}".format(
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'],
@@ -1137,9 +1236,10 @@ def automated_market_scan():
                 spot_open_slots = sum(max(1, int(p.get('entries', 1))) for p in active_positions.values())
                 spot_open_slots += sum(1 for p in active_positions.values()
                                        if p.get('add_attempted') and int(p.get('entries', 1)) < 2)
-                if symbol not in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
-                    continue
-                if symbol in active_positions and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
+                if setup.get('signal') and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'بلغت المراكز حد الصفقات المفتوحة في Spot',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
                 global test_trade_done
@@ -1156,46 +1256,78 @@ def automated_market_scan():
                         }
                         active_positions[symbol] = pos
                         save_position(symbol, pos)
+                        record_decision('Spot', symbol, setup, current_price, 'صفقة اختبار فُتحت',
+                                        'فتح اختباري مفعّل يدويًا', fill.get('order_status'),
+                                        fill.get('order_id'), price_updated_at=price_updated_at)
                         print("🧪 [TEST BUY] {} بسعر {}".format(symbol, fill['price']))
                         send_telegram_message("🧪 <b>صفقة اختبار (BUY)</b>\n🪙 {}\n💵 {}\n⏱ ستُغلق بعد {} ثانية".format(
                             symbol, fill['price'], TEST_TRADE_SECONDS))
                     except Exception as e:
+                        record_decision('Spot', symbol, setup, current_price, 'خطأ أثناء إرسال أمر الاختبار',
+                                        'راجع رسالة API', order_status='غير مؤكد', api_message=e,
+                                        price_updated_at=price_updated_at)
                         print("❌ [TEST BUY ERROR] {}: {}".format(symbol, e))
                         send_telegram_message("❌ <b>فشل شراء الاختبار</b>\n{}".format(html.escape(str(e))))
                     continue
 
                 if not setup['signal']:
+                    record_decision('Spot', symbol, setup, current_price, 'مراقبة',
+                                    setup.get('reason') or 'لا توجد إشارة دخول',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 liquid, liquidity_reason = market_liquidity_check(exchange, symbol, "Spot")
                 if not liquid:
                     log_event("GATE", "تخطي Spot {}: {}".format(symbol, liquidity_reason))
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', liquidity_reason,
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 candle = setup.get('candle_ts')
                 if last_entry_candle.get(symbol) == candle:
+                    record_decision('Spot', symbol, setup, current_price, 'تجاهل مكرر',
+                                    'سبق فحص أو تنفيذ إشارة هذه الشمعة',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
                 if news_blocked():
                     print("📰 [NEWS] إشارة {} على {} لكن الشراء موقوف بسبب الأخبار".format(
                         setup['strategy'], symbol))
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    news_state.get('reason') or 'حظر مرشح الأخبار',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if (news_state['sentiment'] == 'negative' and news_state['severity'] >= 2
                         and setup['strategy'] != 'trend'):
                     print("📰 [NEWS] خبر سلبي؛ السماح فقط بإشارات الاتجاه وتجاهل {} على {}".format(
                         setup['strategy'], symbol))
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'خبر سلبي؛ يسمح النظام بإشارات الاتجاه فقط',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
                 pos = active_positions.get(symbol)
                 is_add = pos is not None
                 if is_add:
                     if BINANCE_ENV != 'demo':
+                        record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                        'إضافة المراكز مسموحة في وضع Demo فقط',
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
                         continue
                     entries = max(1, int(pos.get('entries', 1)))
                     if entries >= 2 or pos.get('add_attempted'):
+                        record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                        'وصل المركز إلى حد الإضافات أو توجد إضافة قيد التحقق',
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
                         continue
                     if setup['strategy'] != pos.get('strategy'):
+                        reason = 'استراتيجية الإشارة مختلفة عن استراتيجية المركز المفتوح'
+                        record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة', reason,
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
                         print("⏸️ [PYRAMID] {} تجاهل: الاستراتيجية الحالية مختلفة عن صفقة المركز".format(symbol))
                         continue
                     if str(pos.get('last_add_candle') or '') == str(candle):
+                        record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                        'تمت محاولة إضافة في هذه الشمعة',
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
                         continue
 
                     entry_before_add = float(pos['entry_price'])
@@ -1205,6 +1337,9 @@ def automated_market_scan():
                     unrealized_before_add = current_price * float(pos['amount']) - float(pos['cost'])
                     required_move = max(atr, initial_risk)
                     if unrealized_before_add <= 0 or current_price < entry_before_add + required_move:
+                        record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                        'المركز لم يحقق شرط الربح والحركة بمقدار ATR',
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
                         print("⏸️ [PYRAMID] {} لم يصل إلى شرط الربح/الحركة المطلوبة".format(symbol))
                         continue
 
@@ -1216,8 +1351,15 @@ def automated_market_scan():
                     last_entry_candle[symbol] = candle
                     try:
                         add_stop_distance = atr * STRATEGY_RISK[pos['strategy']]['stop_atr']
+                        record_decision('Spot', symbol, setup, current_price, 'إرسال أمر إضافة',
+                                        'إضافة إلى مركز رابح؛ انتظار نتيجة Binance',
+                                        order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                         fill = place_buy(symbol, current_price, add_stop_distance)
                     except Exception as e:
+                        record_decision('Spot', symbol, setup, current_price, 'خطأ في أمر الإضافة',
+                                        'لم يتأكد تنفيذ الأمر؛ راجع أوامر Binance قبل أي إعادة',
+                                        order_status='غير مؤكد', api_message=e,
+                                        price_updated_at=price_updated_at)
                         print("❌ [PYRAMID ERROR] {}: {}".format(symbol, e))
                         log_event("ERR", "إضافة {}: {}".format(symbol, str(e)[:80]))
                         send_telegram_message("⚠️ <b>تعذر تأكيد إضافة {}</b>\nلن يعيد البوت المحاولة تلقائيًا لتجنب تكرار أمر قد يكون وصل إلى Binance. راجع سجل الأوامر في Demo.".format(symbol))
@@ -1243,6 +1385,9 @@ def automated_market_scan():
                     })
                     active_positions[symbol] = pos
                     save_position(symbol, pos)
+                    record_decision('Spot', symbol, setup, current_price, 'أُضيف إلى المركز',
+                                    'أُكد تنفيذ الإضافة على Binance', fill.get('order_status'),
+                                    fill.get('order_id'), price_updated_at=price_updated_at)
                     print("➕ [PYRAMID] {} | دخول {}/2 | متوسط {} | كمية إجمالية {}".format(
                         symbol, pos['entries'], weighted_entry, total_amount))
                     log_event("PYRAMID", "{} · دخول {}/2 · متوسط {:.8g}".format(
@@ -1255,11 +1400,18 @@ def automated_market_scan():
                     continue
 
                 last_entry_candle[symbol] = candle
+                record_decision('Spot', symbol, setup, current_price, 'إرسال أمر شراء',
+                                'اجتازت الإشارة فلاتر المخاطر والسيولة والأخبار',
+                                order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
                 entry_stop_distance = entry_atr * STRATEGY_RISK[setup['strategy']]['stop_atr']
                 try:
                     fill = place_buy(symbol, current_price, entry_stop_distance)
                 except Exception as e:
+                    record_decision('Spot', symbol, setup, current_price, 'فشل أو لم يتأكد أمر الشراء',
+                                    'لا تعاد المحاولة تلقائيًا؛ راجع سجل Binance',
+                                    order_status='غير مؤكد', api_message=e,
+                                    price_updated_at=price_updated_at)
                     print("❌ [BUY ERROR] {}: {}".format(symbol, e))
                     log_event("ERR", "شراء {}: {}".format(symbol, str(e)[:80]))
                     send_telegram_message("❌ <b>فشل شراء {}</b>\n{}".format(symbol, html.escape(str(e))))
@@ -1283,6 +1435,9 @@ def automated_market_scan():
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
+                record_decision('Spot', symbol, setup, current_price, 'تم فتح الصفقة',
+                                'تم تأكيد التنفيذ وحفظ المركز', fill.get('order_status'),
+                                fill.get('order_id'), price_updated_at=price_updated_at)
                 print("🚀 [BUY] {} | {} {} | price {} | SL {} | TP {}".format(
                     symbol, setup['strategy'], setup['timeframe'], entry, stop_price, target_price))
                 log_event("BUY", "{} · {} · {}".format(symbol, setup['strategy'], setup['timeframe']))
@@ -1293,6 +1448,10 @@ def automated_market_scan():
                         "\n🧪 محاكاة" if fill['simulated'] else ""))
 
             except Exception as e:
+                record_decision('Spot', symbol, setup, current_price, 'خطأ في فحص السوق',
+                                'تعذر إكمال تقييم الزوج', order_status='لم يُرسل',
+                                api_message=e, price_updated_at=price_updated_at)
+                log_event('ERR', 'فحص Spot {}: {}'.format(symbol, type(e).__name__))
                 print("Error scanning {}: {}".format(symbol, e))
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
             futures_engine.scan(
@@ -1510,7 +1669,8 @@ def api_state():
             'headlines': [{'source': n, 'title': t, 'title_ar': (news_state['headlines_ar'][i] if i < len(news_state['headlines_ar']) else '')} for i, (n, t) in enumerate(news_state['headlines'])],
             'error': news_state['error']
         },
-        'events': list(event_log)
+        'events': list(event_log),
+        'decisions': get_recent_decisions(80)
     }
 
 
@@ -1588,7 +1748,7 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         raise HTTPException(status_code=409, detail='Market scan in progress; retry shortly')
     try:
         try:
-            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event)
+            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event, record_decision)
             balance_check = candidate.balance()
             if balance_check.get('error'):
                 raise RuntimeError('Futures API authentication failed')
