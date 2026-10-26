@@ -19,3 +19,4 @@ def make_binance_exchange(api_key, secret_key, environment="demo"):
     elif environment != "live":
         raise ValueError("Unknown Binance environment: {}".format(environment))
     return client
+
