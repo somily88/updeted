@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import time
 import html
-import ccxt
 import sqlite3
 import datetime
 import threading
@@ -25,9 +24,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
-                             TRAILING_ACTIVATION_PCT, risk_sized_notional,
+                             TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional,
                              market_liquidity_check, retry_api_read)
 from futures_engine import BinanceFuturesDemo
+from exchange_client import make_binance_exchange
+from risk_controls import daily_loss_status
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -250,18 +251,6 @@ def load_saved_binance_credentials(platform='binance'):
     return None
 
 
-def make_binance_exchange(api_key, secret_key):
-    client = ccxt.binance({
-        'apiKey': api_key, 'secret': secret_key, 'enableRateLimit': True,
-        'options': {'defaultType': 'spot', 'adjustForTimeDifference': True}
-    })
-    if BINANCE_ENV == "demo":
-        if not hasattr(client, "enable_demo_trading"):
-            raise RuntimeError("Installed ccxt does not support Binance Demo")
-        client.enable_demo_trading(True)
-    elif BINANCE_ENV == "testnet":
-        client.set_sandbox_mode(True)
-    return client
 def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None):
     try:
         conn = sqlite3.connect(DB_NAME)
@@ -446,7 +435,7 @@ saved_futures_credentials = load_saved_binance_credentials('binance_futures')
 if saved_futures_credentials:
     BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY = saved_futures_credentials
 
-exchange = make_binance_exchange(BINANCE_API_KEY, BINANCE_SECRET_KEY)
+exchange = make_binance_exchange(BINANCE_API_KEY, BINANCE_SECRET_KEY, BINANCE_ENV)
 if BINANCE_ENV == "live":
     print("⚠️ [ENV] الاتصال بالحساب الحقيقي! الأوامر {}".format("مفعّلة" if TRADING_ENABLED else "معطّلة (محاكاة)"))
 elif BINANCE_ENV not in ("demo", "testnet"):
@@ -461,6 +450,18 @@ scanner_state = {
     'last_error': None, 'duration_seconds': None
 }
 event_log = deque(maxlen=40)   # آخر الأحداث المهمة لعرضها في لوحة التحكم
+daily_risk_state = {'spot': None, 'futures': None}
+_daily_risk_block_reported = {'spot': False, 'futures': False}
+
+
+def update_daily_risk_state(market, state):
+    daily_risk_state[market] = state
+    blocked = bool(state.get('blocked'))
+    if blocked and not _daily_risk_block_reported[market]:
+        log_event('GATE', '{}: {}'.format(market, state.get('reason', 'تم إيقاف الدخول اليوم')))
+        _daily_risk_block_reported[market] = True
+    elif not blocked:
+        _daily_risk_block_reported[market] = False
 
 
 def log_event(tag, text):
@@ -553,7 +554,34 @@ class FuturesCredentials(BaseModel):
 class TradFiAgreementConsent(BaseModel):
     accepted: bool
 _balance_cache = {'t': 0.0, 'v': (0.0, 0.0), 'error': False}
-_position_price_cache = {}
+class TTLCache(dict):
+    """Thread-protected caller-managed short TTL cache with a hard size bound."""
+    def __init__(self, ttl=5, maxsize=100):
+        super().__init__()
+        self.ttl = float(ttl)
+        self.maxsize = max(1, int(maxsize))
+
+    def set_price(self, key, price, now=None):
+        now = time.time() if now is None else float(now)
+        for expired in [k for k, item in self.items() if now - item['time'] >= self.ttl]:
+            super().pop(expired, None)
+        if key not in self and len(self) >= self.maxsize:
+            oldest = min(self, key=lambda k: self[k]['time'])
+            super().pop(oldest, None)
+        super().__setitem__(key, {'price': float(price), 'time': now})
+
+    def get_price(self, key, now=None, ttl=None):
+        item = super().get(key)
+        if item is None:
+            return None
+        now = time.time() if now is None else float(now)
+        if now - item['time'] >= (self.ttl if ttl is None else float(ttl)):
+            super().pop(key, None)
+            return None
+        return item['price']
+
+
+_position_price_cache = TTLCache(ttl=5, maxsize=100)
 _position_price_lock = threading.Lock()
 
 
@@ -561,15 +589,15 @@ def get_spot_mark_price(symbol, fallback_price=None, ttl=5):
     """Fresh Demo ticker for portfolio marks, with a short cache and stale fallback."""
     now = time.time()
     with _position_price_lock:
-        cached = _position_price_cache.get(symbol)
-        if cached and now - cached['time'] < ttl:
-            return float(cached['price']), True
+        cached_price = _position_price_cache.get_price(symbol, now, ttl)
+        if cached_price is not None:
+            return float(cached_price), True
     try:
         price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
         if price <= 0:
             raise ValueError("non-positive ticker")
         with _position_price_lock:
-            _position_price_cache[symbol] = {'price': price, 'time': now}
+            _position_price_cache.set_price(symbol, price, now)
         snapshot = market_snapshot.get(symbol)
         if isinstance(snapshot, dict):
             snapshot['price'] = price
@@ -638,58 +666,6 @@ def _get_binance_balance_uncached():
         return 0.0, 0.0
 
 
-# =====================================================================
-# 3. المؤشرات الفنية (نفس دوال backtest.py)
-# =====================================================================
-def calculate_rsi(closes, period=14):
-    if len(closes) < period + 1:
-        return 50.0
-    gains, losses = [], []
-    for i in range(1, len(closes)):
-        change = closes[i] - closes[i - 1]
-        gains.append(max(0, change))
-        losses.append(max(0, -change))
-    avg_gain = sum(gains[:period]) / period
-    avg_loss = sum(losses[:period]) / period
-    for i in range(period, len(gains)):
-        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
-        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-
-def calculate_ema(closes, period=50):
-    if len(closes) < period:
-        return None
-    multiplier = 2 / (period + 1)
-    ema = sum(closes[:period]) / period
-    for price in closes[period:]:
-        ema = (price - ema) * multiplier + ema
-    return ema
-
-
-def calculate_macd(closes):
-    if len(closes) < 35:
-        return 0, 0, 0
-
-    def get_ema_list(data, period):
-        k = 2 / (period + 1)
-        ema_list = [data[0]]
-        for price in data[1:]:
-            ema_list.append((price * k) + (ema_list[-1] * (1 - k)))
-        return ema_list
-
-    fast_list = get_ema_list(closes, 12)
-    slow_list = get_ema_list(closes, 26)
-    macd_line = [f - s for f, s in zip(fast_list, slow_list)]
-    signal_list = get_ema_list(macd_line, 9)
-    return macd_line[-1], signal_list[-1], macd_line[-1] - signal_list[-1]
-
-
-# =====================================================================
-# 4. تنفيذ الأوامر (شراء / بيع)
 # =====================================================================
 def _fees_in(order, currency):
     total = 0.0
@@ -1131,6 +1107,14 @@ def automated_market_scan():
         scan_succeeded = False
         print("🔄 [SCANNER] فحص الاستراتيجيات الآلية الثلاث ({} | Demo-only safety)...".format(BINANCE_ENV))
         check_and_close_positions()
+        try:
+            _, spot_equity = get_binance_balance(ttl=0)
+            update_daily_risk_state('spot', daily_loss_status(DB_NAME, 'spot', spot_equity, MAX_DAILY_LOSS_PCT))
+        except Exception as exc:
+            update_daily_risk_state('spot', {'market': 'spot', 'blocked': True,
+                'equity': 0.0, 'baseline': None, 'loss_pct': None,
+                'limit_pct': MAX_DAILY_LOSS_PCT,
+                'reason': 'تعذر التحقق من حد الخسارة اليومية؛ أُوقف فتح الصفقات ({})'.format(type(exc).__name__)})
 
         for symbol in SYMBOLS:
             try:
@@ -1144,6 +1128,8 @@ def automated_market_scan():
                 setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S"),
                                'updated_at': time.time()})
                 market_snapshot[symbol] = setup
+                if daily_risk_state['spot'] and daily_risk_state['spot'].get('blocked'):
+                    continue
                 print("📊 {} | {} {} | RSI: {:.2f} | strength: {}/100 | setup: {}".format(
                     symbol, setup['strategy'], setup['timeframe'], setup['rsi'],
                     setup.get('signal_strength', 0), setup['reason']))
@@ -1467,6 +1453,7 @@ def api_state():
     return {
         'as_of': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'scanner': dict(scanner_state),
+        'daily_risk': {key: dict(value) if value else None for key, value in daily_risk_state.items()},
         'futures': future_state,
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
@@ -1567,7 +1554,7 @@ def update_binance_credentials(payload: BinanceCredentials):
         raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
     try:
         try:
-            candidate = make_binance_exchange(payload.api_key.strip(), payload.secret_key.strip())
+            candidate = make_binance_exchange(payload.api_key.strip(), payload.secret_key.strip(), BINANCE_ENV)
             candidate.load_markets()
             candidate.fetch_balance()
         except Exception:
