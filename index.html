@@ -359,6 +359,23 @@ body {
   50% { color:var(--futures); text-shadow:0 0 12px rgba(167,139,250,.45); }
 }
 @media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--spot); text-shadow:none; } }
+
+.decision-section { margin-top:16px; padding:14px; background:var(--card); border:1px solid var(--line); border-top:2px solid var(--spot); border-radius:16px; min-width:0; }
+.decision-list { display:flex; flex-direction:column; gap:8px; max-height:560px; overflow:auto; }
+.decision-row { padding:10px; border:1px solid var(--line); border-radius:12px; background:rgba(14,26,42,.55); font-size:11px; line-height:1.55; }
+.decision-row.spot { border-inline-start:3px solid var(--spot); }
+.decision-row.futures { border-inline-start:3px solid var(--futures); }
+.decision-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.decision-symbol { font-weight:700; font-size:12px; }
+.decision-meta { color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:5px; }
+.decision-reason { margin-top:5px; color:var(--text); overflow-wrap:anywhere; }
+.decision-api { color:var(--down); margin-top:4px; overflow-wrap:anywhere; }
+.decision-order { color:var(--futures); }
+.decision-pill { border-radius:999px; padding:2px 7px; background:rgba(148,163,184,.12); color:var(--muted); white-space:nowrap; }
+.decision-pill.ok { color:var(--up); background:rgba(77,224,189,.1); }
+.decision-pill.bad { color:var(--down); background:rgba(255,91,91,.1); }
+@media (max-width:1100px) { .decision-section { margin:0; } }
+
 </style>
 </head>
 <body>
@@ -515,6 +532,11 @@ body {
         <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
       </section>
 
+      <section class="decision-section" aria-label="سجل قرارات البوت">
+        <div class="tx-head-row"><h3>سجل قرارات البوت</h3><small id="decision-count">آخر القرارات</small></div>
+        <div class="decision-list" id="decision-log"><div class="empty">بانتظار قرارات السوق من البوت…</div></div>
+      </section>
+
 
     </aside>
   </div>
@@ -638,6 +660,25 @@ body {
       return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + '</small></span><b class="' + cls + '" dir="ltr">' + usd(t.pnl_usdt, 2) + '</b><span class="' + cls + '" dir="ltr">' + num(t.pnl_pct, 2) + '%</span><small>' + esc(t.time || '—') + '</small></div>';
     }).join('');
   }
+  function renderDecisions(items) {
+    var host = el('decision-log'), count = el('decision-count');
+    items = Array.isArray(items) ? items : [];
+    count.textContent = items.length ? items.length + ' قرار محفوظ' : 'لا توجد قرارات بعد';
+    if (!items.length) { host.innerHTML = '<div class="empty">تظهر هنا أسباب الدخول أو التجاهل وأي نتيجة من Binance.</div>'; return; }
+    host.innerHTML = items.map(function (d) {
+      var futures = String(d.market || '').toLowerCase().indexOf('futures') >= 0;
+      var side = d.signal === 'short' ? 'بيع / شورت' : (d.signal === 'long' ? 'شراء / لونغ' : 'لا توجد إشارة');
+      var status = d.order_status || 'لم يُرسل';
+      var statusLabel = ({'closed':'مكتمل','filled':'مكتمل','open':'مفتوح','canceled':'ملغى','rejected':'مرفوض','expired':'منتهي','simulated':'محاكاة','جارٍ الإرسال':'جارٍ الإرسال','غير مؤكد':'غير مؤكد','لم يُرسل':'لم يُرسل'})[status] || status;
+      var statusClass = ['closed','filled','simulated'].indexOf(status) >= 0 ? 'ok' : (['rejected','canceled','expired','غير مؤكد'].indexOf(status) >= 0 ? 'bad' : '');
+      var details = '<div class="decision-meta"><span>' + esc(futures ? 'Futures Demo' : 'Spot') + '</span><span>' + esc(side) + '</span><span>' + esc(d.strategy || '—') + ' · ' + esc(d.timeframe || '—') + '</span></div>' +
+        '<div class="decision-meta"><span>السعر ' + (d.price == null ? '—' : usd(d.price, Number(d.price) < 1 ? 5 : 2)) + '</span><span>وقت السعر ' + esc(localTime(d.price_updated_at)) + '</span><span>' + esc(localTime(d.created_at)) + ' قرار</span></div>' +
+        '<div class="decision-reason">' + esc(d.outcome || '—') + ': ' + esc(d.reason || '—') + '</div>' +
+        (d.order_id || d.order_status ? '<div class="decision-meta decision-order"><span>الأمر: ' + esc(statusLabel) + '</span>' + (d.order_id ? '<span dir="ltr">ID ' + esc(d.order_id) + '</span>' : '') + '</div>' : '') +
+        (d.api_message ? '<div class="decision-api">رسالة API: ' + esc(d.api_message) + '</div>' : '');
+      return '<article class="decision-row ' + (futures ? 'futures' : 'spot') + '"><div class="decision-top"><span class="decision-symbol" dir="ltr">' + esc(d.symbol) + '</span><span class="decision-pill ' + statusClass + '">' + esc(statusLabel) + '</span></div>' + details + '</article>';
+    }).join('');
+  }
   function renderNews(n) {
     n = n || {};
     var track = el('news-track'), status = el('news-ticker-status'), dot = el('news-ticker-dot');
@@ -714,6 +755,7 @@ body {
     renderMarkets(d.markets || []);
     renderPositions(d.positions || []);
     renderHistory(d.trades || []);
+    renderDecisions(d.decisions || []);
     renderNews(d.news || {});
   }
   function showOffline() {
