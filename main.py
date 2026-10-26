@@ -497,6 +497,17 @@ def _safe_decision_text(value, limit=300):
     return text[:limit]
 
 
+_STRATEGY_LABELS_AR = {
+    'trend': 'تتبّع الاتجاه', 'breakout': 'الاختراق', 'bounce': 'الارتداد',
+    'wait': 'انتظار', 'forced_test': 'اختبار Futures', 'test': 'اختبار Spot',
+}
+_DECISION_REASON_LABELS_AR = {
+    'TP': 'تحقق هدف الربح', 'SL': 'بلغ السعر وقف الخسارة',
+    'TEST': 'إغلاق صفقة اختبار', 'stop_loss': 'بلغ السعر وقف الخسارة',
+    'take_profit': 'تحقق هدف الربح',
+}
+
+
 def record_decision(market, symbol, setup=None, price=None, outcome='مراقبة', reason='',
                     order_status=None, order_id=None, api_message=None, price_updated_at=None):
     setup = setup or {}
@@ -504,9 +515,12 @@ def record_decision(market, symbol, setup=None, price=None, outcome='مراقب�
     direction = str(setup.get('direction') or ('long' if setup.get('signal') else 'none'))
     if not setup.get('signal'):
         direction = 'none'
+    strategy = setup.get('strategy_label') or _STRATEGY_LABELS_AR.get(
+        str(setup.get('strategy') or ''), setup.get('strategy') or '—')
+    reason = _DECISION_REASON_LABELS_AR.get(str(reason), reason)
     values = (
         created_at, str(market), str(symbol), direction,
-        str(setup.get('strategy_label') or setup.get('strategy') or '—'),
+        _safe_decision_text(strategy, 80),
         str(setup.get('timeframe') or '—'),
         float(price) if price is not None else None,
         price_updated_at or setup.get('price_updated_at'),
@@ -534,6 +548,46 @@ def record_decision(market, symbol, setup=None, price=None, outcome='مراقب�
             conn.close()
 
 
+def _explain_api_message(message):
+    text = str(message or '').strip()
+    lowered = text.lower()
+    if not text:
+        return ''
+    if any(term in lowered for term in ('insufficient balance', 'insufficient funds', 'not enough balance')):
+        return 'الرصيد المتاح لا يكفي لتنفيذ الأمر.'
+    if any(term in lowered for term in ('invalid api-key', 'invalid api key', 'unauthorized', 'authentication')):
+        return 'رفض Binance المصادقة؛ تحقق من المفتاح وصلاحياته.'
+    if 'timestamp' in lowered or 'recvwindow' in lowered:
+        return 'وقت الطلب لا يتوافق مع ساعة Binance؛ تحقق من اتصال الخادم والوقت.'
+    if any(term in lowered for term in ('lot_size', 'precision is over', 'invalid quantity')):
+        return 'كمية الأمر لا تطابق الدقة أو الحد الأدنى المسموح للزوج.'
+    if any(term in lowered for term in ('min_notional', 'notional', 'minimum order')):
+        return 'قيمة الأمر أقل من الحد الأدنى الذي يقبله الزوج.'
+    if any(term in lowered for term in ('too many requests', 'rate limit', '429')):
+        return 'أوقف Binance الطلبات مؤقتًا بسبب كثرتها.'
+    if any(term in lowered for term in ('timeout', 'network', 'exchange unavailable', 'connection')):
+        return 'تعذر الاتصال بـ Binance؛ راجع سجل الأوامر قبل إعادة المحاولة.'
+    if 'market is closed' in lowered or 'market closed' in lowered:
+        return 'السوق مغلق أو لا يقبل الأوامر حاليًا.'
+    return 'تفاصيل رد Binance: ' + text
+
+
+def _clarify_indicator_terms(text):
+    labels = {
+        'EMA50': 'المتوسط المتحرك الأسي لآخر 50 شمعة',
+        'EMA20': 'المتوسط المتحرك الأسي لآخر 20 شمعة',
+        'RSI': 'مؤشر قوة الحركة',
+        'MACD': 'مؤشر اتجاه الزخم',
+        'ATR': 'مقياس تقلب السعر',
+    }
+    for index, (term, arabic) in enumerate(labels.items()):
+        token = '__PROTECTED_INDICATOR_{}__'.format(index)
+        text = text.replace('({})'.format(term), token)
+        text = text.replace(term, '{} ({})'.format(arabic, term))
+        text = text.replace(token, '({})'.format(term))
+    return text
+
+
 def get_recent_decisions(limit=80):
     conn = sqlite3.connect(DB_NAME, timeout=10.0)
     conn.row_factory = sqlite3.Row
@@ -541,7 +595,13 @@ def get_recent_decisions(limit=80):
         rows = conn.execute('''SELECT created_at, market, symbol, signal, strategy, timeframe,
             price, price_updated_at, outcome, reason, order_status, order_id, api_message
             FROM decision_log ORDER BY id DESC LIMIT ?''', (max(1, min(int(limit), 200)),)).fetchall()
-        return [dict(row) for row in rows]
+        result = [dict(row) for row in rows]
+        for row in result:
+            row['strategy'] = _STRATEGY_LABELS_AR.get(row.get('strategy'), row.get('strategy') or '—')
+            row['reason'] = _DECISION_REASON_LABELS_AR.get(row.get('reason'), row.get('reason') or '—')
+            row['reason'] = _clarify_indicator_terms(row['reason'])
+            row['api_message_ar'] = _explain_api_message(row.get('api_message'))
+        return result
     except Exception as exc:
         print('[DECISION_LOG] تعذر قراءة سجل القرارات: {}'.format(type(exc).__name__), flush=True)
         return []
@@ -1843,3 +1903,4 @@ def manual_check():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+
