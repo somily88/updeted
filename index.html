@@ -70,7 +70,7 @@ button { font: inherit; color: inherit; }
 .ticker-dot.paused { background:#e8a33d; box-shadow:none; }
 .ticker-viewport { min-width:0; flex:1; overflow:hidden; direction:ltr; }
 .ticker-track { display:flex; width:max-content; align-items:center; white-space:nowrap; direction:ltr; }
-.ticker-track.is-moving { animation:news-scroll 42s linear infinite; }
+.ticker-track.is-moving { animation:news-scroll var(--ticker-duration, 48s) linear infinite; will-change:transform; }
 .news-ticker:hover .ticker-track, .news-ticker:focus-within .ticker-track { animation-play-state:paused; }
 .ticker-sequence { display:flex; align-items:center; flex:none; }
 .ticker-item { display:inline-flex; align-items:center; gap:9px; padding-inline:24px; color:#dedede; font-size:13px; }
@@ -361,6 +361,28 @@ body {
 @media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--spot); text-shadow:none; } }
 
 .decision-section { margin-top:16px; padding:14px; background:var(--card); border:1px solid var(--line); border-top:2px solid var(--spot); border-radius:16px; min-width:0; }
+.section-title-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:18px 0 12px; }
+.section-title-row .section-title { margin:0; }
+.strategy-open,.strategy-close { border:1px solid var(--line); background:var(--card); color:var(--lime); border-radius:10px; cursor:pointer; }
+.strategy-open { padding:9px 14px; font-size:12px; white-space:nowrap; }
+.strategy-open:hover { border-color:var(--lime); background:rgba(56,217,188,.08); }
+.strategy-dialog { width:min(760px,calc(100vw - 28px)); max-height:min(82vh,760px); overflow:auto; margin:auto; padding:22px; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:0 25px 90px rgba(0,0,0,.58); }
+.strategy-dialog::backdrop { background:rgba(2,8,16,.76); backdrop-filter:blur(3px); }
+.strategy-dialog-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:12px; }
+.strategy-dialog-head h2 { font-size:21px; }
+.strategy-close { width:36px; height:36px; font-size:24px; line-height:1; color:var(--text); }
+.strategy-intro { color:var(--muted); line-height:1.7; font-size:13px; margin-bottom:16px; }
+.strategy-group { border:1px solid var(--line); border-radius:13px; padding:12px; margin:9px 0; background:rgba(20,37,58,.55); }
+.strategy-group-head { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }
+.strategy-market-row { display:grid; grid-template-columns:minmax(90px,.7fr) minmax(0,1.3fr); gap:5px 12px; padding:8px 0; border-top:1px solid rgba(32,54,80,.7); font-size:12px; }
+.strategy-market-row small { grid-column:1/-1; line-height:1.55; }
+.strategy-rules { margin-top:16px; padding:14px; border-radius:13px; background:rgba(7,16,28,.65); }
+.strategy-rules h3 { margin-bottom:9px; font-size:14px; }
+.strategy-rules div { display:grid; grid-template-columns:130px 1fr; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:12px; line-height:1.6; }
+.strategy-rules div b { color:var(--lime); }
+.strategy-rules div span,.strategy-rules>small { color:var(--muted); }
+.strategy-rules>small { display:block; margin-top:9px; line-height:1.6; }
+@media (max-width:520px) { .strategy-dialog { padding:16px; } .strategy-rules div { grid-template-columns:1fr; gap:2px; } .strategy-market-row { grid-template-columns:1fr; } .section-title-row { align-items:flex-start; } }
 .decision-list { display:flex; flex-direction:column; gap:8px; max-height:560px; overflow:auto; }
 .decision-row { padding:10px; border:1px solid var(--line); border-radius:12px; background:rgba(14,26,42,.55); font-size:11px; line-height:1.55; }
 .decision-row.spot { border-inline-start:3px solid var(--spot); }
@@ -504,8 +526,30 @@ body {
         <div class="tip" id="tip" dir="ltr"></div>
       </div>
 
-      <h2 class="section-title">الأسواق والإشارات</h2>
+      <div class="section-title-row">
+        <h2 class="section-title">الأسواق والإشارات</h2>
+        <button class="strategy-open" id="strategy-open" type="button">الاستراتيجية المتبعة</button>
+      </div>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
+      <section class="decision-section" aria-label="سجل قرارات البوت">
+        <div class="tx-head-row"><h3>سجل قرارات البوت</h3><small id="decision-count">آخر القرارات</small></div>
+        <div class="decision-list" id="decision-log"><div class="empty">بانتظار قرارات السوق من البوت…</div></div>
+      </section>
+      <dialog class="strategy-dialog" id="strategy-dialog" aria-labelledby="strategy-dialog-title">
+        <div class="strategy-dialog-head">
+          <div><small>اختيار آلي حسب بيانات كل زوج</small><h2 id="strategy-dialog-title">الاستراتيجية المتبعة الآن</h2></div>
+          <button class="strategy-close" id="strategy-close" type="button" aria-label="إغلاق">×</button>
+        </div>
+        <p class="strategy-intro">يقيّم البوت الاتجاه والاختراق والارتداد لكل سوق، ثم يعرض الاستراتيجية والإطار الزمني الذي اجتاز شروطها. قد تختلف الاستراتيجية بين Spot وFutures وبين العملات.</p>
+        <div id="strategy-current"><div class="empty">جارٍ تحميل الاستراتيجيات الحالية…</div></div>
+        <div class="strategy-rules">
+          <h3>قواعد الاختيار</h3>
+          <div><b>تتبّع الاتجاه</b><span>يومي أو 4 ساعات؛ يتطلب توافق السعر ومتوسطات EMA والزخم.</span></div>
+          <div><b>الاختراق</b><span>ساعة أو 15 دقيقة؛ يتطلب كسر نطاق 20 شمعة وحجم تداول مرتفعًا مع تأكيد إطار أكبر.</span></div>
+          <div><b>الارتداد</b><span>15 أو 5 دقائق؛ يُفحص عندما يكون اتجاه السوق عرضيًا.</span></div>
+          <small>هذه قراءة لقواعد الكود الحالية وليست توقعًا أو ضمانًا للربح.</small>
+        </div>
+      </dialog>
 
 
 
@@ -532,10 +576,6 @@ body {
         <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
       </section>
 
-      <section class="decision-section" aria-label="سجل قرارات البوت">
-        <div class="tx-head-row"><h3>سجل قرارات البوت</h3><small id="decision-count">آخر القرارات</small></div>
-        <div class="decision-list" id="decision-log"><div class="empty">بانتظار قرارات السوق من البوت…</div></div>
-      </section>
 
 
     </aside>
@@ -686,18 +726,57 @@ body {
     var state = !n.enabled ? 'الأخبار موقوفة' : (n.blocked ? 'حظر بسبب خبر قوي' : (n.checked_at ? 'آخر فحص ' + String(n.checked_at) : 'بانتظار أول فحص'));
     status.textContent = state;
     dot.classList.toggle('paused', !!n.blocked || !n.enabled);
+    var signature = JSON.stringify([n.enabled, n.blocked, n.checked_at, n.error, n.reason,
+      headlines.map(function (h) { return [h.source, h.title_ar, h.title]; })]);
+    if (track.dataset.signature === signature) return;
+    track.dataset.signature = signature;
+    track.classList.remove('is-moving');
+    track.style.removeProperty('--ticker-duration');
     var items = headlines.map(function (h) {
-      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span dir="auto">' + esc(h.title_ar || 'جارٍ ترجمة العنوان…') + '</span></span>';
+      var title = h.title_ar || h.title || 'خبر جديد';
+      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span dir="auto">' + esc(title) + '</span></span>';
     }).join('');
     if (!items) {
-      var fallback = n.reason || (n.error ? 'تعذّر جلب الأخبار في آخر فحص' : 'لا توجد عناوين حديثة في آخر فحص');
-      track.classList.remove('is-moving');
-      track.innerHTML = '<span class="ticker-item">' + esc(fallback) + '</span>';
+      var fallback = n.error ? 'تعذّر تحديث الأخبار: ' + n.error : (n.reason || 'لا توجد عناوين حديثة في آخر فحص');
+      track.innerHTML = '<span class="ticker-item"><span class="ticker-source">الأخبار</span><span dir="auto">' + esc(fallback) + '</span></span>';
       return;
     }
     var sequence = '<span class="ticker-sequence">' + items + '</span>';
     track.innerHTML = sequence + (headlines.length > 1 ? '<span class="ticker-sequence" aria-hidden="true">' + items + '</span>' : '');
-    track.classList.toggle('is-moving', headlines.length > 1);
+    if (headlines.length > 1) {
+      requestAnimationFrame(function () {
+        if (track.dataset.signature !== signature) return;
+        var sequenceWidth = track.scrollWidth / 2;
+        var seconds = Math.max(22, Math.min(90, sequenceWidth / 42));
+        track.style.setProperty('--ticker-duration', seconds + 's');
+        track.classList.add('is-moving');
+      });
+    }
+  }
+  function renderStrategyDialog(markets) {
+    var host = el('strategy-current');
+    markets = Array.isArray(markets) ? markets : [];
+    var groups = Object.create(null), waiting = [];
+    markets.forEach(function (m) {
+      if (!m || !m.ready) return;
+      var key = String(m.strategy || 'wait') + '|' + String(m.timeframe || '—') + '|' + String(m.market_type || 'Spot');
+      if (m.strategy && m.strategy !== 'wait') {
+        if (!groups[key]) groups[key] = { label:m.strategy_label || m.strategy, timeframe:m.timeframe || '—', venue:m.market_type || 'Spot', items:[] };
+        groups[key].items.push(m);
+      } else waiting.push(m);
+    });
+    var cards = Object.keys(groups).map(function (key) {
+      var group = groups[key];
+      return '<article class="strategy-group"><div class="strategy-group-head"><b>' + esc(group.label) + ' · ' + esc(group.timeframe) + '</b><small>' + esc(group.venue) + ' · ' + group.items.length + ' أزواج</small></div>' +
+        group.items.map(function (m) {
+          var signal = m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'لا توجد إشارة دخول الآن';
+          return '<div class="strategy-market-row"><b dir="ltr">' + esc(m.symbol) + '</b><span>' + esc(signal) + (m.signal_strength ? ' · ' + esc(m.signal_strength) + '/100' : '') + '</span><small>' + esc(m.reason || 'لا يوجد سبب إضافي') + '</small></div>';
+        }).join('') + '</article>';
+    }).join('');
+    var waitingHtml = waiting.length ? '<article class="strategy-group"><div class="strategy-group-head"><b>انتظار</b><small>' + waiting.length + ' أزواج لا تحقق شروط الدخول حاليًا</small></div>' +
+      waiting.slice(0, 12).map(function (m) { return '<div class="strategy-market-row"><b dir="ltr">' + esc(m.symbol) + '</b><span>مراقبة · ' + esc(m.market_type || 'Spot') + '</span><small>' + esc(m.reason || 'بانتظار اكتمال الشروط') + '</small></div>'; }).join('') +
+      (waiting.length > 12 ? '<small>ويجري فحص ' + (waiting.length - 12) + ' أزواج أخرى.</small>' : '') + '</article>' : '';
+    host.innerHTML = cards + waitingHtml || '<div class="empty">بانتظار أول فحص للأسواق.</div>';
   }
   function render(d) {
     var stats = d.stats || {}, wallet = d.wallet || {}, scanner = d.scanner || {};
@@ -753,6 +832,7 @@ body {
     el('exposure-meter').setAttribute('aria-label', num(exposure, 1) + '% من المحفظة في صفقات مفتوحة');
     renderAccounts(d);
     renderMarkets(d.markets || []);
+    renderStrategyDialog(d.markets || []);
     renderPositions(d.positions || []);
     renderHistory(d.trades || []);
     renderDecisions(d.decisions || []);
@@ -769,6 +849,12 @@ body {
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
       .then(render).catch(showOffline).finally(function () { busy = false; });
   }
+  var strategyDialog = el('strategy-dialog');
+  el('strategy-open').addEventListener('click', function () { if (strategyDialog && !strategyDialog.open) strategyDialog.showModal(); });
+  el('strategy-close').addEventListener('click', function () { if (strategyDialog && strategyDialog.open) strategyDialog.close(); });
+  if (strategyDialog) strategyDialog.addEventListener('click', function (event) {
+    if (event.target === strategyDialog) strategyDialog.close();
+  });
   poll();
   window.setInterval(poll, 5000);
   window.addEventListener('online', poll);
