@@ -544,9 +544,10 @@ body {
         <div id="strategy-current"><div class="empty">جارٍ تحميل الاستراتيجيات الحالية…</div></div>
         <div class="strategy-rules">
           <h3>قواعد الاختيار</h3>
-          <div><b>تتبّع الاتجاه</b><span>يومي أو 4 ساعات؛ يتطلب توافق السعر ومتوسطات EMA والزخم.</span></div>
-          <div><b>الاختراق</b><span>ساعة أو 15 دقيقة؛ يتطلب كسر نطاق 20 شمعة وحجم تداول مرتفعًا مع تأكيد إطار أكبر.</span></div>
-          <div><b>الارتداد</b><span>15 أو 5 دقائق؛ يُفحص عندما يكون اتجاه السوق عرضيًا.</span></div>
+          <div><b>تتبّع الاتجاه</b><span>يومي أو 4 ساعات: يقارن سعر الإغلاق بمتوسطَي آخر 20 و50 شمعة، ويتحقق من اتجاههما والزخم.</span></div>
+          <div><b>الاختراق</b><span>ساعة أو 15 دقيقة: يبحث عن إغلاق خارج أعلى أو أدنى نطاق آخر 20 شمعة مع تداول نشط، ثم يتأكد من اتجاه 4 ساعات.</span></div>
+          <div><b>الارتداد</b><span>15 أو 5 دقائق: يبحث عن رجوع السعر من نطاق بولينجر العلوي أو السفلي عندما يكون السوق جانبيًا.</span></div>
+          <small><b>معاني المؤشرات:</b> EMA هو المتوسط المتحرك الأسي لسعر الإغلاق؛ EMA20 وEMA50 يحسبان متوسط آخر 20 أو 50 شمعة. RSI يقيس قوة الحركة، وMACD يوضح اتجاه الزخم، وATR يقيس تقلب السعر ويُستخدم لحساب الوقف والهدف. نطاقات بولينجر تقيس ابتعاد السعر عن متوسطه.</small>
           <small>هذه قراءة لقواعد الكود الحالية وليست توقعًا أو ضمانًا للربح.</small>
         </div>
       </dialog>
@@ -594,6 +595,10 @@ body {
   function pnlClass(v) { return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat'; }
   function coin(symbol) { var base = String(symbol || '').split('/')[0]; return { base: base, glyph: labels[base] || base.slice(0, 1), color: colors[base] || '#748094' }; }
   function setPill(node, text, state) { if (!node) return; node.textContent = text; node.className = 'pill ' + (state || ''); }
+  function timeframeLabel(value) {
+    var labels = { '1d':'يومي', '4h':'4 ساعات', '1h':'ساعة واحدة', '15m':'15 دقيقة', '5m':'5 دقائق', 'demo-test':'اختبار تجريبي', 'auto':'تلقائي' };
+    return labels[String(value || '')] || String(value || '—');
+  }
   function localTime(value) {
     if (!value) return '—';
     var d = new Date(value);
@@ -610,12 +615,12 @@ body {
       var statusClass = stale ? 'pill-off' : (m.ready && (m.signal || m.in_position) ? 'pill-on' : '');
       return '<article class="mkt' + (stale ? ' stale' : '') + '"><div class="mkt-head">' +
         '<span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span>' +
-        '<div class="mkt-title"><b dir="ltr">' + esc(m.symbol) + '</b><small>' + esc(m.strategy_label || (m.market_type === 'Futures Demo' ? 'Futures Demo' : 'Binance Spot')) + ' · ' + (m.ready ? esc(m.timeframe || '') : 'بانتظار الفحص') + '</small></div>' +
+        '<div class="mkt-title"><b dir="ltr">' + esc(m.symbol) + '</b><small>' + esc(m.strategy_label || (m.market_type === 'Futures Demo' ? 'Futures Demo' : 'Binance Spot')) + ' · ' + (m.ready ? esc(timeframeLabel(m.timeframe)) : 'بانتظار الفحص') + '</small></div>' +
         '<span class="pill ' + statusClass + '">' + status + '</span></div>' +
         '<div class="mkt-price" dir="ltr">' + (m.ready && m.price != null ? usd(m.price, m.price < 1 ? 5 : 2) : '—') + '</div>' +
-        '<div class="mkt-grid"><div><small>RSI</small><b dir="ltr">' + (m.ready ? num(m.rsi, 1) : '—') + '</b></div>' +
-        '<div><small>EMA</small><b dir="ltr">' + (m.ready ? num(m.ema, 2) : '—') + '</b></div>' +
-        '<div><small>MACD</small><b dir="ltr" class="' + (Number(m.hist) >= 0 ? 'up' : 'down') + '">' + (m.ready ? num(m.hist, 4) : '—') + '</b></div></div>' +
+        '<div class="mkt-grid"><div><small title="مؤشر قوة الحركة: يوضح إن كان السعر يتحرك بقوة صعودًا أو هبوطًا">RSI</small><b dir="ltr">' + (m.ready ? num(m.rsi, 1) : '—') + '</b></div>' +
+        '<div><small title="المتوسط المتحرك الأسي لسعر الإغلاق خلال 50 شمعة">EMA50</small><b dir="ltr">' + (m.ready ? num(m.ema, 2) : '—') + '</b></div>' +
+        '<div><small title="مؤشر اتجاه الزخم: يوضح تغير قوة الحركة">MACD</small><b dir="ltr" class="' + (Number(m.hist) >= 0 ? 'up' : 'down') + '">' + (m.ready ? num(m.hist, 4) : '—') + '</b></div></div>' +
         '<div class="freshness">' + strength + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : esc(m.reason || 'سيظهر السعر بعد أول فحص')) + '</div></article>';
     }
     var spot = markets.filter(function(m){ return m.market_type !== 'Futures Demo'; });
@@ -711,11 +716,11 @@ body {
       var status = d.order_status || 'لم يُرسل';
       var statusLabel = ({'closed':'مكتمل','filled':'مكتمل','open':'مفتوح','canceled':'ملغى','rejected':'مرفوض','expired':'منتهي','simulated':'محاكاة','جارٍ الإرسال':'جارٍ الإرسال','غير مؤكد':'غير مؤكد','لم يُرسل':'لم يُرسل'})[status] || status;
       var statusClass = ['closed','filled','simulated'].indexOf(status) >= 0 ? 'ok' : (['rejected','canceled','expired','غير مؤكد'].indexOf(status) >= 0 ? 'bad' : '');
-      var details = '<div class="decision-meta"><span>' + esc(futures ? 'Futures Demo' : 'Spot') + '</span><span>' + esc(side) + '</span><span>' + esc(d.strategy || '—') + ' · ' + esc(d.timeframe || '—') + '</span></div>' +
+      var details = '<div class="decision-meta"><span>' + esc(futures ? 'Futures Demo' : 'Spot') + '</span><span>' + esc(side) + '</span><span>' + esc(d.strategy || '—') + ' · ' + esc(timeframeLabel(d.timeframe)) + '</span></div>' +
         '<div class="decision-meta"><span>السعر ' + (d.price == null ? '—' : usd(d.price, Number(d.price) < 1 ? 5 : 2)) + '</span><span>وقت السعر ' + esc(localTime(d.price_updated_at)) + '</span><span>' + esc(localTime(d.created_at)) + ' قرار</span></div>' +
         '<div class="decision-reason">' + esc(d.outcome || '—') + ': ' + esc(d.reason || '—') + '</div>' +
         (d.order_id || d.order_status ? '<div class="decision-meta decision-order"><span>الأمر: ' + esc(statusLabel) + '</span>' + (d.order_id ? '<span dir="ltr">ID ' + esc(d.order_id) + '</span>' : '') + '</div>' : '') +
-        (d.api_message ? '<div class="decision-api">رسالة API: ' + esc(d.api_message) + '</div>' : '');
+        (d.api_message_ar || d.api_message ? '<div class="decision-api">توضيح الخطأ: ' + esc(d.api_message_ar || d.api_message) + '</div>' : '');
       return '<article class="decision-row ' + (futures ? 'futures' : 'spot') + '"><div class="decision-top"><span class="decision-symbol" dir="ltr">' + esc(d.symbol) + '</span><span class="decision-pill ' + statusClass + '">' + esc(statusLabel) + '</span></div>' + details + '</article>';
     }).join('');
   }
@@ -767,7 +772,7 @@ body {
     });
     var cards = Object.keys(groups).map(function (key) {
       var group = groups[key];
-      return '<article class="strategy-group"><div class="strategy-group-head"><b>' + esc(group.label) + ' · ' + esc(group.timeframe) + '</b><small>' + esc(group.venue) + ' · ' + group.items.length + ' أزواج</small></div>' +
+      return '<article class="strategy-group"><div class="strategy-group-head"><b>' + esc(group.label) + ' · ' + esc(timeframeLabel(group.timeframe)) + '</b><small>' + esc(group.venue) + ' · ' + group.items.length + ' أزواج</small></div>' +
         group.items.map(function (m) {
           var signal = m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'لا توجد إشارة دخول الآن';
           return '<div class="strategy-market-row"><b dir="ltr">' + esc(m.symbol) + '</b><span>' + esc(signal) + (m.signal_strength ? ' · ' + esc(m.signal_strength) + '/100' : '') + '</span><small>' + esc(m.reason || 'لا يوجد سبب إضافي') + '</small></div>';
@@ -1086,3 +1091,4 @@ body {
 </script>
 </body>
 </html>
+
