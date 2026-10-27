@@ -540,6 +540,47 @@ body { background:radial-gradient(ellipse at 15% 0%,rgba(72,83,54,.12),transpare
 :focus-visible { outline-color:#c5dc7d; }
 @media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--text); } }
 
+
+/* ---------- Emphasize the latest bot decision ---------- */
+.latest-decision-card {
+  background:linear-gradient(145deg,#242a31 0%,#1c2026 72%);
+  border:1px solid #424a54;
+  border-top:3px solid #b7cf70;
+  box-shadow:0 8px 22px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.025);
+}
+.latest-decision-card h3 {
+  color:#e8eadf;
+  padding-bottom:10px;
+  border-bottom:1px solid #353c45;
+  letter-spacing:.01em;
+}
+.latest-decision-card .decision-row {
+  background:#20252c;
+  border:1px solid #3b444e;
+  border-radius:13px;
+  padding:15px;
+  line-height:1.7;
+}
+.latest-decision-card .decision-row.spot { border-inline-start:4px solid #60b7a5; }
+.latest-decision-card .decision-row.futures { border-inline-start:4px solid #b19ae1; }
+.latest-decision-card .decision-symbol { color:#f0f1ec; font-size:15px; letter-spacing:.02em; }
+.latest-decision-card .decision-pill { padding:4px 10px; border:1px solid #46505b; background:#303640; color:#d0d5dc; }
+.latest-decision-card .decision-pill.ok { color:#91d9b3; background:#263a31; border-color:#3b6550; }
+.latest-decision-card .decision-pill.bad { color:#f1a0a0; background:#402e31; border-color:#694348; }
+.latest-decision-card .decision-meta { color:#b0b7c0; gap:6px 12px; }
+.latest-decision-card .decision-reason {
+  margin-top:9px;
+  padding:10px 12px;
+  color:#e5e7e2;
+  background:#292f36;
+  border-radius:9px;
+  border-inline-start:2px solid #9eb55d;
+  overflow-wrap:anywhere;
+}
+.latest-decision-card .decision-order { color:#c4b2ed; }
+.latest-decision-card .decision-api { color:#f1a1a1; background:#39292c; padding:8px 10px; border-radius:8px; }
+.latest-decision-card .empty { background:#22272e; border:1px dashed #414953; color:#aeb5bd; }
+
 </style>
 </head>
 <body>
