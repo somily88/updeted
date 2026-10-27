@@ -434,6 +434,23 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
 @media (max-width:1100px) { .grid { grid-template-columns:1fr; } } @media (max-width:820px) { .performance-band { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:reduce) { .position-table-row.position-enter,.position-table-row.position-tick-up,.position-table-row.position-tick-down { animation:none!important; } }
 
+
+.performance-report { margin:16px 0; padding:16px; background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 4px 16px rgba(24,35,52,.045); }
+.performance-report-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
+.performance-report-head h3 { font-size:16px; margin-bottom:4px; color:var(--text); }
+.performance-report-head b { color:var(--lime); white-space:nowrap; font-size:12px; }
+.performance-table-wrap { overflow-x:auto; }
+.performance-table { width:100%; min-width:840px; border-collapse:collapse; font-size:12px; text-align:right; }
+.performance-table th { padding:10px 9px; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line); white-space:nowrap; }
+.performance-table td { padding:11px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
+.performance-table tr:last-child td { border-bottom:0; }
+.performance-table .pair-name { direction:ltr; unicode-bidi:isolate; font-weight:600; white-space:nowrap; }
+.performance-table .sub-label { display:block; color:var(--muted); font-size:10px; margin-top:3px; }
+.performance-sample { display:inline-block; padding:3px 7px; border-radius:999px; background:#f0efff; color:#5749ba; white-space:nowrap; }
+.performance-sample.low { background:#fff5df; color:#936318; }
+.performance-report .empty { background:#f7f8fa; }
+@media(max-width:720px) { .performance-report { padding:12px; } .performance-report-head { flex-direction:column; } }
+
 </style>
 </head>
 <body>
@@ -557,16 +574,21 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
         <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
       </section>
 
-      
 
-      
 
-      <section class="futures-market-section" aria-label="عقود Futures Demo">
+
+
+<section class="performance-report" aria-label="تقرير أداء الاستراتيجيات">
+        <div class="performance-report-head"><div><h3>أداء الاستراتيجيات والأزواج</h3><small>آخر 30 يومًا · عينة صغيرة تعني أن النتيجة أولية وليست أساسًا كافيًا لتغيير القواعد</small></div><b id="performance-period">آخر 30 يومًا</b></div>
+        <div id="performance-report-content"><div class="empty">جارٍ تحميل تقرير الأداء…</div></div>
+      </section>
+
+            <section class="futures-market-section" aria-label="عقود Futures Demo">
         <div class="market-group-head"><h3>مراقبة عقود Futures Demo</h3><small>أسعار وإشارات الحساب التجريبي</small></div>
         <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
       </section>
 
-      
+
 
       <div class="section-title-row">
         <h2 class="section-title">الأسواق والإشارات</h2>
@@ -753,6 +775,30 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
     host.innerHTML = rendered.join('');
     if (latest) latest.innerHTML = rendered[0];
   }
+  function renderPerformanceReport(report) {
+    var host = el('performance-report-content');
+    var rows = report && Array.isArray(report.groups) ? report.groups : [];
+    var period = el('performance-period');
+    if (period) period.textContent = report && report.days ? 'آخر ' + report.days + ' يومًا' : 'آخر 30 يومًا';
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty">لا توجد صفقات مغلقة مسجلة خلال الفترة المحددة.</div>';
+      return;
+    }
+    var body = rows.map(function (r) {
+      var sample = Number(r.sample_size) || 0;
+      var cls = pnlClass(r.pnl_per_trade);
+      var strategyLabels = {trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',forced_test:'اختبار Futures',test:'اختبار Spot'};
+      var strategy = strategyLabels[r.strategy] || r.strategy || 'غير مسجل';
+      return '<tr><td>' + esc(r.market) + '</td><td class="pair-name">' + esc(r.symbol) + '</td>' +
+        '<td>' + esc(strategy) + '<small class="sub-label">' + esc(timeframeLabel(r.timeframe)) + '</small></td>' +
+        '<td><span class="performance-sample ' + (sample < Number(report.minimum_sample || 30) ? 'low' : '') + '">' + sample + ' صفقة · ' + esc(r.sample_label || 'عينة أولية') + '</span></td>' +
+        '<td>' + num(r.win_rate,1) + '%<small class="sub-label">' + (r.wins || 0) + ' رابحة · ' + (r.losses || 0) + ' خاسرة</small><small class="sub-label">متوسط الربح ' + usd(r.avg_win,2) + ' · الخسارة ' + usd(r.avg_loss,2) + '</small></td>' +
+        '<td class="' + cls + '">' + usd(r.pnl_per_trade,2) + '<small class="sub-label">متوسط النتيجة للصفقة</small></td>' +
+        '<td class="' + pnlClass(r.pnl_total) + '">' + usd(r.pnl_total,2) + '<small class="sub-label">' + esc(r.cost_basis || '') + '</small></td></tr>';
+    }).join('');
+    host.innerHTML = '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>المجموع المسجل</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
   function renderNews(n) {
     n = n || {};
     var track = el('news-track'), status = el('news-ticker-status'), dot = el('news-ticker-dot');
@@ -870,6 +916,7 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
     renderPositions(d.positions || []);
     renderHistory(d.trades || []);
     renderDecisions(d.decisions || []);
+    renderPerformanceReport(d.performance_report || {});
     renderNews(d.news || {});
   }
   function showOffline() {
@@ -1120,5 +1167,4 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
 </script>
 </body>
 </html>
-
 
