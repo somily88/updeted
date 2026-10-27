@@ -398,6 +398,42 @@ body {
 .decision-pill.bad { color:var(--down); background:rgba(255,91,91,.1); }
 @media (max-width:1100px) { .decision-section { margin:0; } }
 
+/* ---------- Refreshed light command center ---------- */
+:root { --bg:#f1f3f6; --card:#fff; --card-hi:#f7f8fa; --line:#e2e6ec; --text:#171b22; --muted:#707987; --lime:#5146e5; --spot:#087f70; --futures:#7652c8; --up:#16845f; --down:#d64f55; --bar:#dce1e8; }
+html,body { background:var(--bg); } body { padding:26px; background:linear-gradient(180deg,#f8f9fb 0,#f1f3f6 360px); }
+.shell { max-width:1480px; } .top { margin-bottom:18px; padding:0 0 15px; border-color:var(--line); }
+.logo { color:var(--text); } .logo i { color:var(--lime); } .nav-item { color:var(--muted); }
+.pill { background:#fff; color:var(--text); border-color:var(--line); } .btn-scan { border-color:var(--lime); color:var(--lime); } .btn-scan:hover { background:var(--lime); color:#fff; }
+.news-ticker { background:#fff; border-color:var(--line); border-inline-start-color:var(--lime); box-shadow:0 3px 14px rgba(24,35,52,.04); } .ticker-item { color:#353b45; }
+.grid { grid-template-columns:minmax(0,1fr) 300px; gap:18px; } .overview-top { margin-bottom:14px; }
+.wallet-top { background:#fff; border:1px solid var(--line); border-inline-start:4px solid var(--lime); box-shadow:0 5px 20px rgba(24,35,52,.045); }
+.wallet-label { color:var(--muted); } .wallet-value h1 { color:var(--text); } .range { background:#fff; border-color:var(--line); color:var(--muted); } .range.active { background:#f0efff; border-color:var(--lime); color:var(--lime); }
+.stats { margin-bottom:14px; gap:12px; } .stat,.account-card,.futures-market-section,.chart-card,.mkt,.news-card,.risk,.tx,.tx-history,.decision-section { background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.045); }
+.stat { border-top:0; border-inline-start:3px solid var(--lime); padding:17px; } .stat:nth-child(2) { border-inline-start-color:var(--futures); } .stat:nth-child(3) { border-inline-start-color:#3983d5; } .stat:nth-child(4) { border-inline-start-color:#d99a35; } .stat b { color:var(--text); }
+.performance-band { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(280px,1fr); gap:14px; margin-bottom:16px; } .chart-card { height:250px; margin:0; }
+.latest-decision-card { min-width:0; padding:17px; background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 4px 16px rgba(24,35,52,.045); }
+.latest-decision-card h3 { margin-bottom:12px; font-size:15px; } .latest-decision-card .decision-row { min-height:150px; padding:14px; background:#f8f9fb; border-color:var(--line); font-size:12px; }
+.latest-decision-card .decision-meta { color:var(--muted); } .latest-decision-card .decision-reason { color:var(--text); line-height:1.75; }
+.accounts { margin:0 0 15px; } .account-card { border-inline-start:3px solid var(--spot); } .account-card:nth-child(2) { border-inline-start-color:var(--futures); }
+.account-icon { background:#f0f1f5; } .account-balance { color:var(--text); } .account-symbols span { color:#414957; } .tradfi-consent { background:#f7f8fa; } .tradfi-consent label { color:var(--text); } .tradfi-sign-button { color:#fff; }
+.open-positions-section { margin-bottom:16px; padding:16px; background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.045); }
+.open-positions-title { animation:none; color:var(--text); text-shadow:none; } .positions-meta #open-count { color:var(--text); font-weight:600; } .positions-live { color:var(--muted)!important; }
+.positions-table { overflow-x:auto; } .positions-table-head,.position-table-row { display:grid; grid-template-columns:1.1fr .9fr 1fr 1fr .9fr; align-items:center; gap:12px; min-width:650px; padding:12px 14px; }
+.positions-table-head { color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); } .position-table-row { background:#fff; border-bottom:1px solid var(--line); font-size:12px; transition:background .2s; }
+.position-table-row:last-child { border-bottom:0; } .position-table-row.spot-position { border-inline-start:3px solid var(--spot); } .position-table-row.futures-position { border-inline-start:3px solid var(--futures); }
+.position-table-row.position-enter { animation:position-enter .45s ease both; } .position-table-row.position-tick-up { animation:position-tick-up .85s ease; } .position-table-row.position-tick-down { animation:position-tick-down .85s ease; }
+.position-pair { display:flex; align-items:center; gap:8px; font-weight:600; } .position-pair .coin { width:28px; height:28px; font-size:14px; } .position-venue { display:block; color:var(--muted); font-size:10px; font-weight:400; margin-top:2px; }
+.position-numbers { direction:ltr; unicode-bidi:isolate; text-align:right; } .position-value { direction:ltr; unicode-bidi:isolate; text-align:right; font-weight:600; }
+.futures-market-section { border-inline-start:3px solid var(--futures); } .futures-market-section .market-group-head h3 { color:var(--futures); } .futures-market-section .mkt { background:#faf9ff; border-color:#e7e0f7; }
+.market-group { background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.04); } .market-group-head h3 { color:var(--text); } .mkt { background:#fff; border-color:var(--line); } .mkt:hover { border-color:var(--lime); }
+.risk { border-top:2px solid var(--lime); } .risk h2 { color:var(--text); } .meter { background:repeating-linear-gradient(90deg,#e1e5eb 0 1.5px,transparent 1.5px 5px); }
+.tx-head-row h3,.section-title { color:var(--text); } .tx-head-row span { color:var(--lime); } .tx.position-card { background:#fff; } .tx.hl { background:var(--lime); } .empty { background:#f7f8fa; }
+.history-row { border-color:var(--line); } .decision-section { border-top-color:var(--lime); } .decision-row { background:#f8f9fb; border-color:var(--line); } .decision-meta { color:var(--muted); } .decision-reason { color:var(--text); } .decision-pill { background:#eef0f4; }
+.strategy-dialog { color:var(--text); background:#fff; border-color:var(--line); box-shadow:0 25px 90px rgba(24,35,52,.2); } .strategy-dialog::backdrop { background:rgba(19,25,38,.45); }
+.strategy-group { background:#f8f9fb; } .strategy-market-row { border-color:var(--line); } .strategy-rules { background:#f2f4f8; } .strategy-rules div { border-color:var(--line); } .strategy-rules div b { color:var(--lime); } .news-list li { color:#343a44; }
+@media (max-width:1100px) { .grid { grid-template-columns:1fr; } } @media (max-width:820px) { .performance-band { grid-template-columns:1fr; } }
+@media (prefers-reduced-motion:reduce) { .position-table-row.position-enter,.position-table-row.position-tick-up,.position-table-row.position-tick-down { animation:none!important; } }
+
 </style>
 </head>
 <body>
@@ -471,13 +507,11 @@ body {
         </div>
       </div>
 
-      <section class="open-positions-section" aria-label="الصفقات المفتوحة">
-        <div class="tx-head-row">
-          <h3 class="open-positions-title">الصفقات المفتوحة</h3>
-          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> تحديث تلقائي</span></div>
-        </div>
-        <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
-      </section>
+      <div class="performance-band"><div class="chart-card">
+        <div id="chart" dir="ltr"></div>
+        <div class="chart-empty" id="chart-empty">بانتظار بيانات المحفظة من البوت.</div>
+        <div class="tip" id="tip" dir="ltr"></div>
+      </div><section class="latest-decision-card" aria-label="آخر قرار من البوت"><h3>قرار البوت الأخير</h3><div id="latest-decision"><div class="empty">بانتظار أول قرار من البوت.</div></div></section></div>
 
       <section class="accounts" id="accounts" aria-label="ملخص المنصات">
         <article class="account-card">
@@ -515,16 +549,24 @@ body {
         </article>
       </section>
 
+      <section class="open-positions-section" aria-label="الصفقات المفتوحة">
+        <div class="tx-head-row">
+          <h3 class="open-positions-title">الصفقات المفتوحة</h3>
+          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> تحديث تلقائي</span></div>
+        </div>
+        <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
+      </section>
+
+      
+
+      
+
       <section class="futures-market-section" aria-label="عقود Futures Demo">
         <div class="market-group-head"><h3>مراقبة عقود Futures Demo</h3><small>أسعار وإشارات الحساب التجريبي</small></div>
         <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
       </section>
 
-      <div class="chart-card">
-        <div id="chart" dir="ltr"></div>
-        <div class="chart-empty" id="chart-empty">بانتظار بيانات المحفظة من البوت.</div>
-        <div class="tip" id="tip" dir="ltr"></div>
-      </div>
+      
 
       <div class="section-title-row">
         <h2 class="section-title">الأسواق والإشارات</h2>
@@ -634,37 +676,22 @@ body {
   }
   var previousPositionSnapshot = Object.create(null);
   function renderPositions(positions) {
-    var host = el('tx-cards');
-    positions = Array.isArray(positions) ? positions : [];
+    var host = el('tx-cards'); positions = Array.isArray(positions) ? positions : [];
     el('open-count').textContent = positions.length + ' مفتوحة';
-    if (!positions.length) {
-      previousPositionSnapshot = Object.create(null);
-      host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>';
-      return;
-    }
+    if (!positions.length) { previousPositionSnapshot = Object.create(null); host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>'; return; }
     var nextPositionSnapshot = Object.create(null);
-    host.innerHTML = positions.map(function (p) {
-      var c = coin(p.symbol), cls = pnlClass(p.pnl_usdt);
-      var venue = p.market_type === 'Futures Demo' ? (p.side === 'short' ? 'Futures Demo · شورت' : 'Futures Demo · لونغ') : (p.simulated ? 'محاكاة' : 'منفّذة على Binance');
-      var entryInfo = p.market_type === 'Futures Demo' ? '' : (p.add_pending ? ' · إضافة قيد التحقق' : ' · ' + Math.max(1, Number(p.entries) || 1) + ' دخول');
-      var key = String(p.market_type || 'Spot') + '|' + String(p.symbol || '') + '|' + String(p.side || 'long');
-      var pnl = Number(p.pnl_usdt) || 0, price = Number(p.price) || 0;
-      var marketClass = p.market_type === 'Futures Demo' ? 'futures-position' : 'spot-position';
-      var previous = previousPositionSnapshot[key], motion = 'position-enter';
-      if (previous) {
-        var pnlDelta = pnl - previous.pnl;
-        var priceDelta = price - previous.price;
-        if (Math.abs(pnlDelta) > 0.000001 || Math.abs(priceDelta) > 0.00000001) {
-          motion = pnlDelta > 0.000001 ? 'position-tick-up' : (pnlDelta < -0.000001 ? 'position-tick-down' : 'position-tick');
-        } else {
-          motion = '';
-        }
-      }
-      nextPositionSnapshot[key] = { pnl: pnl, price: price };
-      return '<article class="tx position-card ' + marketClass + ' ' + motion + '"><div class="tx-head"><span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span><div><b dir="ltr">' + esc(p.symbol) + '</b><small>' + esc(venue + entryInfo) + '</small></div></div>' +
-        '<div class="tx-body"><span class="tx-sym">سعر الدخول ' + usd(p.entry, 2) + '</span><span class="tx-val ' + cls + '" dir="ltr">' + usd(p.pnl_usdt, 2) + '</span><span class="tx-sub">السعر ' + usd(p.price, 2) + ' · ' + num(p.pnl_pct, 2) + '%</span><span class="tx-sub">وقف ' + usd(p.stop, 2) + ' · هدف ' + usd(p.target, 2) + '</span></div></article>';
+    var rows = positions.map(function (p) {
+      var c=coin(p.symbol), cls=pnlClass(p.pnl_usdt), fut=p.market_type==='Futures Demo';
+      var venue=fut?'Futures Demo':(p.simulated?'محاكاة':'Binance Spot');
+      var side=fut?(p.side==='short'?'بيع / شورت':'شراء / لونغ'):'شراء';
+      var key=String(p.market_type||'Spot')+'|'+String(p.symbol||'')+'|'+String(p.side||'long');
+      var pnl=Number(p.pnl_usdt)||0, price=Number(p.price)||0, prev=previousPositionSnapshot[key], motion='position-enter';
+      if(prev){var pd=pnl-prev.pnl,qd=price-prev.price;motion=Math.abs(pd)>0.000001||Math.abs(qd)>0.00000001?(pd>0.000001?'position-tick-up':(pd< -0.000001?'position-tick-down':'position-tick')):'';}
+      nextPositionSnapshot[key]={pnl:pnl,price:price};
+      return '<div class="position-table-row '+(fut?'futures-position':'spot-position')+' '+motion+'"><span class="position-pair"><span class="coin" style="background:'+esc(c.color)+'">'+esc(c.glyph)+'</span><span dir="ltr">'+esc(p.symbol)+'<small class="position-venue">'+esc(venue)+'</small></span></span><span>'+side+'</span><span class="position-numbers">'+usd(p.entry,2)+'<small class="position-venue">سعر الدخول</small></span><span class="position-numbers">'+usd(p.price,2)+'<small class="position-venue">السعر الحالي · الوقف '+usd(p.stop,2)+'</small></span><b class="position-value '+cls+'">'+usd(p.pnl_usdt,2)+'<small class="position-venue">'+num(p.pnl_pct,2)+'% · الهدف '+usd(p.target,2)+'</small></b></div>';
     }).join('');
-    previousPositionSnapshot = nextPositionSnapshot;
+    host.innerHTML='<div class="positions-table"><div class="positions-table-head"><span>السوق والزوج</span><span>الاتجاه</span><span>الدخول</span><span>السعر الحالي</span><span>الربح / الخسارة</span></div>'+rows+'</div>';
+    previousPositionSnapshot=nextPositionSnapshot;
   }
   function renderAccounts(d) {
     var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {}, settings = d.settings || {};
@@ -706,11 +733,11 @@ body {
     }).join('');
   }
   function renderDecisions(items) {
-    var host = el('decision-log'), count = el('decision-count');
+    var host = el('decision-log'), count = el('decision-count'), latest = el('latest-decision');
     items = Array.isArray(items) ? items : [];
     count.textContent = items.length ? items.length + ' قرار محفوظ' : 'لا توجد قرارات بعد';
-    if (!items.length) { host.innerHTML = '<div class="empty">تظهر هنا أسباب الدخول أو التجاهل وأي نتيجة من Binance.</div>'; return; }
-    host.innerHTML = items.map(function (d) {
+    if (!items.length) { var empty = '<div class="empty">تظهر هنا أسباب الدخول أو التجاهل وأي نتيجة من Binance.</div>'; host.innerHTML = empty; if (latest) latest.innerHTML = '<div class="empty">لم يسجل البوت قرارًا بعد.</div>'; return; }
+    var rendered = items.map(function (d) {
       var futures = String(d.market || '').toLowerCase().indexOf('futures') >= 0;
       var side = d.signal === 'short' ? 'بيع / شورت' : (d.signal === 'long' ? 'شراء / لونغ' : 'لا توجد إشارة');
       var status = d.order_status || 'لم يُرسل';
@@ -722,7 +749,9 @@ body {
         (d.order_id || d.order_status ? '<div class="decision-meta decision-order"><span>الأمر: ' + esc(statusLabel) + '</span>' + (d.order_id ? '<span dir="ltr">ID ' + esc(d.order_id) + '</span>' : '') + '</div>' : '') +
         (d.api_message_ar || d.api_message ? '<div class="decision-api">توضيح الخطأ: ' + esc(d.api_message_ar || d.api_message) + '</div>' : '');
       return '<article class="decision-row ' + (futures ? 'futures' : 'spot') + '"><div class="decision-top"><span class="decision-symbol" dir="ltr">' + esc(d.symbol) + '</span><span class="decision-pill ' + statusClass + '">' + esc(statusLabel) + '</span></div>' + details + '</article>';
-    }).join('');
+    });
+    host.innerHTML = rendered.join('');
+    if (latest) latest.innerHTML = rendered[0];
   }
   function renderNews(n) {
     n = n || {};
@@ -1091,4 +1120,5 @@ body {
 </script>
 </body>
 </html>
+
 
