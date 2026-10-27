@@ -28,8 +28,9 @@ from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker)
 from futures_engine import BinanceFuturesDemo
 from exchange_client import make_binance_exchange
-from risk_controls import daily_loss_status
-from database import get_db_connection
+from risk_controls import (daily_loss_status, portfolio_risk_status,
+                           MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
+from database import get_db_connection, open_db_connection
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -128,7 +129,7 @@ if _db_dir:
 
 def init_db():
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS trades (
@@ -169,6 +170,11 @@ def init_db():
             ('initial_cost', 'REAL'),
             ('exit_attempted', 'INTEGER NOT NULL DEFAULT 0'),
             ('fee_quality', "TEXT NOT NULL DEFAULT 'unverified'"),
+            ('protective_order_id', 'TEXT'),
+            ('protective_client_id', 'TEXT'),
+            ('protective_stop_price', 'REAL'),
+            ('reconciliation_required', 'INTEGER NOT NULL DEFAULT 0'),
+            ('fees_usdt', 'REAL NOT NULL DEFAULT 0'),
         ]:
             existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
             if column not in existing:
@@ -205,7 +211,8 @@ def init_db():
             pass  # العمود موجود مسبقاً
         trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
         for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
-                                   ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'")]:
+                                   ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
+                                   ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL')]:
             if column not in trade_columns:
                 cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         conn.commit()
@@ -225,7 +232,7 @@ def load_runtime_settings():
     global TRADE_AMOUNT_USDT, MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES
     conn = None
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
         stored_amount = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
         # One-time migration: the user requested changing the existing 100 USDT
@@ -265,7 +272,7 @@ def load_saved_binance_credentials(platform='binance'):
     if not CREDENTIAL_ENCRYPTION_KEY:
         return None
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', (platform,)).fetchone()
         conn.close()
         if row:
@@ -279,7 +286,7 @@ def load_saved_binance_credentials(platform='binance'):
 def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
               strategy=None, timeframe=None):
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         cursor = conn.cursor()
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''
@@ -294,15 +301,17 @@ def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
 
 
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
-                              pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified'):
+                              pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
+                              gross_pnl_usdt=None, fees_usdt=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
-            (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe, cost_quality)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
+             cost_quality, gross_pnl_usdt, fees_usdt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
-             pnl_usdt, strategy, timeframe, cost_quality))
+             pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
 
 
@@ -310,7 +319,7 @@ def get_recent_trades(limit=15):
     try:
         with get_db_connection(DB_NAME) as conn:
             rows = conn.execute("""SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp,
-                pnl_usdt, cost_quality FROM trades ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+                pnl_usdt, cost_quality, gross_pnl_usdt, fees_usdt FROM trades ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
             return [tuple(row) for row in rows]
     except Exception as e:
         print("Get Trades Error: {}".format(type(e).__name__))
@@ -362,7 +371,7 @@ def record_equity():
     try:
         _, total = get_binance_balance()
         if total and total > 0:
-            conn = sqlite3.connect(DB_NAME)
+            conn = open_db_connection(DB_NAME)
             conn.execute('INSERT OR REPLACE INTO equity (ts, value) VALUES (?, ?)', (int(time.time()), float(total)))
             conn.commit()
             conn.close()
@@ -373,7 +382,7 @@ def record_equity():
 def get_equity_series(range_key="1d", max_points=300):
     try:
         seconds = EQUITY_RANGES.get(range_key, 86400)
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         cursor = conn.cursor()
         if seconds:
             cursor.execute('SELECT ts, value FROM equity WHERE ts >= ? ORDER BY ts', (int(time.time()) - seconds,))
@@ -392,14 +401,15 @@ def get_equity_series(range_key="1d", max_points=300):
 
 def save_position(symbol, pos):
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         conn.execute('''
             INSERT OR REPLACE INTO open_positions
             (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
              strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
              risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
-             exit_attempted, fee_quality)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             exit_attempted, fee_quality, protective_order_id, protective_client_id,
+             protective_stop_price, reconciliation_required, fees_usdt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
               pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
               pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
@@ -409,7 +419,10 @@ def save_position(symbol, pos):
               1 if pos.get('partial_taken') else 0, 1 if pos.get('partial_attempted') else 0,
               float(pos.get('partial_pnl_usdt') or 0.0),
               float(pos.get('initial_cost') or pos.get('cost') or 0.0),
-              1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified')))
+              1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified'),
+              pos.get('protective_order_id'), pos.get('protective_client_id'),
+              pos.get('protective_stop_price'), 1 if pos.get('reconciliation_required') else 0,
+              float(pos.get('fees_usdt') or 0.0)))
         conn.commit()
         conn.close()
         return True
@@ -420,7 +433,7 @@ def save_position(symbol, pos):
 
 def delete_position(symbol):
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         conn.execute('DELETE FROM open_positions WHERE symbol = ?', (symbol,))
         conn.commit()
         conn.close()
@@ -431,12 +444,13 @@ def delete_position(symbol):
 def load_positions():
     result = {}
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         cursor = conn.cursor()
         cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
                           simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
                           entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
-                          partial_pnl_usdt, initial_cost, exit_attempted, fee_quality
+                          partial_pnl_usdt, initial_cost, exit_attempted, fee_quality, protective_order_id,
+                          protective_client_id, protective_stop_price, reconciliation_required, fees_usdt
                           FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
@@ -449,7 +463,14 @@ def load_positions():
                 'partial_taken': bool(r[16]), 'partial_attempted': bool(r[17]),
                 'partial_pnl_usdt': float(r[18] or 0.0), 'initial_cost': float(r[19] or r[3] or 0.0),
                 'exit_attempted': bool(r[20]), 'fee_quality': r[21] or 'unverified',
+                'protective_order_id': r[22], 'protective_client_id': r[23],
+                'protective_stop_price': float(r[24] or 0.0),
+                'reconciliation_required': bool(r[25]), 'fees_usdt': float(r[26] or 0.0),
             }
+            if result[r[0]]['fees_usdt'] <= 0 and result[r[0]]['initial_cost'] > 0:
+                result[r[0]]['fees_usdt'] = result[r[0]]['initial_cost'] * 0.001
+                if result[r[0]].get('fee_quality') == 'unverified':
+                    result[r[0]]['fee_quality'] = 'estimated'
         conn.close()
     except Exception as e:
         print("Load Positions Error: {}".format(e))
@@ -553,7 +574,7 @@ def record_decision(market, symbol, setup=None, price=None, outcome='مراقب�
     )
     conn = None
     try:
-        conn = sqlite3.connect(DB_NAME, timeout=10.0)
+        conn = open_db_connection(DB_NAME)
         conn.execute('''INSERT INTO decision_log
             (created_at, market, symbol, signal, strategy, timeframe, price, price_updated_at,
              outcome, reason, order_status, order_id, api_message)
@@ -611,7 +632,7 @@ def _clarify_indicator_terms(text):
 
 
 def get_recent_decisions(limit=80):
-    conn = sqlite3.connect(DB_NAME, timeout=10.0)
+    conn = open_db_connection(DB_NAME)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute('''SELECT created_at, market, symbol, signal, strategy, timeframe,
@@ -650,10 +671,15 @@ async def lifespan(app: FastAPI):
             print("✅ [MARKETS] Active spot pairs: {}".format(", ".join(sorted(SUPPORTED_SYMBOLS))))
     except Exception as e:
         print("Load Markets Error: {}".format(e))
+    try:
+        if not _reconcile_spot_positions():
+            log_event('ERR', 'توقفت إدخالات Spot الجديدة: توجد مراكز تحتاج مطابقة')
+    except Exception as exc:
+        log_event('ERR', 'تعذر بدء مطابقة Spot Demo ({})'.format(type(exc).__name__))
     global futures_engine
     if BINANCE_ENV == 'demo' and BINANCE_FUTURES_API_KEY and BINANCE_FUTURES_SECRET_KEY:
         try:
-            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event, record_decision, get_spot_hedge_exposures)
+            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event, record_decision, get_spot_hedge_exposures, portfolio_risk_snapshot)
             print('✅ [FUTURES DEMO] Active contracts: {}'.format(', '.join(futures_engine.symbols) or 'none'))
             if not futures_engine.symbols:
                 log_event('WARN', 'Binance Futures Demo لا يعرض عقود CL/BZ/XAU المطلوبة')
@@ -852,6 +878,54 @@ def _get_binance_balance_uncached():
 
 
 # =====================================================================
+def portfolio_risk_snapshot():
+    """Return managed open risk and combined Demo equity across venues."""
+    risks = []
+    for symbol, pos in list(active_positions.items()):
+        entry = float(pos.get('entry_price') or 0.0)
+        distance = float(pos.get('risk_distance') or 0.0)
+        if distance <= 0 and pos.get('stop_price') is not None:
+            distance = abs(entry - float(pos.get('stop_price') or entry))
+        if distance <= 0:
+            distance = entry * RISK_PER_TRADE_PCT / 100.0
+        if not pos.get('simulated'):
+            risks.append({'symbol': symbol, 'market': 'Spot',
+                          'risk_usdt': max(0.0, float(pos.get('amount') or 0.0) * distance)})
+
+    engine = globals().get('futures_engine')
+    futures_equity = 0.0
+    if engine is not None:
+        try:
+            account = engine.balance(ttl=10)
+            if account.get('error'):
+                raise RuntimeError('Futures balance unavailable')
+            futures_equity = float(account.get('total') or 0.0)
+            for symbol, pos in list(engine.positions.items()):
+                entry = float(pos.get('entry_price') or 0.0)
+                distance = float(pos.get('risk_distance') or 0.0)
+                if distance <= 0 and pos.get('stop_price') is not None:
+                    distance = abs(entry - float(pos.get('stop_price') or entry))
+                if distance <= 0:
+                    distance = entry * RISK_PER_TRADE_PCT / 100.0
+                multiplier = float(engine.exchange.market(symbol).get('contractSize') or 1.0)
+                risks.append({'symbol': symbol, 'market': 'Futures Demo',
+                              'risk_usdt': max(0.0, float(pos.get('contracts') or 0.0)
+                                               * multiplier * distance)})
+        except Exception:
+            return {'open_risks': risks, 'equity': 0.0, 'available': False}
+
+    try:
+        _, spot_equity = get_binance_balance(ttl=10)
+        available = (not bool(_balance_cache.get('error'))
+                     and float(spot_equity or 0.0) > 0)
+        if engine is not None:
+            available = available and futures_equity > 0
+        return {'open_risks': risks, 'equity': float(spot_equity or 0.0) + futures_equity,
+                'available': available}
+    except Exception:
+        return {'open_risks': risks, 'equity': 0.0, 'available': False}
+
+
 def _fees_in(order, currency):
     total = 0.0
     fees = order.get('fees') or ([order['fee']] if order.get('fee') else [])
@@ -922,12 +996,16 @@ def _parse_fill(order, symbol):
 
 def place_buy(symbol, ref_price, stop_distance=None):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
+    if TRADING_ENABLED and BINANCE_ENV != 'demo':
+        raise RuntimeError('هذا المسار مقفل على Binance Demo ولا يرسل أوامر إلى بيئة حية')
     if not TRADING_ENABLED:
         fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
         simulated_notional = float(TRADE_AMOUNT_USDT)
+        estimated_fee = simulated_notional * fee_rate
         return {'price': ref_price, 'amount': simulated_notional / ref_price,
-                'cost': simulated_notional * (1.0 + fee_rate), 'fee_quality': 'estimated',
-                'simulated': True, 'order_status': 'simulated', 'order_id': None}
+                'cost': simulated_notional + estimated_fee, 'fee_usdt': estimated_fee,
+                'fee_quality': 'estimated', 'simulated': True,
+                'order_status': 'simulated', 'order_id': None}
 
     amount_usdt = float(TRADE_AMOUNT_USDT)
     if stop_distance is not None:
@@ -952,35 +1030,363 @@ def place_buy(symbol, ref_price, stop_distance=None):
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
     return {'price': avg, 'amount': filled - base_fee, 'cost': cost + fee_quote,
-            'fee_quality': fee_quality, 'notional_cap': TRADE_AMOUNT_USDT,
+            'fee_usdt': fee_quote, 'fee_quality': fee_quality, 'notional_cap': TRADE_AMOUNT_USDT,
             'risk_sized_notional': amount_usdt, 'simulated': False,
             'order_status': order.get('status'), 'order_id': order.get('id')}
+
+
+
+def _spot_demo_endpoint_ready():
+    urls = exchange.urls.get('api') or {}
+    private_url = urls.get('private', '') if isinstance(urls, dict) else str(urls)
+    return BINANCE_ENV == 'demo' and 'demo-api.binance.com' in str(private_url)
+
+
+def _mark_spot_reconciliation_required(symbol, pos, reason):
+    pos['reconciliation_required'] = True
+    pos['protection_status'] = 'needs_reconciliation'
+    active_positions[symbol] = pos
+    save_position(symbol, pos)
+    log_event('ERR', 'تجميد Spot {}: {}'.format(symbol, reason))
+    record_decision('Spot', symbol,
+        {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')},
+        None, 'مطابقة مطلوبة', reason, order_status='غير مؤكد',
+        order_id=pos.get('protective_order_id'))
+
+
+def _spot_order_stop_price(order):
+    info = (order or {}).get('info') or {}
+    value = (order or {}).get('stopPrice') or info.get('stopPrice') or info.get('triggerPrice')
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _spot_order_client_id(order):
+    info = (order or {}).get('info') or {}
+    return ((order or {}).get('clientOrderId') or info.get('clientOrderId')
+            or info.get('origClientOrderId') or info.get('newClientOrderId'))
+
+
+def _clear_spot_protection(pos):
+    pos['protective_order_id'] = None
+    pos['protective_client_id'] = None
+    pos['protective_stop_price'] = 0.0
+    pos['protection_status'] = 'not_installed'
+
+
+def _cancel_spot_protective_stop(symbol, pos):
+    order_id = pos.get('protective_order_id')
+    if not order_id:
+        return True
+    if not _spot_demo_endpoint_ready():
+        raise RuntimeError('رفض إلغاء وقف Spot: اتصال الحساب ليس Binance Demo')
+    order = retry_api_read(exchange.fetch_order, str(order_id), symbol)
+    status_value = str(order.get('status') or '').lower()
+    filled = float(order.get('filled') or 0.0)
+    if filled > 0 or status_value in ('closed', 'filled'):
+        _mark_spot_reconciliation_required(symbol, pos,
+            'وقف Binance بدأ التنفيذ؛ لن يُرسل أمر سوق حتى تُطابق الكمية المنفذة')
+        raise RuntimeError('وقف Spot بدأ التنفيذ؛ أوقف الإغلاق اليدوي للمطابقة')
+    if status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
+        _clear_spot_protection(pos)
+        save_position(symbol, pos)
+        return True
+    try:
+        exchange.cancel_order(str(order_id), symbol)
+    except Exception:
+        confirmed = retry_api_read(exchange.fetch_order, str(order_id), symbol)
+        confirmed_status = str(confirmed.get('status') or '').lower()
+        if confirmed_status not in ('canceled', 'cancelled', 'expired', 'rejected'):
+            if float(confirmed.get('filled') or 0.0) > 0:
+                _mark_spot_reconciliation_required(symbol, pos,
+                    'تزامن تنفيذ الوقف مع محاولة إلغائه؛ يلزم احتساب التنفيذ قبل أي أمر آخر')
+            raise RuntimeError('تعذر تأكيد إلغاء وقف Spot؛ لم يُرسل أمر بيع آخر')
+    confirmed = retry_api_read(exchange.fetch_order, str(order_id), symbol)
+    confirmed_status = str(confirmed.get('status') or '').lower()
+    if float(confirmed.get('filled') or 0.0) > 0:
+        _mark_spot_reconciliation_required(symbol, pos,
+            'نُفذت كمية من وقف Spot أثناء الإلغاء؛ يلزم مطابقة التنفيذ')
+        raise RuntimeError('وقف Spot نُفذ جزئيًا أثناء الإلغاء؛ لا تُكرر البيع')
+    if confirmed_status not in ('canceled', 'cancelled', 'expired', 'rejected'):
+        raise RuntimeError('لم يؤكد Binance إلغاء وقف Spot')
+    _clear_spot_protection(pos)
+    save_position(symbol, pos)
+    return True
+
+
+def _ensure_spot_protective_stop(symbol, pos, stop_price=None):
+    """Maintain one exchange-side market stop for an actual Spot Demo position."""
+    if pos.get('simulated'):
+        return True
+    if not _spot_demo_endpoint_ready():
+        raise RuntimeError('وقف الحماية الآلي متاح في Binance Demo فقط؛ لم يُرسل أمر وقف')
+    if pos.get('reconciliation_required'):
+        raise RuntimeError('مركز Spot مجمّد حتى اكتمال المطابقة')
+    desired = float(stop_price or pos.get('stop_price') or 0.0)
+    amount = float(pos.get('amount') or 0.0)
+    if desired <= 0 or amount <= 0:
+        raise ValueError('كمية أو سعر وقف Spot غير صالح')
+    amount_text = exchange.amount_to_precision(symbol, amount)
+    amount = float(amount_text)
+    stop_text = exchange.price_to_precision(symbol, desired)
+    desired = float(stop_text)
+    old_id = pos.get('protective_order_id')
+    if not old_id:
+        open_orders = retry_api_read(exchange.fetch_open_orders, symbol)
+        bot_orders = [item for item in open_orders
+                      if str(_spot_order_client_id(item) or '').startswith('sbot_')]
+        if len(bot_orders) > 1:
+            _mark_spot_reconciliation_required(symbol, pos,
+                'عُثر على أكثر من وقف Spot تابع للبوت؛ يلزم فحصها قبل المتابعة')
+            raise RuntimeError('هناك عدة أوامر وقف Spot تابعة للبوت')
+        if bot_orders:
+            old = bot_orders[0]
+            pos['protective_order_id'] = str(old.get('id'))
+            pos['protective_client_id'] = _spot_order_client_id(old)
+            pos['protective_stop_price'] = _spot_order_stop_price(old)
+            save_position(symbol, pos)
+            old_id = pos['protective_order_id']
+    if old_id:
+        order = retry_api_read(exchange.fetch_order, str(old_id), symbol)
+        status_value = str(order.get('status') or '').lower()
+        filled = float(order.get('filled') or 0.0)
+        if filled > 0 or status_value in ('closed', 'filled'):
+            _mark_spot_reconciliation_required(symbol, pos,
+                'وقف Binance ممتلئ أو بدأ التنفيذ؛ يلزم تسجيل التعبئة قبل إنشاء وقف جديد')
+            raise RuntimeError('وقف Spot منفذ أو قيد التنفيذ؛ أوقفت إنشاء وقف مكرر')
+        if status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
+            _clear_spot_protection(pos)
+            save_position(symbol, pos)
+        elif status_value in ('open', 'new', 'partially_filled'):
+            old_stop = _spot_order_stop_price(order) or float(pos.get('protective_stop_price') or 0.0)
+            old_amount = float(order.get('amount') or (order.get('info') or {}).get('origQty') or 0.0)
+            # A Spot long stop may only move upward, never farther from the market.
+            desired = max(desired, old_stop)
+            desired_text = exchange.price_to_precision(symbol, desired)
+            if (desired_text == exchange.price_to_precision(symbol, old_stop)
+                    and abs(old_amount - amount) <= max(amount * 1e-8, 1e-12)):
+                pos['protective_stop_price'] = float(desired_text)
+                pos['protection_status'] = 'active'
+                save_position(symbol, pos)
+                return True
+            _cancel_spot_protective_stop(symbol, pos)
+        else:
+            raise RuntimeError('حالة وقف Spot غير معروفة؛ يلزم مطابقة يدوية')
+
+    client_id = 'sbot_' + secrets.token_hex(10)
+    try:
+        order = exchange.create_order(symbol, 'market', 'sell', amount, None,
+            {'stopLossPrice': desired, 'clientOrderId': client_id})
+    except Exception:
+        # The create response may have been lost. Search by the unique client ID;
+        # never submit another stop until the first request has been reconciled.
+        try:
+            orders = retry_api_read(exchange.fetch_open_orders, symbol)
+            order = next((item for item in orders if _spot_order_client_id(item) == client_id), None)
+        except Exception:
+            order = None
+        if not order:
+            _mark_spot_reconciliation_required(symbol, pos,
+                'رد إنشاء وقف Binance غير مؤكد؛ يلزم فحص الأوامر المفتوحة قبل إعادة المحاولة')
+            raise RuntimeError('إنشاء وقف Spot غير مؤكد؛ لم يُعاد إرسال الطلب')
+    if not order or not order.get('id'):
+        _mark_spot_reconciliation_required(symbol, pos, 'لم يُرجع Binance معرفًا لوقف الحماية')
+        raise RuntimeError('لم يؤكد Binance إنشاء وقف Spot')
+    status_value = str(order.get('status') or '').lower()
+    if status_value not in ('open', 'new', 'partially_filled'):
+        if float(order.get('filled') or 0.0) > 0:
+            pos['protective_order_id'] = str(order['id'])
+            pos['protective_client_id'] = client_id
+            _mark_spot_reconciliation_required(symbol, pos,
+                'أُطلق وقف Spot فور إنشائه؛ يلزم احتساب التعبئة')
+        else:
+            _mark_spot_reconciliation_required(symbol, pos,
+                'أعاد Binance حالة وقف غير مفتوحة: {}'.format(status_value or 'غير معروفة'))
+        raise RuntimeError('وقف Spot ليس مفتوحًا بعد إنشائه')
+    pos['protective_order_id'] = str(order['id'])
+    pos['protective_client_id'] = client_id
+    pos['protective_stop_price'] = float(stop_text)
+    pos['protection_status'] = 'active'
+    pos['reconciliation_required'] = False
+    if not save_position(symbol, pos):
+        _mark_spot_reconciliation_required(symbol, pos, 'تعذر حفظ معرف وقف Binance في قاعدة البيانات')
+        raise RuntimeError('وقف الحماية أُرسل لكن تعذر حفظ مرجعه محليًا')
+    return True
+
+
+def _poll_spot_protective_stop(symbol, pos):
+    """Return an accounted sale when a Binance Demo stop has filled."""
+    order_id = pos.get('protective_order_id')
+    if not order_id:
+        return None
+    if not _spot_demo_endpoint_ready():
+        _mark_spot_reconciliation_required(symbol, pos,
+            'المركز يحتوي وقفًا محفوظًا لكن إعداد الحساب لم يعد Binance Demo')
+        raise RuntimeError('تعذر التحقق من وقف Spot المحفوظ')
+    order = retry_api_read(exchange.fetch_order, str(order_id), symbol)
+    status_value = str(order.get('status') or '').lower()
+    filled = float(order.get('filled') or 0.0)
+    if filled <= 0 and status_value in ('open', 'new', 'partially_filled'):
+        return None
+    if filled <= 0 and status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
+        _clear_spot_protection(pos)
+        save_position(symbol, pos)
+        _ensure_spot_protective_stop(symbol, pos, pos.get('stop_price'))
+        return None
+    if filled <= 0 and status_value not in ('closed', 'filled'):
+        _mark_spot_reconciliation_required(symbol, pos, 'حالة وقف Binance غير معروفة: {}'.format(status_value))
+        raise RuntimeError('حالة وقف Spot غير مؤكدة')
+    if filled > 0 and status_value in ('open', 'new', 'partially_filled'):
+        try:
+            exchange.cancel_order(str(order_id), symbol)
+        except Exception:
+            pass
+        order = retry_api_read(exchange.fetch_order, str(order_id), symbol)
+        status_value = str(order.get('status') or '').lower()
+        filled = float(order.get('filled') or 0.0)
+        if status_value in ('open', 'new', 'partially_filled'):
+            _mark_spot_reconciliation_required(symbol, pos,
+                'تعذر إيقاف باقي كمية أمر الوقف بعد تنفيذ جزئي')
+            raise RuntimeError('وقف Spot ما زال نشطًا بعد تعبئة جزئية')
+    if filled <= 0:
+        return None
+    avg = float(order.get('average') or pos.get('protective_stop_price') or pos['entry_price'])
+    cost = float(order.get('cost') or (filled * avg))
+    if cost <= 0:
+        _mark_spot_reconciliation_required(symbol, pos, 'بيانات تنفيذ وقف Binance لا تحتوي قيمة قابلة للحساب')
+        raise RuntimeError('بيانات تنفيذ وقف Spot غير مكتملة')
+    fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
+    base = symbol.split('/')[0]
+    base_fee = _fees_in(order, base)
+    consumed = min(filled + base_fee, float(pos.get('amount') or 0.0))
+    _clear_spot_protection(pos)
+    # Persist an in-flight marker before applying the fill to local inventory.
+    # A crash at this point will freeze the row for reconciliation, never duplicate a sale.
+    pos['exit_attempted'] = True
+    pos['reconciliation_required'] = False
+    if not save_position(symbol, pos):
+        _mark_spot_reconciliation_required(symbol, pos, 'تعذر حفظ حالة التعبئة المؤكدة لوقف Binance')
+        raise RuntimeError('تعذر حفظ تعبئة وقف Spot')
+    return {'price': avg, 'proceeds': cost - fee_quote, 'filled': consumed,
+            'fee_usdt': fee_quote, 'fee_quality': fee_quality, 'order_status': status_value or 'closed',
+            'order_id': order.get('id')}
+
+
+def _reconcile_spot_positions():
+    """Verify persisted Spot Demo inventory and stop orders after a process restart."""
+    if not active_positions:
+        return True
+    okay = True
+    for symbol, pos in list(active_positions.items()):
+        if pos.get('simulated'):
+            continue
+        try:
+            if pos.get('partial_attempted') or pos.get('exit_attempted'):
+                _mark_spot_reconciliation_required(symbol, pos,
+                    'يوجد أمر بيع جزئي أو إغلاق سابق غير محسوم')
+                okay = False
+                continue
+            if not _spot_demo_endpoint_ready():
+                _mark_spot_reconciliation_required(symbol, pos,
+                    'إعداد الاتصال لا يشير إلى Binance Demo؛ لم تُعدّل أوامر الحساب')
+                okay = False
+                continue
+            if pos.get('protective_order_id'):
+                # A stop may have filled while the service was down, reducing inventory.
+                order = retry_api_read(exchange.fetch_order, str(pos['protective_order_id']), symbol)
+                status_value = str(order.get('status') or '').lower()
+                if float(order.get('filled') or 0.0) > 0:
+                    continue
+                if status_value not in ('open', 'new', 'partially_filled'):
+                    if status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
+                        _clear_spot_protection(pos)
+                    else:
+                        _mark_spot_reconciliation_required(symbol, pos,
+                            'تعذر العثور على وقف الحماية المحفوظ في Binance')
+                        okay = False
+                        continue
+            base = symbol.split('/')[0]
+            balances = retry_api_read(exchange.fetch_balance)
+            inventory = float(balances.get('total', {}).get(base)
+                              or (float(balances.get('free', {}).get(base) or 0.0)
+                                  + float(balances.get('used', {}).get(base) or 0.0)))
+            tracked = float(pos.get('amount') or 0.0)
+            tolerance = max(float(exchange.amount_to_precision(symbol, max(tracked, 1e-12))) * 1e-6, 1e-12)
+            if inventory + tolerance < tracked:
+                _mark_spot_reconciliation_required(symbol, pos,
+                    'رصيد Binance من {} ({:.8g}) أقل من الكمية المحفوظة ({:.8g})'.format(base, inventory, tracked))
+                okay = False
+                continue
+            pos['reconciliation_required'] = False
+            active_positions[symbol] = pos
+            _ensure_spot_protective_stop(symbol, pos, pos.get('protective_stop_price') or pos.get('stop_price'))
+            log_event('INFO', 'تمت مطابقة Spot Demo {} والوقف بعد التشغيل'.format(symbol))
+        except Exception as exc:
+            _mark_spot_reconciliation_required(symbol, pos,
+                'فشلت مطابقة الرصيد أو وقف الحماية ({})'.format(type(exc).__name__))
+            okay = False
+    return okay
+
+
+
+def _check_sized_spot_risk(symbol, price, stop_distance):
+    _, equity = get_binance_balance(ttl=10)
+    notional = risk_sized_notional(equity, price, stop_distance,
+                                   TRADE_AMOUNT_USDT, RISK_PER_TRADE_PCT)
+    risk_amount = notional * float(stop_distance) / max(float(price), 1e-12)
+    result = _check_combined_portfolio_risk(symbol, 'Spot', risk_amount)
+    result['candidate_notional_usdt'] = notional
+    return result
+
+
+def _check_combined_portfolio_risk(symbol, market, risk_usdt):
+    snapshot = portfolio_risk_snapshot()
+    if not snapshot.get('available'):
+        return {'allowed': False, 'reason': 'رصيد إحدى محافظ Demo غير متاح؛ أوقف حاجز المخاطر المجمعة'}
+    return portfolio_risk_status(
+        snapshot.get('open_risks'), {'symbol': symbol, 'market': market, 'risk_usdt': risk_usdt},
+        snapshot.get('equity'), MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
 
 
 def place_sell(symbol, pos, amount_to_sell=None):
     """Sell a requested tranche once; order creation is never retried."""
     requested = min(float(pos['amount']), float(amount_to_sell or pos['amount']))
-    if not TRADING_ENABLED or pos.get('simulated'):
+    if pos.get('simulated'):
         price = float(fetch_fresh_ticker(exchange, symbol)['last'])
         fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
-        return {'price': price, 'proceeds': requested * price * (1.0 - fee_rate),
-                'filled': requested, 'fee_quality': 'estimated',
+        estimated_fee = requested * price * fee_rate
+        return {'price': price, 'proceeds': requested * price - estimated_fee,
+                'filled': requested, 'fee_usdt': estimated_fee, 'fee_quality': 'estimated',
                 'order_status': 'simulated', 'order_id': None}
 
+    if BINANCE_ENV != 'demo':
+        raise RuntimeError('إغلاق أوامر Spot الآلي مقفل على Binance Demo')
+    if not TRADING_ENABLED:
+        raise RuntimeError('تنفيذ الأوامر معطل؛ لن تُسوى صفقة Spot حقيقية على أنها محاكاة')
+    if pos.get('protective_order_id'):
+        _cancel_spot_protective_stop(symbol, pos)
     base = symbol.split('/')[0]
     free_base = float(retry_api_read(exchange.fetch_balance).get('free', {}).get(base, 0.0) or 0.0)
     amount = float(exchange.amount_to_precision(symbol, min(requested, free_base)))
     if amount <= 0:
         raise ValueError("لا يوجد رصيد كافٍ من {} للبيع".format(base))
-    order = exchange.create_order(symbol, 'market', 'sell', amount)
-    order = _complete_order(order, symbol)
+    try:
+        order = exchange.create_order(symbol, 'market', 'sell', amount)
+        order = _complete_order(order, symbol)
+    except Exception as exc:
+        _mark_spot_reconciliation_required(symbol, pos,
+            'نتيجة أمر البيع غير مؤكدة بعد إلغاء وقف الحماية ({})'.format(type(exc).__name__))
+        raise RuntimeError('أمر بيع Spot غير مؤكد؛ لا تعِد الإرسال قبل المطابقة')
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
     # Credit proceeds only for the quantity Binance actually filled. Any residual
     # inventory remains in the position and is managed on the next scan.
     proceeds = cost - fee_quote
     return {'price': avg, 'proceeds': proceeds, 'filled': min(filled + base_fee, requested),
-            'fee_quality': fee_quality, 'order_status': order.get('status'), 'order_id': order.get('id')}
+            'fee_usdt': fee_quote, 'fee_quality': fee_quality,
+            'order_status': order.get('status'), 'order_id': order.get('id')}
 
 
 # =====================================================================
@@ -1236,16 +1642,28 @@ def check_and_close_positions():
         current_price, sale = None, None
         try:
             pos = active_positions[symbol]
+            if pos.get('reconciliation_required') and pos.get('protective_order_id'):
+                # If the stop race was the only ambiguity, recover its confirmed fill first.
+                sale = _poll_spot_protective_stop(symbol, pos)
+                if sale is not None:
+                    pos['reconciliation_required'] = False
+            if pos.get('reconciliation_required'):
+                monitor_ok = False
+                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None,
+                                'تجميد متابعة المركز', 'المركز يحتاج مطابقة مع Binance قبل أي أمر جديد', order_status='غير مؤكد')
+                continue
             if pos.get('partial_attempted') and not pos.get('partial_taken'):
                 monitor_ok = False
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'أمر بيع جزئي غير مؤكد؛ يلزم مطابقته مع Binance قبل المتابعة', order_status='غير مؤكد')
                 continue  # ambiguous tranche order: freeze automated entries and exits until reconciled
-            if pos.get('exit_attempted'):
+            if pos.get('exit_attempted') and sale is None:
                 monitor_ok = False
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'حالة أمر الإغلاق السابق غير مؤكدة؛ طابق سجل Binance قبل أي أمر آخر', order_status='غير مؤكد')
                 continue
             current_price = fetch_fresh_ticker(exchange, symbol)['last']
             entry_price = pos['entry_price']
+            if pos.get('protective_order_id') and not pos.get('simulated'):
+                sale = _poll_spot_protective_stop(symbol, pos)
 
             highest_price = max(pos.get('highest_price', entry_price), current_price)
             if highest_price != pos.get('highest_price'):
@@ -1261,14 +1679,14 @@ def check_and_close_positions():
                            and highest_price >= entry_price * (1 + TRAILING_ACTIVATION_PCT / 100))
             active_stop = max(initial_stop, highest_price - trailing_distance) if trail_armed else initial_stop
 
-            reason = None
-            if pos.get('test'):
+            reason = 'SL' if sale is not None else None
+            if reason is None and pos.get('test'):
                 opened = datetime.datetime.strptime(pos['time'], "%Y-%m-%d %H:%M:%S")
                 if (datetime.datetime.now() - opened).total_seconds() >= TEST_TRADE_SECONDS:
                     reason = "TEST"
-            elif not pos.get('partial_taken') and target is not None and current_price >= target:
+            elif reason is None and not pos.get('partial_taken') and target is not None and current_price >= target:
                 reason = "TP"
-            elif current_price <= active_stop:
+            elif reason is None and current_price <= active_stop:
                 reason = "SL"
 
             if not reason and not pos.get('test') and not pos.get('partial_taken') and not pos.get('partial_attempted'):
@@ -1283,6 +1701,8 @@ def check_and_close_positions():
                             pos['target_price'] = None
                             pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
                             save_position(symbol, pos)
+                            if not pos.get('simulated'):
+                                _ensure_spot_protective_stop(symbol, pos, pos['stop_price'])
                             log_event("GATE", "تخطي الجني الجزئي {}: نصف المركز دون الحد الأدنى؛ متابعة الوقف فقط".format(symbol))
                             continue
                         pos['partial_attempted'] = True
@@ -1299,6 +1719,7 @@ def check_and_close_positions():
                             pos['amount'] = max(float(pos['amount']) - sold, 0.0)
                             pos['cost'] = max(float(pos['cost']) - cost_sold, 0.0)
                             pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + partial_pnl
+                            pos['fees_usdt'] = float(pos.get('fees_usdt') or 0.0) + float(partial_sale.get('fee_usdt') or 0.0)
                             pos['partial_taken'] = True
                             pos['partial_attempted'] = False
                             if partial_sale.get('fee_quality') != 'actual':
@@ -1309,6 +1730,8 @@ def check_and_close_positions():
                             if not save_position(symbol, pos):
                                 monitor_ok = False
                                 raise RuntimeError("تعذر حفظ الرصيد المتبقي بعد البيع الجزئي")
+                            if not pos.get('simulated'):
+                                _ensure_spot_protective_stop(symbol, pos, pos['stop_price'])
                             log_event("PARTIAL", "{} · بيع 50% عند 1R · {:+.2f} USDT · الوقف للتعادل".format(symbol, partial_pnl))
                             send_telegram_message("✅ <b>جني جزئي Spot عند 1R</b>\n🪙 {}\n💰 المحقق: {:+.2f} USDT\n🔒 تم رفع الوقف إلى نقطة الدخول".format(symbol, partial_pnl))
                             continue
@@ -1322,12 +1745,17 @@ def check_and_close_positions():
                 continue
 
             try:
-                pos['exit_attempted'] = True
-                if not save_position(symbol, pos):
+                if sale is None:
+                    pos['exit_attempted'] = True
+                    if not save_position(symbol, pos):
+                        pos['exit_attempted'] = False
+                        raise RuntimeError("تعذر حفظ حالة الإغلاق؛ لم يُرسل الأمر")
+                    sale = place_sell(symbol, pos)
+                    record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ الإغلاق', reason, sale.get('order_status'), sale.get('order_id'))
+                else:
                     pos['exit_attempted'] = False
-                    raise RuntimeError("تعذر حفظ حالة الإغلاق؛ لم يُرسل الأمر")
-                sale = place_sell(symbol, pos)
-                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ الإغلاق', reason, sale.get('order_status'), sale.get('order_id'))
+                    save_position(symbol, pos)
+                    record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ وقف Binance Demo', 'وقف حماية Spot أُطلق خارج البوت', sale.get('order_status'), sale.get('order_id'))
             except Exception as e:
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'فشل أو لم يتأكد أمر البيع', 'راجع سجل Binance قبل أي إعادة', order_status='غير مؤكد', api_message=e)
                 print("❌ [SELL ERROR] {}: {}".format(symbol, e))
@@ -1343,6 +1771,7 @@ def check_and_close_positions():
                 raise RuntimeError("أمر البيع لم يستهلك كمية قابلة للمطابقة")
             cost_sold = float(pos.get('cost') or 0.0) * sold / old_amount
             tranche_pnl = float(sale.get('proceeds') or 0.0) - cost_sold
+            pos['fees_usdt'] = float(pos.get('fees_usdt') or 0.0) + float(sale.get('fee_usdt') or 0.0)
             remaining_amount = max(old_amount - sold, 0.0)
             pos['amount'] = remaining_amount
             pos['cost'] = max(float(pos.get('cost') or 0.0) - cost_sold, 0.0)
@@ -1358,6 +1787,8 @@ def check_and_close_positions():
                 pos['exit_attempted'] = False
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
+                if not pos.get('simulated'):
+                    _ensure_spot_protective_stop(symbol, pos, pos.get('stop_price'))
                 record_decision('Spot', symbol,
                     {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')},
                     current_price, 'إغلاق جزئي؛ المركز ما زال مفتوحًا',
@@ -1376,9 +1807,11 @@ def check_and_close_positions():
                 title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
             log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
+            fees_total = float(pos.get('fees_usdt') or 0.0)
             record_closed_spot_trade(symbol, entry_price, sale['price'], realized_pnl, status,
                                       total_pnl, pos.get('strategy'), pos.get('timeframe'),
-                                      ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')))
+                                      ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')),
+                                      gross_pnl_usdt=total_pnl + fees_total, fees_usdt=fees_total)
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -1462,16 +1895,29 @@ def automated_market_scan():
                 if FORCE_TEST_TRADE and not test_trade_done and symbol not in active_positions:
                     test_trade_done = True
                     try:
-                        fill = place_buy(symbol, current_price)
+                        test_stop_distance = current_price * INITIAL_SL_PCT / 100.0
+                        if TRADING_ENABLED:
+                            risk_check = _check_sized_spot_risk(symbol, current_price, test_stop_distance)
+                            if not risk_check.get('allowed'):
+                                record_decision('Spot', symbol, setup, current_price, 'اختبار مرفوض',
+                                                risk_check.get('reason'), order_status='لم يُرسل',
+                                                price_updated_at=price_updated_at)
+                                continue
+                        fill = place_buy(symbol, current_price, test_stop_distance)
                         pos = {
                             'entry_price': fill['price'], 'amount': fill['amount'],
                             'cost': fill['cost'], 'highest_price': fill['price'],
                             'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'simulated': fill['simulated'], 'fee_quality': fill.get('fee_quality', 'unverified'), 'test': True,
+                            'simulated': fill['simulated'], 'fee_quality': fill.get('fee_quality', 'unverified'),
+                            'fees_usdt': float(fill.get('fee_usdt') or 0.0), 'test': True,
                             'strategy': 'test', 'timeframe': setup.get('timeframe', '15m'),
+                            'stop_price': fill['price'] - test_stop_distance,
+                            'risk_distance': test_stop_distance,
                         }
                         active_positions[symbol] = pos
                         save_position(symbol, pos)
+                        if not pos.get('simulated'):
+                            _ensure_spot_protective_stop(symbol, pos, pos['stop_price'])
                         record_decision('Spot', symbol, setup, current_price, 'صفقة اختبار فُتحت',
                                         'فتح اختباري مفعّل يدويًا', fill.get('order_status'),
                                         fill.get('order_id'), price_updated_at=price_updated_at)
@@ -1567,6 +2013,15 @@ def automated_market_scan():
                     last_entry_candle[symbol] = candle
                     try:
                         add_stop_distance = atr * STRATEGY_RISK[pos['strategy']]['stop_atr']
+                        if TRADING_ENABLED:
+                            risk_check = _check_sized_spot_risk(symbol, current_price, add_stop_distance)
+                            if not risk_check.get('allowed'):
+                                pos['add_attempted'] = False
+                                save_position(symbol, pos)
+                                record_decision('Spot', symbol, setup, current_price, 'إضافة مرفوضة',
+                                                risk_check.get('reason'), order_status='لم يُرسل',
+                                                price_updated_at=price_updated_at)
+                                continue
                         record_decision('Spot', symbol, setup, current_price, 'إرسال أمر إضافة',
                                         'إضافة إلى مركز رابح؛ انتظار نتيجة Binance',
                                         order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
@@ -1598,12 +2053,23 @@ def automated_market_scan():
                         'entries': entries + 1,
                         'simulated': bool(pos.get('simulated') or fill['simulated']),
                         'initial_cost': float(pos.get('initial_cost') or pos['cost']) + float(fill['cost']),
+                        'fees_usdt': float(pos.get('fees_usdt') or 0.0) + float(fill.get('fee_usdt') or 0.0),
                         'fee_quality': ('estimated' if 'estimated' in (pos.get('fee_quality'), fill.get('fee_quality'))
                                         else 'actual' if pos.get('fee_quality') == fill.get('fee_quality') == 'actual'
                                         else 'unverified'),
                     })
                     active_positions[symbol] = pos
                     save_position(symbol, pos)
+                    if not pos.get('simulated'):
+                        try:
+                            _ensure_spot_protective_stop(symbol, pos, pos.get('stop_price'))
+                        except Exception as protection_error:
+                            _mark_spot_reconciliation_required(symbol, pos,
+                                'أُكدت إضافة Spot لكن لم يتأكد تحديث وقف الحماية ({})'.format(type(protection_error).__name__))
+                            record_decision('Spot', symbol, setup, current_price, 'إضافة مؤكدة؛ الوقف يحتاج مراجعة',
+                                            'لم يُرسل أمر آخر حتى مطابقة وقف الحماية', fill.get('order_status'),
+                                            fill.get('order_id'), price_updated_at=price_updated_at)
+                            continue
                     record_decision('Spot', symbol, setup, current_price, 'أُضيف إلى المركز',
                                     'أُكد تنفيذ الإضافة على Binance', fill.get('order_status'),
                                     fill.get('order_id'), price_updated_at=price_updated_at)
@@ -1624,6 +2090,13 @@ def automated_market_scan():
                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
                 entry_stop_distance = entry_atr * STRATEGY_RISK[setup['strategy']]['stop_atr']
+                if TRADING_ENABLED:
+                    risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance)
+                    if not risk_check.get('allowed'):
+                        record_decision('Spot', symbol, setup, current_price, 'مرفوض بسبب مخاطر المحفظة',
+                                        risk_check.get('reason'), order_status='لم يُرسل',
+                                        price_updated_at=price_updated_at)
+                        continue
                 try:
                     fill = place_buy(symbol, current_price, entry_stop_distance)
                 except Exception as e:
@@ -1651,10 +2124,21 @@ def automated_market_scan():
                     'risk_distance': entry_atr * risk['stop_atr'], 'partial_taken': False,
                     'partial_pnl_usdt': 0.0, 'initial_cost': fill['cost'],
                     'fee_quality': fill.get('fee_quality', 'unverified'),
+                    'fees_usdt': float(fill.get('fee_usdt') or 0.0),
                     'entries': 1, 'last_add_candle': None,
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
+                if not pos.get('simulated'):
+                    try:
+                        _ensure_spot_protective_stop(symbol, pos, stop_price)
+                    except Exception as protection_error:
+                        _mark_spot_reconciliation_required(symbol, pos,
+                            'أُكد فتح Spot لكن لم يتأكد وقف الحماية ({})'.format(type(protection_error).__name__))
+                        record_decision('Spot', symbol, setup, current_price, 'صفقة مؤكدة؛ الوقف يحتاج مراجعة',
+                                        'أوقف النظام فتح مراكز إضافية حتى مطابقة وقف الحماية', fill.get('order_status'),
+                                        fill.get('order_id'), price_updated_at=price_updated_at)
+                        continue
                 record_decision('Spot', symbol, setup, current_price, 'تم فتح الصفقة',
                                 'تم تأكيد التنفيذ وحفظ المركز', fill.get('order_status'),
                                 fill.get('order_id'), price_updated_at=price_updated_at)
@@ -1727,8 +2211,9 @@ def get_performance_report(days=30, limit=5000):
     unverified_spot_trades = 0
     try:
         with get_db_connection(DB_NAME) as conn:
-            rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, pnl_pct, strategy, timeframe, cost_quality
-                FROM trades WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
+            rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, pnl_pct, strategy, timeframe,
+                cost_quality, gross_pnl_usdt, fees_usdt FROM trades
+                WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
         for row in rows:
             quality = row[7] or "legacy_or_unverified"
             if row[3] is None or quality not in ("actual", "estimated", "simulated"):
@@ -1744,14 +2229,17 @@ def get_performance_report(days=30, limit=5000):
             }.get(quality, "تكلفة غير مؤكدة")
             records.append({"market":"Spot", "symbol":row[0], "status":row[1], "time":row[2],
                 "pnl_usdt":pnl, "strategy":row[5] or "غير مسجل", "timeframe":row[6] or "غير مسجل",
-                "cost_basis":quality_label})
+                "cost_basis":quality_label,
+                "gross_pnl_usdt": (float(row[8]) if row[8] is not None else None),
+                "fees_usdt": (float(row[9]) if row[9] is not None else None),
+                "funding_usdt": None})
     except Exception as exc:
         print("[PERFORMANCE] Spot report unavailable: {}".format(type(exc).__name__), flush=True)
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
                 rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, strategy, timeframe,
-                    cost_quality, fees_usdt, funding_usdt FROM futures_trades
+                    cost_quality, fees_usdt, funding_usdt, gross_pnl_usdt FROM futures_trades
                     WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
             for row in rows:
                 quality = row[6] or "legacy_gross_before_fees"
@@ -1763,7 +2251,8 @@ def get_performance_report(days=30, limit=5000):
                 records.append({"market":"Futures Demo", "symbol":row[0], "status":row[1], "time":row[2],
                     "pnl_usdt":float(row[3] or 0.0), "strategy":row[4] or "غير مسجل",
                     "timeframe":row[5] or "غير مسجل", "cost_basis":quality_label,
-                    "fees_usdt":float(row[7] or 0.0), "funding_usdt":float(row[8] or 0.0)})
+                    "fees_usdt":float(row[7] or 0.0), "funding_usdt":float(row[8] or 0.0),
+                    "gross_pnl_usdt":float(row[9] or 0.0)})
         except Exception as exc:
             print("[PERFORMANCE] Futures report unavailable: {}".format(type(exc).__name__), flush=True)
 
@@ -1774,6 +2263,9 @@ def get_performance_report(days=30, limit=5000):
     groups=[]
     for key, items in grouped.items():
         values=[item["pnl_usdt"] for item in items]
+        gross_values=[item.get("gross_pnl_usdt") for item in items]
+        fee_values=[item.get("fees_usdt") for item in items]
+        funding_values=[item.get("funding_usdt") for item in items]
         wins=[value for value in values if value > 0]
         losses=[value for value in values if value < 0]
         groups.append({
@@ -1782,6 +2274,12 @@ def get_performance_report(days=30, limit=5000):
             "wins":len(wins), "losses":len(losses),
             "win_rate":len(wins)/len(values)*100 if values else 0.0,
             "pnl_total":sum(values), "pnl_per_trade":sum(values)/len(values) if values else 0.0,
+            "gross_pnl_total": (sum(v for v in gross_values if v is not None)
+                                  if all(v is not None for v in gross_values) else None),
+            "fees_total": (sum(v for v in fee_values if v is not None)
+                             if all(v is not None for v in fee_values) else None),
+            "funding_total": (sum(v for v in funding_values if v is not None)
+                                if all(v is not None for v in funding_values) else None),
             "avg_win":sum(wins)/len(wins) if wins else 0.0,
             "avg_loss":sum(losses)/len(losses) if losses else 0.0,
             "sample_label":"عينة أولية" if len(values)<30 else "30 صفقة أو أكثر",
@@ -1825,6 +2323,9 @@ def api_state():
             'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
             'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', ''),
+            'protection_status': ('مطابقة مطلوبة' if pos.get('reconciliation_required') else
+                                  'وقف Binance Demo نشط' if pos.get('protective_order_id') else
+                                  'محاكاة' if pos.get('simulated') else 'وقف غير معروف'),
             'entries': max(1, int(pos.get('entries', 1))),
             'add_pending': bool(pos.get('add_attempted') and int(pos.get('entries', 1)) < 2)
         })
@@ -1868,7 +2369,10 @@ def api_state():
                 'cost': pos['cost'], 'highest': pos['highest_price'], 'price': price, 'pnl_usdt': pnl,
                 'pnl_pct': pnl / float(pos.get('initial_cost') or pos['cost'] or 1.0) * 100, 'stop': pos['stop_price'],
                 'target': pos['target_price'], 'strategy': pos['strategy'], 'timeframe': pos['timeframe'],
-                'side': side, 'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
+                'side': side, 'simulated': False, 'time': pos['opened_at'],
+                'protection_status': ('مطابقة مطلوبة' if pos.get('reconciliation_required') else
+                                      'وقف Binance Demo نشط' if pos.get('protective_algo_id') else 'وقف غير معروف'),
+                'market_type': 'Futures Demo'})
     if futures_engine:
         for sym in futures_engine.symbols:
             data = futures_engine.snapshot.get(sym)
@@ -1890,15 +2394,18 @@ def api_state():
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
-        'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated'))
+        'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated')),
+        'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None
     } for t in get_recent_trades(limit=8)]
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
+                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality, gross_pnl_usdt, fees_usdt, funding_usdt FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
             trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
                 'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'cost_quality': t[9],
-                'pnl_known': t[9] in ('net_actual_costs', 'net_estimated_costs'), 'market_type': 'Futures Demo'} for t in rows)
+                'pnl_known': t[9] in ('net_actual_costs', 'net_estimated_costs'),
+                'gross_pnl_usdt': t[10], 'fees_usdt': t[11], 'funding_usdt': t[12],
+                'market_type': 'Futures Demo'} for t in rows)
             trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
         except Exception:
             pass
@@ -1911,7 +2418,7 @@ def api_state():
         'open_positions': 0, 'balance': 0.0, 'free_balance': 0.0, 'closed': 0,
         'wins': 0, 'losses': 0, 'realized_pnl': 0.0}
     try:
-        with sqlite3.connect(DB_NAME) as conn:
+        with get_db_connection(DB_NAME) as conn:
             agreement_row = conn.execute(
                 "SELECT value FROM bot_settings WHERE key = 'tradfi_agreement_key_fingerprint'"
             ).fetchone()
@@ -1998,7 +2505,7 @@ def update_runtime_settings(payload: RuntimeSettings):
     if not scan_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
     try:
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [
             ('trade_amount_usdt', str(payload.trade_amount_usdt)),
             ('spot_max_concurrent_trades', str(payload.spot_max_concurrent_trades)),
@@ -2040,7 +2547,7 @@ def update_binance_credentials(payload: BinanceCredentials):
         except Exception:
             raise HTTPException(status_code=400, detail="Binance Demo could not verify these credentials")
         cipher = _credential_cipher()
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
                      ('binance', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
         conn.commit()
@@ -2065,7 +2572,7 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         raise HTTPException(status_code=409, detail='Market scan in progress; retry shortly')
     try:
         try:
-            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event, record_decision, get_spot_hedge_exposures)
+            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event, record_decision, get_spot_hedge_exposures, portfolio_risk_snapshot)
             balance_check = candidate.balance()
             if balance_check.get('error'):
                 raise RuntimeError('Futures API authentication failed')
@@ -2074,7 +2581,7 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         except Exception:
             raise HTTPException(status_code=400, detail='تعذر التحقق من Binance Futures Demo أو أن عقود النفط/الذهب غير متاحة في حساب الديمو')
         cipher = _credential_cipher()
-        conn = sqlite3.connect(DB_NAME)
+        conn = open_db_connection(DB_NAME)
         conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
             ('binance_futures', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
         conn.commit(); conn.close()
@@ -2136,7 +2643,7 @@ def sign_binance_tradfi_agreement(payload: TradFiAgreementConsent):
         except ValueError:
             result = {}
         fingerprint = hashlib.sha256(BINANCE_FUTURES_API_KEY.encode()).hexdigest()
-        with sqlite3.connect(DB_NAME) as conn:
+        with get_db_connection(DB_NAME) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)",
                 ("tradfi_agreement_key_fingerprint", fingerprint),

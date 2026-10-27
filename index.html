@@ -898,7 +898,7 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
       var pnl=Number(p.pnl_usdt)||0, price=Number(p.price)||0, prev=previousPositionSnapshot[key], motion='position-enter';
       if(prev){var pd=pnl-prev.pnl,qd=price-prev.price;motion=Math.abs(pd)>0.000001||Math.abs(qd)>0.00000001?(pd>0.000001?'position-tick-up':(pd< -0.000001?'position-tick-down':'position-tick')):'';}
       nextPositionSnapshot[key]={pnl:pnl,price:price};
-      return '<div class="position-table-row '+(fut?'futures-position':'spot-position')+' '+motion+'"><span class="position-pair"><span class="coin" style="background:'+esc(c.color)+'">'+esc(c.glyph)+'</span><span dir="ltr">'+esc(p.symbol)+'<small class="position-venue">'+esc(venue)+'</small></span></span><span>'+side+'</span><span class="position-numbers">'+usd(p.entry,2)+'<small class="position-venue">سعر الدخول</small></span><span class="position-numbers">'+usd(p.price,2)+'<small class="position-venue">السعر الحالي · الوقف '+usd(p.stop,2)+'</small></span><b class="position-value '+cls+'">'+usd(p.pnl_usdt,2)+'<small class="position-venue">'+num(p.pnl_pct,2)+'% · الهدف '+usd(p.target,2)+'</small></b></div>';
+      return '<div class="position-table-row '+(fut?'futures-position':'spot-position')+' '+motion+'"><span class="position-pair"><span class="coin" style="background:'+esc(c.color)+'">'+esc(c.glyph)+'</span><span dir="ltr">'+esc(p.symbol)+'<small class="position-venue">'+esc(venue)+'</small></span></span><span>'+side+'</span><span class="position-numbers">'+usd(p.entry,2)+'<small class="position-venue">سعر الدخول</small></span><span class="position-numbers">'+usd(p.price,2)+'<small class="position-venue">السعر الحالي · الوقف '+usd(p.stop,2)+'</small><small class="position-venue">'+esc(p.protection_status || 'حالة الوقف غير معروفة')+'</small></span><b class="position-value '+cls+'">'+usd(p.pnl_usdt,2)+'<small class="position-venue">'+num(p.pnl_pct,2)+'% · الهدف '+usd(p.target,2)+'</small></b></div>';
     }).join('');
     host.innerHTML='<div class="positions-table"><div class="positions-table-head"><span>السوق والزوج</span><span>الاتجاه</span><span>الدخول</span><span>السعر الحالي</span><span>الربح / الخسارة</span></div>'+rows+'</div>';
     previousPositionSnapshot=nextPositionSnapshot;
@@ -942,7 +942,10 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
       var label = t.market_type === 'Futures Demo' ? (t.side === 'short' ? ' · شورت' : ' · لونغ') : '';
       var quality = {actual:'رسوم فعلية', estimated:'رسوم مقدرة', simulated:'محاكاة', net_actual_costs:'صافي وتكاليف مسجلة', net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality] || (known ? 'صافي مسجل' : 'سجل قديم · الصافي غير مؤكد');
       var change = known && t.pnl_pct != null ? num(t.pnl_pct, 2) + '%' : '—';
-      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + ' · ' + esc(quality) + '</small></span><b class="' + cls + '" dir="ltr">' + (known ? usd(t.pnl_usdt, 2) : '—') + '</b><span class="' + cls + '" dir="ltr">' + change + '</span><small>' + esc(t.time || '—') + '</small></div>';
+      var costDetail = t.gross_pnl_usdt == null ? 'تفصيل العمولة غير متوفر' :
+        'الإجمالي ' + usd(t.gross_pnl_usdt, 2) + ' · رسوم ' + usd(t.fees_usdt || 0, 3) +
+        (t.funding_usdt == null ? '' : ' · تمويل ' + usd(t.funding_usdt, 3));
+      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + ' · ' + esc(quality) + '</small></span><b class="' + cls + '" dir="ltr">' + (known ? usd(t.pnl_usdt, 2) : '—') + '<small dir="rtl">' + esc(costDetail) + '</small></b><span class="' + cls + '" dir="ltr">' + change + '</span><small>' + esc(t.time || '—') + '</small></div>';
     }).join('');
   }
   function renderDecisions(items) {
@@ -981,16 +984,20 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
       var cls = pnlClass(r.pnl_per_trade);
       var strategyLabels = {trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',forced_test:'اختبار Futures',test:'اختبار Spot'};
       var strategy = strategyLabels[r.strategy] || r.strategy || 'غير مسجل';
+      var gross = r.gross_pnl_total == null ? '—' : usd(r.gross_pnl_total, 2);
+      var fees = r.fees_total == null ? '—' : usd(r.fees_total, 3);
+      var funding = r.funding_total == null ? '—' : usd(r.funding_total, 3);
       return '<tr><td>' + esc(r.market) + '</td><td class="pair-name">' + esc(r.symbol) + '</td>' +
         '<td>' + esc(strategy) + '<small class="sub-label">' + esc(timeframeLabel(r.timeframe)) + '</small></td>' +
         '<td><span class="performance-sample ' + (sample < Number(report.minimum_sample || 30) ? 'low' : '') + '">' + sample + ' صفقة · ' + esc(r.sample_label || 'عينة أولية') + '</span></td>' +
         '<td>' + num(r.win_rate,1) + '%<small class="sub-label">' + (r.wins || 0) + ' رابحة · ' + (r.losses || 0) + ' خاسرة</small><small class="sub-label">متوسط الربح ' + usd(r.avg_win,2) + ' · الخسارة ' + usd(r.avg_loss,2) + '</small></td>' +
         '<td class="' + cls + '">' + usd(r.pnl_per_trade,2) + '<small class="sub-label">متوسط النتيجة للصفقة</small></td>' +
+        '<td>' + gross + '</td><td>' + fees + '</td><td>' + funding + '</td>' +
         '<td class="' + pnlClass(r.pnl_total) + '">' + usd(r.pnl_total,2) + '<small class="sub-label">' + esc(r.cost_basis || '') + '</small></td></tr>';
     }).join('');
     var oldCount = Number(report && report.unverified_spot_trades) || 0;
     var note = oldCount ? '<div class="sub-label">استُبعد ' + oldCount + ' سجلًا قديمًا أو غير مكتمل من نتائج صافي الأرباح.</div>' : '';
-    host.innerHTML = note + '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>المجموع المسجل</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+    host.innerHTML = note + '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>قبل الرسوم</th><th>العمولات</th><th>التمويل</th><th>الصافي</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
   function renderNews(n) {

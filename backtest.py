@@ -476,6 +476,24 @@ def profile_score(result):
     return m["net_pnl_usdt"] - m["max_drawdown_usdt"]
 
 
+def walk_forward_windows(timeline, split_index, folds=3):
+    """Create contiguous, non-overlapping OOS windows after the initial training period."""
+    remaining = len(timeline) - int(split_index)
+    count = min(max(1, int(folds)), remaining)
+    width = max(1, (remaining + count - 1) // count)
+    windows = []
+    for index in range(count):
+        start_index = int(split_index) + index * width
+        if start_index >= len(timeline):
+            break
+        end_index = min(len(timeline), start_index + width)
+        start_ms = int(timeline[start_index])
+        end_ms = int(timeline[end_index]) if end_index < len(timeline) else int(timeline[-1]) + 1
+        if end_ms > start_ms:
+            windows.append((start_ms, end_ms))
+    return windows
+
+
 def run(args):
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     if not symbols:
@@ -497,6 +515,7 @@ def run(args):
     funding_history_complete = (args.market != "futures" or all(
         data[symbol].get("funding_history_available") for symbol in symbols))
 
+    fee_override = args.fee_percent is not None
     fee_percent = args.fee_percent
     if fee_percent is None:
         fee_percent = 0.05 if args.market == "futures" else 0.10
@@ -515,6 +534,28 @@ def run(args):
             fee_rate, slippage_rate)
         summaries[name] = {"profile": profile, "train": train["metrics"], "out_of_sample": test["metrics"]}
         details[name] = {"train": train, "out_of_sample": test}
+
+    fold_windows = walk_forward_windows(timeline, split_index, args.walk_forward_folds)
+    walk_forward_results = {name: [] for name in PROFILES}
+    for fold_index, (fold_start, fold_end) in enumerate(fold_windows, 1):
+        for name, profile in PROFILES.items():
+            fold_train = simulate_segment(
+                data, symbols, timeline, events, timeline[0], fold_start, profile,
+                args.market, args.trade_usdt, args.capital_usdt, args.max_positions,
+                fee_rate, slippage_rate)
+            fold_test = simulate_segment(
+                data, symbols, timeline, events, fold_start, fold_end, profile,
+                args.market, args.trade_usdt, args.capital_usdt, args.max_positions,
+                fee_rate, slippage_rate)
+            walk_forward_results[name].append({
+                "fold": fold_index,
+                "train_start_utc": iso_utc(timeline[0]),
+                "train_end_utc": iso_utc(fold_start),
+                "out_of_sample_start_utc": iso_utc(fold_start),
+                "out_of_sample_end_utc": iso_utc(fold_end),
+                "train": fold_train["metrics"],
+                "out_of_sample": fold_test["metrics"],
+            })
 
     baseline_oos = summaries["baseline"]["out_of_sample"]
     eligible = [
@@ -535,15 +576,44 @@ def run(args):
     }
     if winner:
         candidate_oos = summaries[winner]["out_of_sample"]
+        baseline_folds = [item["out_of_sample"] for item in walk_forward_results["baseline"]]
+        candidate_folds = [item["out_of_sample"] for item in walk_forward_results[winner]]
+        fold_wins = sum(1 for candidate, baseline in zip(candidate_folds, baseline_folds)
+                        if candidate["net_pnl_usdt"] > baseline["net_pnl_usdt"])
+        candidate_fold_trades = sum(item["trades"] for item in candidate_folds)
+        baseline_fold_trades = sum(item["trades"] for item in baseline_folds)
+        candidate_fold_pnl = sum(item["net_pnl_usdt"] for item in candidate_folds)
+        baseline_fold_pnl = sum(item["net_pnl_usdt"] for item in baseline_folds)
+        candidate_fold_dd = (sum(item["max_drawdown_usdt"] for item in candidate_folds)
+                             / max(1, len(candidate_folds)))
+        baseline_fold_dd = (sum(item["max_drawdown_usdt"] for item in baseline_folds)
+                            / max(1, len(baseline_folds)))
+        needed_wins = max(2, (len(fold_windows) * 2 + 2) // 3)
+        repeated_improvement = (
+            candidate_fold_trades >= args.min_trades
+            and baseline_fold_trades >= args.min_trades
+            and fold_wins >= needed_wins
+            and candidate_fold_pnl > baseline_fold_pnl
+            and candidate_fold_dd <= baseline_fold_dd
+        )
         if (candidate_oos["net_pnl_usdt"] > baseline_oos["net_pnl_usdt"]
-                and candidate_oos["max_drawdown_usdt"] <= baseline_oos["max_drawdown_usdt"]):
+                and candidate_oos["max_drawdown_usdt"] <= baseline_oos["max_drawdown_usdt"]
+                and repeated_improvement):
             recommendation = {
                 "status": "review_candidate",
-                "message": "تحسن المرشح خارج العينة مع عدم زيادة أقصى تراجع؛ راجعه يدويًا قبل تجربة Demo.",
+                "message": "تحسن المرشح في العينة المفردة وتكرر عبر النوافذ الزمنية مع تراجع متوسط غير أعلى؛ راجعه يدويًا قبل تجربة Demo.",
                 "candidate": winner,
                 "profile": PROFILES[winner],
+                "walk_forward_folds_won": fold_wins,
+                "walk_forward_folds_required": needed_wins,
+                "walk_forward_net_pnl_usdt": candidate_fold_pnl,
+                "baseline_walk_forward_net_pnl_usdt": baseline_fold_pnl,
                 "requires_manual_review": True,
             }
+        else:
+            recommendation["message"] = "لم يتكرر التحسن خارج العينة بالقدر المطلوب؛ لا تغيّر الاستراتيجية."
+            recommendation["walk_forward_folds_won"] = fold_wins
+            recommendation["walk_forward_folds_required"] = needed_wins
 
     report = {
         "created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -554,8 +624,17 @@ def run(args):
         "train_percent": args.train_percent,
         "out_of_sample_start_utc": iso_utc(split_ms),
         "out_of_sample_end_utc": iso_utc(end_ms),
+        "walk_forward": {
+            "fold_count": len(fold_windows),
+            "fold_windows": [{"start_utc": iso_utc(start), "end_utc": iso_utc(end)}
+                             for start, end in fold_windows],
+            "profiles": walk_forward_results,
+            "promotion_rule": "المقارنة خارج العينة المتكررة؛ لا ترقية تلقائية",
+        },
         "cost_model": {
             "fee_percent_per_side": fee_percent,
+            "fee_source": "user_override" if fee_override else "illustrative_default",
+            "account_fee_tier_loaded": False,
             "funding_history": ("included from public historical rates" if funding_history_complete
                                 and args.market == "futures" else
                                 "not applicable to Spot" if args.market == "spot" else
@@ -619,7 +698,9 @@ def parse_args():
     parser.add_argument("--capital-usdt", type=float, default=5000.0)
     parser.add_argument("--max-positions", type=int, default=6)
     parser.add_argument("--fee-percent", type=float, default=None,
-                        help="رسوم كل جانب بالنسبة المئوية؛ الافتراضي 0.10 Spot و0.05 Futures")
+                        help="رسوم كل جانب كنسبة مئوية؛ أدخل رسوم حسابك الفعلية، وإلا استُخدم افتراض توضيحي")
+    parser.add_argument("--walk-forward-folds", type=int, default=3,
+                        help="عدد نوافذ الاختبار الزمني المتتابعة خارج العينة (افتراضي 3)")
     parser.add_argument("--slippage-percent", type=float, default=0.05,
                         help="انزلاق تقديري لكل جانب بالنسبة المئوية")
     parser.add_argument("--min-trades", type=int, default=20,
@@ -642,6 +723,8 @@ def parse_args():
         parser.error("--fee-percent لا يمكن أن يكون سالبًا")
     if args.slippage_percent < 0 or args.min_trades < 1:
         parser.error("الانزلاق يجب أن يكون غير سالب والحد الأدنى للصفقات موجبًا")
+    if not 2 <= args.walk_forward_folds <= 8:
+        parser.error("--walk-forward-folds يجب أن يكون بين 2 و8")
     return args
 
 

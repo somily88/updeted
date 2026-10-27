@@ -9,13 +9,14 @@ import datetime
 import os
 import sqlite3
 import time
+import uuid
 
 import ccxt
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, risk_sized_notional,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              MAX_DAILY_LOSS_PCT, MAX_SPOT_HEDGE_RATIO)
-from risk_controls import daily_loss_status
+from risk_controls import daily_loss_status, portfolio_risk_status
 from database import get_db_connection
 
 HEDGE_ONLY_IDS = {
@@ -29,13 +30,15 @@ TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
 
 class BinanceFuturesDemo:
     def __init__(self, api_key, secret_key, db_path, on_event=None, on_decision=None,
-                 spot_exposure_provider=None):
+                 spot_exposure_provider=None, portfolio_risk_provider=None):
         if not api_key or not secret_key:
             raise ValueError("Futures Demo API credentials are required")
         self.db_path = db_path
         self.on_event = on_event or (lambda tag, message: None)
         self.on_decision = on_decision or (lambda *args, **kwargs: None)
         self.spot_exposure_provider = spot_exposure_provider
+        self.portfolio_risk_provider = portfolio_risk_provider
+        self.protection_degraded = False
         self.exchange = ccxt.binance({
             "apiKey": api_key,
             "secret": secret_key,
@@ -65,6 +68,7 @@ class BinanceFuturesDemo:
         self._balance_cache = {"time": 0.0, "value": None}
         self._init_db()
         self.positions = self._load_positions()
+        self._reconcile_exchange_positions()
         self.daily_risk_state = None
         self._daily_risk_block_reported = False
 
@@ -101,7 +105,11 @@ class BinanceFuturesDemo:
                                        ("opened_at_ms", "INTEGER NOT NULL DEFAULT 0"),
                                        ("hedge_base", "TEXT"),
                                        ("hedge_ratio", "REAL"),
-                                       ("hedge_exposure_usdt", "REAL")):
+                                       ("hedge_exposure_usdt", "REAL"),
+                                       ("protective_algo_id", "TEXT"),
+                                       ("protective_client_id", "TEXT"),
+                                       ("protective_stop_price", "REAL"),
+                                       ("reconciliation_required", "INTEGER NOT NULL DEFAULT 0")):
                 if column not in position_columns:
                     conn.execute("ALTER TABLE futures_positions ADD COLUMN {} {}".format(column, definition))
             conn.execute("""CREATE TABLE IF NOT EXISTS futures_trades (
@@ -232,6 +240,20 @@ class BinanceFuturesDemo:
                 pos["funding_warning_sent"] = True
             return False
 
+    def _portfolio_risk_check(self, symbol, candidate_risk_usdt):
+        if not callable(self.portfolio_risk_provider):
+            return {"allowed": False, "reason": "بيانات مخاطرة Spot وFutures المجمعة غير متاحة"}
+        try:
+            snapshot = self.portfolio_risk_provider()
+        except Exception:
+            snapshot = None
+        if not isinstance(snapshot, dict) or not snapshot.get("available"):
+            return {"allowed": False, "reason": "تعذر قراءة أرصدة Demo للمخاطر المجمعة؛ لم يُرسل أمر"}
+        return portfolio_risk_status(
+            snapshot.get("open_risks"),
+            {"symbol": symbol, "market": "Futures Demo", "risk_usdt": candidate_risk_usdt},
+            snapshot.get("equity"))
+
     def _load_positions(self):
         try:
             with self._connect() as conn:
@@ -241,7 +263,8 @@ class BinanceFuturesDemo:
                     partial_attempted, partial_pnl_usdt, initial_cost,
                     remaining_entry_fee_usdt, fees_usdt, fees_estimated, funding_usdt,
                     funding_cursor_ms, funding_available, exit_attempted, opened_at_ms,
-                    hedge_base, hedge_ratio, hedge_exposure_usdt
+                    hedge_base, hedge_ratio, hedge_exposure_usdt, protective_algo_id,
+                    protective_client_id, protective_stop_price, reconciliation_required
                     FROM futures_positions""").fetchall()
             positions = {}
             for row in rows:
@@ -262,6 +285,9 @@ class BinanceFuturesDemo:
                     "opened_at_ms": int(row[25] or 0),
                     "hedge_base": row[26], "hedge_ratio": float(row[27] or 0.0),
                     "hedge_exposure_usdt": float(row[28] or 0.0),
+                    "protective_algo_id": row[29], "protective_client_id": row[30],
+                    "protective_stop_price": float(row[31] or 0.0),
+                    "reconciliation_required": bool(row[32]),
                 }
                 if pos["fees_usdt"] <= 0 and pos["cost"] > 0:
                     pos["fees_estimated"] = True
@@ -331,6 +357,7 @@ class BinanceFuturesDemo:
         balance = self.balance()
         return {
             "connected": True, "environment": "demo", "trading_enabled": True,
+            "protection_degraded": bool(self.protection_degraded),
             "symbols": self.symbols, "unavailable_symbols": self.unavailable_symbols,
             "open_positions": len(self.positions),
             "balance": balance["total"], "free_balance": balance["free"],
@@ -349,8 +376,9 @@ class BinanceFuturesDemo:
                  risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
                  remaining_entry_fee_usdt, fees_usdt, fees_estimated, funding_usdt,
                  funding_cursor_ms, funding_available, exit_attempted, opened_at_ms,
-                 hedge_base, hedge_ratio, hedge_exposure_usdt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 hedge_base, hedge_ratio, hedge_exposure_usdt, protective_algo_id,
+                 protective_client_id, protective_stop_price, reconciliation_required)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (pos["symbol"], pos["entry_price"], pos["amount"], pos["contracts"],
                  pos["cost"], pos["highest_price"], pos["stop_price"], pos["target_price"],
                  pos["trailing_distance"], pos["strategy"], pos["timeframe"], pos["opened_at"],
@@ -363,9 +391,209 @@ class BinanceFuturesDemo:
                  float(pos.get("funding_usdt") or 0.0), int(pos.get("funding_cursor_ms") or 0),
                  1 if pos.get("funding_available") else 0,
                  1 if pos.get("exit_attempted") else 0, int(pos.get("opened_at_ms") or 0),
-                 pos.get("hedge_base"), pos.get("hedge_ratio"), pos.get("hedge_exposure_usdt")))
+                 pos.get("hedge_base"), pos.get("hedge_ratio"), pos.get("hedge_exposure_usdt"),
+                  pos.get("protective_algo_id"), pos.get("protective_client_id"),
+                  float(pos.get("protective_stop_price") or 0.0),
+                  1 if pos.get("reconciliation_required") else 0))
 
-    def _close(self, symbol, pos, price, reason, contracts_to_close=None, partial=False):
+    def _open_algo_orders(self, symbol):
+        method = getattr(self.exchange, "fapiPrivateGetOpenAlgoOrders", None)
+        if not callable(method):
+            raise RuntimeError("إصدار CCXT لا يدعم قراءة أوامر Futures الشرطية")
+        market_id = self.exchange.market(symbol).get("id")
+        return retry_api_read(method, {"symbol": market_id}) or []
+
+    def _mark_reconciliation_required(self, symbol, pos, message):
+        pos["reconciliation_required"] = True
+        pos["protection_status"] = "needs_reconciliation"
+        self._save_position(pos)
+        self.protection_degraded = True
+        self.on_event("ERR", "تجميد مركز Futures {}: {}".format(symbol, message))
+        self.on_decision('Futures Demo', symbol,
+                         {'signal': False, 'strategy': pos.get('strategy'),
+                          'timeframe': pos.get('timeframe')}, outcome='مطابقة مطلوبة',
+                         reason=message, order_status='غير مؤكد',
+                         order_id=pos.get("protective_algo_id"))
+
+    def _cancel_exchange_stop(self, symbol, pos):
+        algo_id = pos.get("protective_algo_id")
+        if not algo_id:
+            return True
+        delete = getattr(self.exchange, "fapiPrivateDeleteAlgoOrder", None)
+        query = getattr(self.exchange, "fapiPrivateGetAlgoOrder", None)
+        if not callable(delete) or not callable(query):
+            raise RuntimeError("إصدار CCXT لا يدعم تأكيد حالة وقف Futures")
+        market_id = self.exchange.market(symbol).get("id")
+        details = retry_api_read(query, {"symbol": market_id, "algoId": str(algo_id)})
+        if (details or {}).get("actualOrderId"):
+            raise RuntimeError("وقف Futures بدأ التنفيذ؛ انتظر مطابقة التعبئة قبل الإغلاق")
+        status = str((details or {}).get("algoStatus") or (details or {}).get("status") or "").upper()
+        if status in ("CANCELED", "CANCELLED", "EXPIRED"):
+            pos["protective_algo_id"] = None
+            pos["protective_client_id"] = None
+            pos["protective_stop_price"] = 0.0
+            pos["protection_status"] = "not_installed"
+            self._save_position(pos)
+            return True
+        if status not in ("NEW", "WORKING", "ACCEPTED", "PENDING"):
+            raise RuntimeError("حالة وقف Futures غير مؤكدة؛ لم يُرسل أمر إغلاق")
+        try:
+            delete({"symbol": market_id, "algoId": str(algo_id)})
+        except Exception:
+            details = retry_api_read(query, {"symbol": market_id, "algoId": str(algo_id)})
+            if (details or {}).get("actualOrderId"):
+                raise RuntimeError("وقف Futures أُطلق أثناء الإلغاء")
+            status = str((details or {}).get("algoStatus") or (details or {}).get("status") or "").upper()
+            if status not in ("CANCELED", "CANCELLED", "EXPIRED"):
+                raise
+        pos["protective_algo_id"] = None
+        pos["protective_client_id"] = None
+        pos["protective_stop_price"] = 0.0
+        pos["protection_status"] = "not_installed"
+        self._save_position(pos)
+        return True
+
+    def _ensure_exchange_stop(self, symbol, pos, stop_price=None):
+        """Keep a reduce-only close-position stop on Binance Futures Demo."""
+        endpoint = str((self.exchange.urls.get("api") or {}).get("fapiPrivate") or "")
+        if "demo-fapi.binance.com" not in endpoint:
+            raise RuntimeError("رفض وضع وقف حماية: اتصال Futures ليس Binance Demo")
+        if pos.get("reconciliation_required"):
+            raise RuntimeError("المركز يحتاج مطابقة قبل إنشاء وقف حماية")
+        market = self.exchange.market(symbol)
+        market_id = market.get("id")
+        side = "BUY" if pos.get("side") == "short" else "SELL"
+        desired = float(stop_price or pos.get("stop_price") or 0.0)
+        if desired <= 0:
+            raise ValueError("سعر وقف Futures غير صالح")
+        desired_text = self.exchange.price_to_precision(symbol, desired)
+        open_orders = self._open_algo_orders(symbol)
+        old_id = pos.get("protective_algo_id")
+        if not old_id:
+            orphaned = [o for o in open_orders
+                        if str(o.get("clientAlgoId") or "").startswith("stbot_")]
+            if len(orphaned) > 1:
+                self._mark_reconciliation_required(symbol, pos,
+                    "عُثر على أكثر من وقف Futures تابع للبوت؛ يلزم فحصها")
+                raise RuntimeError("توجد عدة أوامر وقف Futures تابعة للبوت")
+            if orphaned:
+                pos["protective_algo_id"] = str(orphaned[0].get("algoId"))
+                pos["protective_client_id"] = orphaned[0].get("clientAlgoId")
+                old_id = pos["protective_algo_id"]
+        existing = next((o for o in open_orders
+                         if str(o.get("algoId")) == str(old_id)
+                         or (pos.get("protective_client_id") and
+                             o.get("clientAlgoId") == pos.get("protective_client_id"))), None)
+        if existing:
+            existing_text = self.exchange.price_to_precision(
+                symbol, float(existing.get("triggerPrice") or existing.get("stopPrice") or 0.0))
+            old_trigger = float(existing_text)
+            new_trigger = float(desired_text)
+            # Never loosen an exchange-side stop if the stored stop has already tightened.
+            if pos.get("side") == "short" and old_trigger < new_trigger:
+                desired_text = existing_text
+            elif pos.get("side") != "short" and old_trigger > new_trigger:
+                desired_text = existing_text
+            if existing_text == desired_text:
+                pos["protective_algo_id"] = str(existing.get("algoId"))
+                pos["protective_client_id"] = existing.get("clientAlgoId")
+                pos["protective_stop_price"] = float(existing_text)
+                pos["protection_status"] = "active"
+                self._save_position(pos)
+                return True
+
+        client_id = "stbot_" + uuid.uuid4().hex[:20]
+        create = getattr(self.exchange, "fapiPrivatePostAlgoOrder", None)
+        if not callable(create):
+            raise RuntimeError("إصدار CCXT لا يدعم أوامر وقف Futures الشرطية")
+        response = create({
+            "algoType": "CONDITIONAL", "symbol": market_id,
+            "side": side, "type": "STOP_MARKET", "triggerPrice": desired_text,
+            "workingType": "MARK_PRICE", "closePosition": "true",
+            "clientAlgoId": client_id,
+        })
+        new_id = response.get("algoId") if isinstance(response, dict) else None
+        if not new_id:
+            raise RuntimeError("Binance لم يؤكد إنشاء وقف Futures")
+        pos["protective_algo_id"] = str(new_id)
+        pos["protective_client_id"] = client_id
+        pos["protective_stop_price"] = float(desired_text)
+        pos["protection_status"] = "active"
+        self._save_position(pos)
+        if old_id and str(old_id) != str(new_id):
+            try:
+                getattr(self.exchange, "fapiPrivateDeleteAlgoOrder")(
+                    {"symbol": market_id, "algoId": str(old_id)})
+            except Exception:
+                self.protection_degraded = True
+                self.on_event("WARN", "وقف جديد نشط لكن تعذر تأكيد إلغاء الوقف السابق لـ {}".format(symbol))
+                raise
+        return True
+
+    def _recover_triggered_stop(self, symbol, pos):
+        algo_id = pos.get("protective_algo_id")
+        if not algo_id:
+            return False
+        method = getattr(self.exchange, "fapiPrivateGetAlgoOrder", None)
+        if not callable(method):
+            return False
+        details = retry_api_read(method, {"symbol": self.exchange.market(symbol).get("id"),
+                                          "algoId": str(algo_id)})
+        actual_id = (details or {}).get("actualOrderId")
+        if not actual_id:
+            status = str((details or {}).get("algoStatus") or (details or {}).get("status") or "").upper()
+            if status in ("TRIGGERED", "FINISHED", "EXPIRED"):
+                self._mark_reconciliation_required(symbol, pos,
+                    "وقف Futures أصبح نهائيًا لكن معرف أمر التنفيذ غير متاح")
+                return True
+            return False
+        order = retry_api_read(self.exchange.fetch_order, str(actual_id), symbol)
+        if float(order.get("filled") or 0.0) <= 0:
+            return False
+        price = float(order.get("average") or pos.get("stop_price") or pos["entry_price"])
+        self._close(symbol, pos, price, "وقف حماية Binance Demo", pre_filled_order=order)
+        return True
+
+    def _reconcile_exchange_positions(self):
+        """On process start, compare saved Futures positions with Binance Demo."""
+        if not self.positions:
+            return
+        all_matched = True
+        for symbol, pos in list(self.positions.items()):
+            try:
+                external = retry_api_read(self.exchange.fetch_positions, [symbol])
+                active = [item for item in external
+                          if abs(float(item.get("contracts") or 0.0)) > 0.0]
+                match = next((item for item in active
+                              if str(item.get("side") or pos.get("side") or "long").lower()
+                              == str(pos.get("side") or "long").lower()), None)
+                if match is None:
+                    if self._recover_triggered_stop(symbol, pos):
+                        if pos.get("reconciliation_required"):
+                            all_matched = False
+                        continue
+                    self._mark_reconciliation_required(
+                        symbol, pos, "لا يظهر المركز المحفوظ في حساب Binance Futures Demo؛ يلزم فحص الأوامر والصفقات")
+                    all_matched = False
+                    continue
+                actual = abs(float(match.get("contracts") or 0.0))
+                expected = abs(float(pos.get("contracts") or 0.0))
+                tolerance = max(1e-8, expected * 1e-6)
+                if abs(actual - expected) > tolerance:
+                    self._mark_reconciliation_required(
+                        symbol, pos, "كمية Binance ({:.8g}) تختلف عن الكمية المحفوظة ({:.8g})".format(actual, expected))
+                    all_matched = False
+                    continue
+                pos["reconciliation_required"] = False
+                self._ensure_exchange_stop(symbol, pos, pos.get("protective_stop_price")
+                                           or pos.get("stop_price"))
+            except Exception as exc:
+                self._mark_reconciliation_required(
+                    symbol, pos, "تعذرت مطابقة المركز أو وقف الحماية ({})".format(type(exc).__name__))
+                all_matched = False
+        self.protection_degraded = not all_matched
+
+    def _close(self, symbol, pos, price, reason, contracts_to_close=None, partial=False, pre_filled_order=None):
         self._sync_funding(symbol, pos)
         side = pos.get("side", "long")
         close_side = "buy" if side == "short" else "sell"
@@ -374,13 +602,21 @@ class BinanceFuturesDemo:
         requested = float(self.exchange.amount_to_precision(symbol, requested))
         if requested <= 0:
             raise ValueError("كمية الإغلاق أقل من دقة العقد")
-        # Persist the intent before sending. If the response is ambiguous, the
-        # monitor freezes this position rather than submitting a duplicate close.
-        pos["exit_attempted"] = True
-        self._save_position(pos)
-        # Never retry create_order; only read the status of the submitted order.
-        order = self.exchange.create_order(
-            symbol, "market", close_side, requested, None, {"reduceOnly": True})
+        if pre_filled_order is None:
+            # Cancel the exchange-side stop before the managed market close.
+            self._cancel_exchange_stop(symbol, pos)
+            # Persist intent before sending; ambiguous closes are never resubmitted.
+            pos["exit_attempted"] = True
+            self._save_position(pos)
+            order = self.exchange.create_order(
+                symbol, "market", close_side, requested, None, {"reduceOnly": True})
+        else:
+            # Binance's Demo conditional order already closed this position.
+            order = pre_filled_order
+            pos["exit_attempted"] = False
+            pos["protective_algo_id"] = None
+            pos["protective_client_id"] = None
+            pos["protective_stop_price"] = 0.0
         if order.get("status") != "closed" and order.get("id"):
             order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
         filled = float(order.get("filled") or 0)
@@ -465,7 +701,13 @@ class BinanceFuturesDemo:
             except Exception:
                 pos["exit_attempted"] = True
                 raise
-            self.on_event("WARN", "إغلاق {} نُفذ جزئيًا؛ سيُتابع المتبقي دون تكرار الأمر".format(symbol))
+            try:
+                self._ensure_exchange_stop(symbol, pos, pos.get("stop_price"))
+            except Exception as protection_error:
+                self._mark_reconciliation_required(symbol, pos,
+                    "إغلاق جزئي تأكد لكن وقف الكمية المتبقية غير مؤكد ({})".format(type(protection_error).__name__))
+                raise
+            self.on_event("WARN", "إغلاق {} نُفذ جزئيًا؛ أُعيد وقف الحماية للمتبقي".format(symbol))
 
     def _monitor_positions(self):
         monitor_ok = True
@@ -473,6 +715,12 @@ class BinanceFuturesDemo:
             order = None
             try:
                 side = pos.get("side", "long")
+                if pos.get("reconciliation_required"):
+                    if pos.get("protective_algo_id") and self._recover_triggered_stop(symbol, pos):
+                        monitor_ok = False
+                        continue
+                    monitor_ok = False
+                    continue
                 if pos.get("partial_attempted") and not pos.get("partial_taken"):
                     monitor_ok = False
                     continue  # ambiguous tranche order: require reconciliation before another order
@@ -482,6 +730,8 @@ class BinanceFuturesDemo:
                                      'timeframe': pos.get('timeframe')}, outcome='تجميد المركز',
                                      reason='أمر إغلاق سابق غير مؤكد؛ طابق سجل Binance قبل أي أمر آخر',
                                      order_status='غير مؤكد')
+                    continue
+                if self._recover_triggered_stop(symbol, pos):
                     continue
                 price = float(fetch_fresh_ticker(self.exchange, symbol)["last"])
                 self._sync_funding(symbol, pos)
@@ -534,6 +784,8 @@ class BinanceFuturesDemo:
                     active_stop = max(pos["stop_price"], trailing_stop) if trail_armed else pos["stop_price"]
                     hit_target = not pos.get("partial_taken") and price >= pos["target_price"]
                     hit_stop = price <= active_stop
+                if not hit_target and not hit_stop:
+                    self._ensure_exchange_stop(symbol, pos, active_stop)
                 self._save_position(pos)
                 if hit_target:
                     self._close(symbol, pos, price, "هدف الربح")
@@ -567,6 +819,7 @@ class BinanceFuturesDemo:
                                  order_status='غير مؤكد' if order is not None else 'لم يُرسل',
                                  api_message=exc, price_updated_at=snapshot.get('price_updated_at'))
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
+        self.protection_degraded = not monitor_ok
         return monitor_ok
 
     def _claim_test_run(self, test_id):
@@ -629,6 +882,13 @@ class BinanceFuturesDemo:
             minimum = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
             if contracts <= 0 or notional < minimum:
                 raise ValueError("قيمة الاختبار أقل من الحد الأدنى لهذا العقد")
+            risk_check = self._portfolio_risk_check(symbol, notional * 0.005)
+            if not risk_check.get("allowed"):
+                self.on_decision('Futures Demo', symbol, setup, price, 'اختبار مرفوض بسبب مخاطر المحفظة',
+                                 risk_check.get("reason"), order_status='لم يُرسل',
+                                 price_updated_at=price_updated_at)
+                self.on_event("GATE", "اختبار Futures مرفوض: {}".format(risk_check.get("reason")))
+                return
 
             if not self._claim_test_run(test_id):
                 self.on_event("WARN", "اختبار Futures بهذا المعرّف نُفذ أو بدأ سابقًا؛ لن يتكرر")
@@ -674,6 +934,12 @@ class BinanceFuturesDemo:
             }
             self.positions[symbol] = pos
             self._save_position(pos)
+            try:
+                self._ensure_exchange_stop(symbol, pos, pos["stop_price"])
+            except Exception as protection_error:
+                self._mark_reconciliation_required(symbol, pos,
+                    "دخول مؤكد لكن وقف الحماية غير مؤكد ({})".format(type(protection_error).__name__))
+                raise
             self._finish_test_run(test_id, "opened", symbol, side, order.get("id"))
             self.on_decision('Futures Demo', symbol, setup, price, 'تم فتح صفقة الاختبار', 'تأكد التنفيذ وحُفظ المركز', order.get('status'), order.get('id'), price_updated_at=price_updated_at)
             self.on_event("FUTURES", "اختبار Binance Futures Demo: {} {} بقيمة نحو {:.2f} USDT؛ إغلاق تلقائي خلال دقيقتين".format(
@@ -713,6 +979,12 @@ class BinanceFuturesDemo:
                         }
                         self.positions[symbol] = pos
                         self._save_position(pos)
+                        try:
+                            self._ensure_exchange_stop(symbol, pos, pos["stop_price"])
+                        except Exception as protection_error:
+                            self._mark_reconciliation_required(symbol, pos,
+                                "دخول مؤكد لكن وقف الحماية غير مؤكد ({})".format(type(protection_error).__name__))
+                            raise
                         self._finish_test_run(test_id, "opened_recovered", symbol, recovered_side, order_id)
                         self.on_decision('Futures Demo', symbol, setup, entry, 'استعادة مركز اختبار بعد رد ملتبس', 'تمت مطابقة المركز من حساب Binance', 'مستعاد', order_id, price_updated_at=price_updated_at)
                         self.on_event("WARN", "تم استرداد مركز اختبار Futures غير مؤكد وربطه بمؤقت الإغلاق")
@@ -890,6 +1162,13 @@ class BinanceFuturesDemo:
                 minimum = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
                 if contracts <= 0 or notional < minimum:
                     raise ValueError("قيمة المركز المحسوبة أقل من الحد الأدنى لهذا العقد")
+                risk_check = self._portfolio_risk_check(
+                    symbol, contracts * multiplier * stop_distance)
+                if not risk_check.get("allowed"):
+                    self.on_decision('Futures Demo', symbol, setup, price,
+                                     'مرفوض بسبب مخاطر المحفظة', risk_check.get("reason"),
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 try:
                     self.exchange.set_margin_mode("isolated", symbol)
                 except Exception as exc:
@@ -937,6 +1216,12 @@ class BinanceFuturesDemo:
                 }
                 self.positions[symbol] = pos
                 self._save_position(pos)
+                try:
+                    self._ensure_exchange_stop(symbol, pos, pos["stop_price"])
+                except Exception as protection_error:
+                    self._mark_reconciliation_required(symbol, pos,
+                        "دخول مؤكد لكن وقف الحماية غير مؤكد ({})".format(type(protection_error).__name__))
+                    raise
                 self.last_entry_candle[symbol] = setup.get("candle_ts")
                 self.on_decision('Futures Demo', symbol, setup, price, 'تم فتح المركز',
                                  'تأكد التنفيذ وحُفظ المركز', order.get('status'), order.get('id'),

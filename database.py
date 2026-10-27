@@ -5,11 +5,18 @@ import sqlite3
 DB_NAME = "trading_bot.db"
 
 
+def open_db_connection(db_name=DB_NAME):
+    """Create every SQLite connection with the same timeout and row settings."""
+    conn = sqlite3.connect(db_name, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
+    return conn
+
+
 @contextlib.contextmanager
 def get_db_connection(db_name=DB_NAME):
     """Open one SQLite transaction and always close the connection."""
-    conn = sqlite3.connect(db_name, timeout=10.0)
-    conn.row_factory = sqlite3.Row
+    conn = open_db_connection(db_name)
     try:
         yield conn
         conn.commit()
@@ -53,4 +60,3 @@ def get_recent_trades(limit=10):
             SELECT symbol, entry_price, exit_price, pnl_pct, status, timestamp
             FROM trades ORDER BY id DESC LIMIT ?
         ''', (limit,)).fetchall()
-
