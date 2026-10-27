@@ -25,10 +25,11 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional,
-                             market_liquidity_check, retry_api_read)
+                             market_liquidity_check, retry_api_read, fetch_fresh_ticker)
 from futures_engine import BinanceFuturesDemo
 from exchange_client import make_binance_exchange
 from risk_controls import daily_loss_status
+from database import get_db_connection
 
 # =====================================================================
 # 0. الإعدادات (من متغيرات البيئة)
@@ -94,7 +95,7 @@ NEWS_FEEDS = [
 
 print("🔐 [CONFIG] Binance credentials loaded:", bool(BINANCE_API_KEY and BINANCE_SECRET_KEY))
 print("🌐 [ENV] Binance environment:", BINANCE_ENV)
-print("📐 [STRATEGY] Automatic selection: trend (1d/4h), breakout (1h/15m), bounce (15m/5m) | risk exits: ATR-based")
+print("📐 [STRATEGY] Automatic selection: trend, breakout, bounce, macro-momentum, news-context and volume-profile | Futures hedge is Spot-linked | ATR risk exits")
 print("📰 [NEWS] Filter: {} | Classifier: {} | Pause: {}h".format(
     "ON" if NEWS_FILTER else "OFF", "Groq ({})".format(GROQ_MODEL or "auto model") if GROQ_API_KEY else "Keywords (no GROQ_API_KEY)", NEWS_PAUSE_HOURS))
 print("🛒 [TRADING] Order execution:", "ENABLED" if TRADING_ENABLED else "SIMULATION ONLY", "| Amount per trade: {} USDT".format(TRADE_AMOUNT_USDT))
@@ -166,6 +167,8 @@ def init_db():
             ('partial_attempted', 'INTEGER NOT NULL DEFAULT 0'),
             ('partial_pnl_usdt', 'REAL NOT NULL DEFAULT 0'),
             ('initial_cost', 'REAL'),
+            ('exit_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+            ('fee_quality', "TEXT NOT NULL DEFAULT 'unverified'"),
         ]:
             existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
             if column not in existing:
@@ -201,7 +204,8 @@ def init_db():
         except sqlite3.OperationalError:
             pass  # العمود موجود مسبقاً
         trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
-        for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT')]:
+        for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
+                                   ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'")]:
             if column not in trade_columns:
                 cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         conn.commit()
@@ -289,64 +293,67 @@ def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
         print("Log Trade Error: {}".format(e))
 
 
+def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
+                              pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified'):
+    """Atomically record the realized trade and remove its persisted open position."""
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection(DB_NAME) as conn:
+        conn.execute("""INSERT INTO trades
+            (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe, cost_quality)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (symbol, entry_price, exit_price, pnl_pct, status, now_str,
+             pnl_usdt, strategy, timeframe, cost_quality))
+        conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
+
+
 def get_recent_trades(limit=15):
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp,
-                   COALESCE(pnl_usdt, pnl_pct / 100.0 * ?)
-            FROM trades ORDER BY id DESC LIMIT ?
-        ''', (TRADE_AMOUNT_USDT, limit))
-        rows = cursor.fetchall()
-        conn.close()
-        return rows
+        with get_db_connection(DB_NAME) as conn:
+            rows = conn.execute("""SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp,
+                pnl_usdt, cost_quality FROM trades ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+            return [tuple(row) for row in rows]
     except Exception as e:
-        print("Get Trades Error: {}".format(e))
+        print("Get Trades Error: {}".format(type(e).__name__))
         return []
-
-
 def get_performance_stats():
+    """Summarize only closed trades with an explicitly recorded net result."""
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('SELECT COUNT(*), SUM(CASE WHEN status="WIN" THEN 1 ELSE 0 END), SUM(pnl_pct), MAX(pnl_pct), MIN(pnl_pct) FROM trades')
-        row = cursor.fetchone()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            row = conn.execute("""SELECT COUNT(*),
+                SUM(CASE WHEN pnl_usdt > 0 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct END),
+                MAX(pnl_pct), MIN(pnl_pct)
+                FROM trades
+                WHERE pnl_usdt IS NOT NULL AND cost_quality IN ('actual','estimated')""").fetchone()
         if row and row[0] > 0:
-            total = row[0]
-            wins = row[1] or 0
+            total = int(row[0])
+            wins = int(row[1] or 0)
             losses = total - wins
-            win_rate = (wins / total) * 100
-            total_pnl = row[2] or 0.0
-            best = row[3] or 0.0
-            worst = row[4] or 0.0
-            return total, wins, losses, win_rate, total_pnl, best, worst
+            win_rate = wins / total * 100.0
+            total_pnl_pct = float(row[2] or 0.0)
+            return total, wins, losses, win_rate, total_pnl_pct, float(row[3] or 0.0), float(row[4] or 0.0)
         return 0, 0, 0, 0.0, 0.0, 0.0, 0.0
     except Exception as e:
-        print("Stats Error: {}".format(e))
+        print("Stats Error: {}".format(type(e).__name__))
         return 0, 0, 0, 0.0, 0.0, 0.0, 0.0
-
-
 def get_realized_stats():
-    """إجمالي الربح/الخسارة المحققة بالدولار (الكلي + اليوم)"""
+    """Return net Spot PnL only when the result and cost quality are known."""
+    known = "pnl_usdt IS NOT NULL AND cost_quality IN ('actual','estimated')"
     try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        expr = "COALESCE(pnl_usdt, pnl_pct / 100.0 * ?)"
-        cursor.execute("SELECT COALESCE(SUM({}), 0) FROM trades".format(expr), (TRADE_AMOUNT_USDT,))
-        total = cursor.fetchone()[0] or 0.0
         today = datetime.datetime.now().strftime("%Y-%m-%d")
-        cursor.execute("SELECT COALESCE(SUM({}), 0) FROM trades WHERE timestamp LIKE ?".format(expr),
-                       (TRADE_AMOUNT_USDT, today + "%"))
-        today_val = cursor.fetchone()[0] or 0.0
-        conn.close()
-        return float(total), float(today_val)
+        with get_db_connection(DB_NAME) as conn:
+            total = conn.execute("SELECT COALESCE(SUM(pnl_usdt), 0) FROM trades WHERE " + known).fetchone()[0]
+            today_total = conn.execute("SELECT COALESCE(SUM(pnl_usdt), 0) FROM trades WHERE " + known +
+                                       " AND timestamp LIKE ?", (today + "%",)).fetchone()[0]
+            unverified = conn.execute("""SELECT COUNT(*) FROM trades
+                WHERE pnl_usdt IS NULL OR cost_quality IS NULL
+                   OR cost_quality NOT IN ('actual','estimated','simulated')""").fetchone()[0]
+            estimated = conn.execute("""SELECT COUNT(*) FROM trades
+                WHERE pnl_usdt IS NOT NULL AND cost_quality='estimated'""").fetchone()[0]
+        return float(total or 0.0), float(today_total or 0.0), int(unverified or 0), int(estimated or 0)
     except Exception as e:
-        print("Realized Stats Error: {}".format(e))
-        return 0.0, 0.0
-
-
+        print("Realized Stats Error: {}".format(type(e).__name__))
+        return 0.0, 0.0, 0, 0
 EQUITY_RANGES = {'1h': 3600, '8h': 8 * 3600, '1d': 86400, '1w': 7 * 86400, '1m': 30 * 86400, 'all': None}
 
 
@@ -390,8 +397,9 @@ def save_position(symbol, pos):
             INSERT OR REPLACE INTO open_positions
             (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
              strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
-             risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
+             exit_attempted, fee_quality)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
               pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
               pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
@@ -400,11 +408,14 @@ def save_position(symbol, pos):
               1 if pos.get('add_attempted') else 0, pos.get('risk_distance'),
               1 if pos.get('partial_taken') else 0, 1 if pos.get('partial_attempted') else 0,
               float(pos.get('partial_pnl_usdt') or 0.0),
-              float(pos.get('initial_cost') or pos.get('cost') or 0.0)))
+              float(pos.get('initial_cost') or pos.get('cost') or 0.0),
+              1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified')))
         conn.commit()
         conn.close()
+        return True
     except Exception as e:
         print("Save Position Error: {}".format(e))
+        return False
 
 
 def delete_position(symbol):
@@ -425,7 +436,7 @@ def load_positions():
         cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
                           simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
                           entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
-                          partial_pnl_usdt, initial_cost
+                          partial_pnl_usdt, initial_cost, exit_attempted, fee_quality
                           FROM open_positions''')
         for r in cursor.fetchall():
             result[r[0]] = {
@@ -437,6 +448,7 @@ def load_positions():
                 'add_attempted': bool(r[14]), 'risk_distance': float(r[15] or 0.0),
                 'partial_taken': bool(r[16]), 'partial_attempted': bool(r[17]),
                 'partial_pnl_usdt': float(r[18] or 0.0), 'initial_cost': float(r[19] or r[3] or 0.0),
+                'exit_attempted': bool(r[20]), 'fee_quality': r[21] or 'unverified',
             }
         conn.close()
     except Exception as e:
@@ -505,6 +517,10 @@ def _safe_decision_text(value, limit=300):
 
 _STRATEGY_LABELS_AR = {
     'trend': 'تتبّع الاتجاه', 'breakout': 'الاختراق', 'bounce': 'الارتداد',
+    'macro_momentum_hybrid': 'هجين الزخم الكلي',
+    'algorithmic_discretionary_hybrid': 'خوارزمي مع سياق الأخبار',
+    'volume_profile_range': 'نطاق حجم التداول',
+    'volatility_breakout_hedge': 'اختراق تقلب مع تحوّط',
     'wait': 'انتظار', 'forced_test': 'اختبار Futures', 'test': 'اختبار Spot',
 }
 _DECISION_REASON_LABELS_AR = {
@@ -637,7 +653,7 @@ async def lifespan(app: FastAPI):
     global futures_engine
     if BINANCE_ENV == 'demo' and BINANCE_FUTURES_API_KEY and BINANCE_FUTURES_SECRET_KEY:
         try:
-            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event, record_decision)
+            futures_engine = BinanceFuturesDemo(BINANCE_FUTURES_API_KEY, BINANCE_FUTURES_SECRET_KEY, DB_NAME, log_event, record_decision, get_spot_hedge_exposures)
             print('✅ [FUTURES DEMO] Active contracts: {}'.format(', '.join(futures_engine.symbols) or 'none'))
             if not futures_engine.symbols:
                 log_event('WARN', 'Binance Futures Demo لا يعرض عقود CL/BZ/XAU المطلوبة')
@@ -738,7 +754,7 @@ def get_spot_mark_price(symbol, fallback_price=None, ttl=5):
         if cached_price is not None:
             return float(cached_price), True
     try:
-        price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
+        price = float(fetch_fresh_ticker(exchange, symbol)['last'])
         if price <= 0:
             raise ValueError("non-positive ticker")
         with _position_price_lock:
@@ -758,6 +774,30 @@ def get_spot_mark_price(symbol, fallback_price=None, ttl=5):
             return float(fallback_price), False
         raise
 
+
+def get_spot_hedge_exposures():
+    """Return fresh managed Spot exposure by base asset, or None when any mark is stale."""
+    exposures = {}
+    for symbol, pos in list(active_positions.items()):
+        if pos.get('simulated'):
+            continue
+        try:
+            price, fresh = get_spot_mark_price(symbol, pos.get('entry_price'))
+        except Exception:
+            return None
+        if not fresh or price <= 0:
+            return None
+        base = symbol.split('/')[0]
+        exposures[base] = exposures.get(base, 0.0) + float(pos.get('amount') or 0.0) * price
+    return exposures
+
+
+def strategy_news_context():
+    if (not NEWS_FILTER or not news_state.get('checked_epoch')
+            or time.time() - float(news_state.get('checked_epoch') or 0.0) > NEWS_WINDOW_HOURS * 3600):
+        return {'news_sentiment': 'neutral', 'news_severity': 0}
+    return {'news_sentiment': news_state.get('sentiment', 'neutral'),
+            'news_severity': int(news_state.get('severity') or 0)}
 
 def get_binance_balance(ttl=10):
     """Return free cash and Spot equity marked with current prices for managed holdings."""
@@ -821,6 +861,47 @@ def _fees_in(order, currency):
     return total
 
 
+def _fees_quote_equivalent(order, symbol, price):
+    """Return commission value in quote currency and whether the result is exact."""
+    base, quote = symbol.split('/')
+    fee_items = (order or {}).get('fees') or ([order['fee']] if order and order.get('fee') else [])
+    market = exchange.market(symbol)
+    if not fee_items:
+        rate = market.get('taker')
+        rate = float(rate) if rate is not None else 0.001
+        notional = float((order or {}).get('cost') or 0.0)
+        if notional <= 0:
+            notional = float((order or {}).get('filled') or 0.0) * float(price)
+        return notional * max(rate, 0.0), 'estimated'
+
+    total = 0.0
+    try:
+        for fee in fee_items:
+            amount = abs(float(fee.get('cost') or 0.0))
+            currency = str(fee.get('currency') or '').upper()
+            if amount <= 0:
+                continue
+            if currency == quote.upper() or (quote.upper() == 'USDT' and currency == 'USDC'):
+                total += amount
+            elif currency == base.upper():
+                # Base-asset commissions are already reflected in the net amount consumed.
+                continue
+            elif currency:
+                conversion_symbol = '{}/{}'.format(currency, quote)
+                conversion_price = float(fetch_fresh_ticker(exchange, conversion_symbol)['last'])
+                total += amount * conversion_price
+            else:
+                raise ValueError('Commission currency is missing')
+        return total, 'actual'
+    except Exception:
+        rate = market.get('taker')
+        rate = float(rate) if rate is not None else 0.001
+        notional = float((order or {}).get('cost') or 0.0)
+        if notional <= 0:
+            notional = float((order or {}).get('filled') or 0.0) * float(price)
+        return notional * max(rate, 0.0), 'estimated'
+
+
 def _complete_order(order, symbol):
     """تأكد أن الأمر نُفّذ بالكامل وفيه بيانات التنفيذ."""
     if order.get('status') != 'closed' or not order.get('cost'):
@@ -842,8 +923,11 @@ def _parse_fill(order, symbol):
 def place_buy(symbol, ref_price, stop_distance=None):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if not TRADING_ENABLED:
-        return {'price': ref_price, 'amount': TRADE_AMOUNT_USDT / ref_price,
-                'cost': TRADE_AMOUNT_USDT, 'simulated': True, 'order_status': 'simulated', 'order_id': None}
+        fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
+        simulated_notional = float(TRADE_AMOUNT_USDT)
+        return {'price': ref_price, 'amount': simulated_notional / ref_price,
+                'cost': simulated_notional * (1.0 + fee_rate), 'fee_quality': 'estimated',
+                'simulated': True, 'order_status': 'simulated', 'order_id': None}
 
     amount_usdt = float(TRADE_AMOUNT_USDT)
     if stop_distance is not None:
@@ -857,15 +941,19 @@ def place_buy(symbol, ref_price, stop_distance=None):
         raise ValueError("حجم الصفقة المحسوب {:.2f} USDT أقل من الحد الأدنى {} USDT".format(amount_usdt, min_cost))
 
     free_usdt = float(retry_api_read(exchange.fetch_balance).get('free', {}).get('USDT', 0.0) or 0.0)
-    if free_usdt < amount_usdt:
-        raise ValueError("الرصيد المتاح {:.2f} USDT أقل من حجم الصفقة المحسوب {:.2f} USDT".format(free_usdt, amount_usdt))
+    expected_fee_rate = float(market.get('taker') if market.get('taker') is not None else 0.001)
+    required_usdt = amount_usdt * (1.0 + max(expected_fee_rate, 0.0))
+    if free_usdt < required_usdt:
+        raise ValueError("الرصيد المتاح {:.2f} USDT أقل من قيمة الصفقة مع هامش العمولة {:.2f} USDT".format(free_usdt, required_usdt))
 
     amount = float(exchange.amount_to_precision(symbol, amount_usdt / ref_price))
     order = exchange.create_order(symbol, 'market', 'buy', amount)
     order = _complete_order(order, symbol)
-    filled, cost, avg, base_fee, quote_fee = _parse_fill(order, symbol)
-    return {'price': avg, 'amount': filled - base_fee, 'cost': cost + quote_fee,
-            'notional_cap': TRADE_AMOUNT_USDT, 'risk_sized_notional': amount_usdt, 'simulated': False,
+    filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
+    fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
+    return {'price': avg, 'amount': filled - base_fee, 'cost': cost + fee_quote,
+            'fee_quality': fee_quality, 'notional_cap': TRADE_AMOUNT_USDT,
+            'risk_sized_notional': amount_usdt, 'simulated': False,
             'order_status': order.get('status'), 'order_id': order.get('id')}
 
 
@@ -873,8 +961,11 @@ def place_sell(symbol, pos, amount_to_sell=None):
     """Sell a requested tranche once; order creation is never retried."""
     requested = min(float(pos['amount']), float(amount_to_sell or pos['amount']))
     if not TRADING_ENABLED or pos.get('simulated'):
-        price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
-        return {'price': price, 'proceeds': requested * price, 'filled': requested, 'order_status': 'simulated', 'order_id': None}
+        price = float(fetch_fresh_ticker(exchange, symbol)['last'])
+        fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
+        return {'price': price, 'proceeds': requested * price * (1.0 - fee_rate),
+                'filled': requested, 'fee_quality': 'estimated',
+                'order_status': 'simulated', 'order_id': None}
 
     base = symbol.split('/')[0]
     free_base = float(retry_api_read(exchange.fetch_balance).get('free', {}).get(base, 0.0) or 0.0)
@@ -883,12 +974,13 @@ def place_sell(symbol, pos, amount_to_sell=None):
         raise ValueError("لا يوجد رصيد كافٍ من {} للبيع".format(base))
     order = exchange.create_order(symbol, 'market', 'sell', amount)
     order = _complete_order(order, symbol)
-    filled, cost, avg, base_fee, quote_fee = _parse_fill(order, symbol)
-    proceeds = cost - quote_fee
-    if amount_to_sell is None:
-        proceeds += max(float(pos['amount']) - filled, 0.0) * avg
+    filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
+    fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
+    # Credit proceeds only for the quantity Binance actually filled. Any residual
+    # inventory remains in the position and is managed on the next scan.
+    proceeds = cost - fee_quote
     return {'price': avg, 'proceeds': proceeds, 'filled': min(filled + base_fee, requested),
-            'order_status': order.get('status'), 'order_id': order.get('id')}
+            'fee_quality': fee_quality, 'order_status': order.get('status'), 'order_id': order.get('id')}
 
 
 # =====================================================================
@@ -896,7 +988,7 @@ def place_sell(symbol, pos, amount_to_sell=None):
 # =====================================================================
 news_state = {
     'sentiment': 'neutral', 'severity': 0, 'reason': 'لم يُفحص بعد', 'source': '',
-    'checked_at': None, 'blocked_until': 0.0, 'headlines': [], 'headlines_ar': [], 'alerted': False, 'error': ''
+    'checked_at': None, 'checked_epoch': 0.0, 'blocked_until': 0.0, 'headlines': [], 'headlines_ar': [], 'alerted': False, 'error': ''
 }
 
 STRONG_NEGATIVE_WORDS = [
@@ -1112,6 +1204,7 @@ def check_news():
         news_state.update({
             'sentiment': sentiment, 'severity': severity, 'reason': reason, 'source': source,
             'checked_at': datetime.datetime.now().strftime("%H:%M"),
+            'checked_epoch': time.time(),
             'headlines': [(n, t) for (_, n, t) in items[:5]],
             'headlines_ar': headline_translations[:5], 'error': ''
         })
@@ -1138,14 +1231,20 @@ def check_news():
 # 5. إدارة الصفقات والفحص الدوري
 # =====================================================================
 def check_and_close_positions():
+    monitor_ok = True
     for symbol in list(active_positions.keys()):
         current_price, sale = None, None
         try:
             pos = active_positions[symbol]
             if pos.get('partial_attempted') and not pos.get('partial_taken'):
+                monitor_ok = False
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'أمر بيع جزئي غير مؤكد؛ يلزم مطابقته مع Binance قبل المتابعة', order_status='غير مؤكد')
-                continue  # ambiguous tranche order: freeze automated exits until the Demo order is reconciled
-            current_price = retry_api_read(exchange.fetch_ticker, symbol)['last']
+                continue  # ambiguous tranche order: freeze automated entries and exits until reconciled
+            if pos.get('exit_attempted'):
+                monitor_ok = False
+                record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'حالة أمر الإغلاق السابق غير مؤكدة؛ طابق سجل Binance قبل أي أمر آخر', order_status='غير مؤكد')
+                continue
+            current_price = fetch_fresh_ticker(exchange, symbol)['last']
             entry_price = pos['entry_price']
 
             highest_price = max(pos.get('highest_price', entry_price), current_price)
@@ -1187,10 +1286,13 @@ def check_and_close_positions():
                             log_event("GATE", "تخطي الجني الجزئي {}: نصف المركز دون الحد الأدنى؛ متابعة الوقف فقط".format(symbol))
                             continue
                         pos['partial_attempted'] = True
-                        save_position(symbol, pos)
+                        if not save_position(symbol, pos):
+                            raise RuntimeError("تعذر حفظ حالة محاولة البيع الجزئي؛ لم يُرسل الأمر")
                         partial_sale = place_sell(symbol, pos, tranche)
                         record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ جني جزئي', 'بيع نصف المركز عند 1R', partial_sale.get('order_status'), partial_sale.get('order_id'))
                         sold = float(partial_sale.get('filled') or 0.0)
+                        if sold <= 0:
+                            raise RuntimeError("أمر البيع الجزئي لم يؤكد كمية منفذة")
                         if sold > 0:
                             cost_sold = float(pos['cost']) * min(sold / float(pos['amount']), 1.0)
                             partial_pnl = float(partial_sale['proceeds']) - cost_sold
@@ -1198,14 +1300,20 @@ def check_and_close_positions():
                             pos['cost'] = max(float(pos['cost']) - cost_sold, 0.0)
                             pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + partial_pnl
                             pos['partial_taken'] = True
+                            pos['partial_attempted'] = False
+                            if partial_sale.get('fee_quality') != 'actual':
+                                pos['fee_quality'] = partial_sale.get('fee_quality', 'unverified')
                             pos['target_price'] = None  # let the remaining half run under the trailing stop
                             pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
                             active_positions[symbol] = pos
-                            save_position(symbol, pos)
+                            if not save_position(symbol, pos):
+                                monitor_ok = False
+                                raise RuntimeError("تعذر حفظ الرصيد المتبقي بعد البيع الجزئي")
                             log_event("PARTIAL", "{} · بيع 50% عند 1R · {:+.2f} USDT · الوقف للتعادل".format(symbol, partial_pnl))
                             send_telegram_message("✅ <b>جني جزئي Spot عند 1R</b>\n🪙 {}\n💰 المحقق: {:+.2f} USDT\n🔒 تم رفع الوقف إلى نقطة الدخول".format(symbol, partial_pnl))
                             continue
                     except Exception as exc:
+                        monitor_ok = False
                         record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'فشل أو لم يتأكد أمر الجني الجزئي', 'راجع سجل Binance قبل أي إعادة', order_status='غير مؤكد', api_message=exc)
                         log_event("ERR", "تعذر الجني الجزئي {}: {}".format(symbol, type(exc).__name__))
                         continue
@@ -1214,6 +1322,10 @@ def check_and_close_positions():
                 continue
 
             try:
+                pos['exit_attempted'] = True
+                if not save_position(symbol, pos):
+                    pos['exit_attempted'] = False
+                    raise RuntimeError("تعذر حفظ حالة الإغلاق؛ لم يُرسل الأمر")
                 sale = place_sell(symbol, pos)
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'تم تنفيذ الإغلاق', reason, sale.get('order_status'), sale.get('order_id'))
             except Exception as e:
@@ -1225,8 +1337,38 @@ def check_and_close_positions():
                     send_telegram_message("❌ <b>فشل بيع {}</b>\n{}".format(symbol, html.escape(str(e))))
                 continue
 
-            total_pnl = float(pos.get('partial_pnl_usdt') or 0.0) + sale['proceeds'] - pos['cost']
-            pnl_basis = float(pos.get('initial_cost') or pos['cost'] or 0.0)
+            old_amount = float(pos.get('amount') or 0.0)
+            sold = min(float(sale.get('filled') or 0.0), old_amount)
+            if old_amount <= 0 or sold <= 0:
+                raise RuntimeError("أمر البيع لم يستهلك كمية قابلة للمطابقة")
+            cost_sold = float(pos.get('cost') or 0.0) * sold / old_amount
+            tranche_pnl = float(sale.get('proceeds') or 0.0) - cost_sold
+            remaining_amount = max(old_amount - sold, 0.0)
+            pos['amount'] = remaining_amount
+            pos['cost'] = max(float(pos.get('cost') or 0.0) - cost_sold, 0.0)
+            pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + tranche_pnl
+            if sale.get('fee_quality') != 'actual':
+                pos['fee_quality'] = sale.get('fee_quality', 'unverified')
+
+            # A market order can fill less than requested. Preserve the unsold
+            # amount instead of recording a full close or crediting phantom proceeds.
+            precision_amount = float(exchange.amount_to_precision(symbol, max(old_amount, 1e-12)))
+            dust_tolerance = max(precision_amount * 1e-8, 1e-12)
+            if remaining_amount > dust_tolerance:
+                pos['exit_attempted'] = False
+                active_positions[symbol] = pos
+                save_position(symbol, pos)
+                record_decision('Spot', symbol,
+                    {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')},
+                    current_price, 'إغلاق جزئي؛ المركز ما زال مفتوحًا',
+                    'نُفذت كمية أقل من كامل المركز؛ سيبقى المتبقي محفوظًا ومراقبًا',
+                    sale.get('order_status'), sale.get('order_id'))
+                log_event('WARN', 'إغلاق {} جزئيًا؛ المتبقي {:.8g} {}'.format(
+                    symbol, remaining_amount, symbol.split('/')[0]))
+                continue
+
+            total_pnl = float(pos.get('partial_pnl_usdt') or 0.0)
+            pnl_basis = float(pos.get('initial_cost') or (cost_sold + pos['cost']) or 0.0)
             realized_pnl = (total_pnl / pnl_basis * 100.0) if pnl_basis else 0.0
             status = "WIN" if total_pnl > 0 else "LOSS"
             title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار"}.get(reason, "🛑 إغلاق بوقف الخسارة")
@@ -1234,19 +1376,21 @@ def check_and_close_positions():
                 title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
             log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
-            log_trade(symbol, entry_price, sale['price'], realized_pnl, status, total_pnl,
-                       pos.get('strategy'), pos.get('timeframe'))
+            record_closed_spot_trade(symbol, entry_price, sale['price'], realized_pnl, status,
+                                      total_pnl, pos.get('strategy'), pos.get('timeframe'),
+                                      ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
                     pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
                     "\n🧪 محاكاة" if (not TRADING_ENABLED or pos.get('simulated')) else ""))
             del active_positions[symbol]
-            delete_position(symbol)
         except Exception as e:
+            monitor_ok = False
             record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'خطأ في متابعة المركز', 'تعذر تحديث السعر أو تنفيذ إدارة المركز', order_status='غير مؤكد' if sale is not None else 'لم يُرسل', api_message=e)
             log_event('ERR', 'متابعة Spot {}: {}'.format(symbol, type(e).__name__))
             print("Error in position monitoring ({}): {}".format(symbol, e))
+    return monitor_ok
 
 
 def automated_market_scan():
@@ -1261,8 +1405,8 @@ def automated_market_scan():
             'last_error': None,
         })
         scan_succeeded = False
-        print("🔄 [SCANNER] فحص الاستراتيجيات الآلية الثلاث ({} | Demo-only safety)...".format(BINANCE_ENV))
-        check_and_close_positions()
+        print("🔄 [SCANNER] فحص الاستراتيجيات الفنية والهجينة ({} | Demo-only safety)...".format(BINANCE_ENV))
+        position_monitor_ok = check_and_close_positions()
         try:
             _, spot_equity = get_binance_balance(ttl=0)
             update_daily_risk_state('spot', daily_loss_status(DB_NAME, 'spot', spot_equity, MAX_DAILY_LOSS_PCT))
@@ -1278,8 +1422,8 @@ def automated_market_scan():
                 if symbol not in SUPPORTED_SYMBOLS:
                     record_decision('Spot', symbol, outcome='مرفوض', reason='الزوج غير مدعوم في الإعداد الحالي')
                     continue
-                setup = evaluate_symbol(exchange, symbol)
-                current_price = float(retry_api_read(exchange.fetch_ticker, symbol)['last'])
+                setup = evaluate_symbol(exchange, symbol, context=strategy_news_context(), enable_hybrids=(BINANCE_ENV == 'demo'))
+                current_price = float(fetch_fresh_ticker(exchange, symbol)['last'])
                 price_updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 if not setup:
                     record_decision('Spot', symbol, outcome='تعذر التقييم',
@@ -1290,6 +1434,11 @@ def automated_market_scan():
                 setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S"),
                                'updated_at': time.time(), 'price_updated_at': price_updated_at})
                 market_snapshot[symbol] = setup
+                if setup.get('signal') and not position_monitor_ok:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if (setup.get('signal') and daily_risk_state['spot']
                         and daily_risk_state['spot'].get('blocked')):
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
@@ -1318,7 +1467,7 @@ def automated_market_scan():
                             'entry_price': fill['price'], 'amount': fill['amount'],
                             'cost': fill['cost'], 'highest_price': fill['price'],
                             'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            'simulated': fill['simulated'], 'test': True,
+                            'simulated': fill['simulated'], 'fee_quality': fill.get('fee_quality', 'unverified'), 'test': True,
                             'strategy': 'test', 'timeframe': setup.get('timeframe', '15m'),
                         }
                         active_positions[symbol] = pos
@@ -1449,6 +1598,9 @@ def automated_market_scan():
                         'entries': entries + 1,
                         'simulated': bool(pos.get('simulated') or fill['simulated']),
                         'initial_cost': float(pos.get('initial_cost') or pos['cost']) + float(fill['cost']),
+                        'fee_quality': ('estimated' if 'estimated' in (pos.get('fee_quality'), fill.get('fee_quality'))
+                                        else 'actual' if pos.get('fee_quality') == fill.get('fee_quality') == 'actual'
+                                        else 'unverified'),
                     })
                     active_positions[symbol] = pos
                     save_position(symbol, pos)
@@ -1498,6 +1650,7 @@ def automated_market_scan():
                     'target_price': target_price, 'trailing_distance': trailing_distance,
                     'risk_distance': entry_atr * risk['stop_atr'], 'partial_taken': False,
                     'partial_pnl_usdt': 0.0, 'initial_cost': fill['cost'],
+                    'fee_quality': fill.get('fee_quality', 'unverified'),
                     'entries': 1, 'last_add_candle': None,
                 }
                 active_positions[symbol] = pos
@@ -1527,6 +1680,7 @@ def automated_market_scan():
                 force_test_trade=FORCE_FUTURES_TEST_TRADE,
                 force_test_id=FORCE_FUTURES_TEST_ID,
                 force_test_side=FORCE_FUTURES_TEST_SIDE,
+                market_context=strategy_news_context(),
             )
         record_equity()
         scan_succeeded = True
@@ -1570,29 +1724,46 @@ def get_performance_report(days=30, limit=5000):
         return cached["data"]
     cutoff = (datetime.datetime.now() - datetime.timedelta(days=max(1, min(int(days), 3650)))).strftime("%Y-%m-%d %H:%M:%S")
     records = []
+    unverified_spot_trades = 0
     try:
-        with sqlite3.connect(DB_NAME, timeout=10.0) as conn:
-            rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, pnl_pct, strategy, timeframe
+        with get_db_connection(DB_NAME) as conn:
+            rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, pnl_pct, strategy, timeframe, cost_quality
                 FROM trades WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
         for row in rows:
-            # Spot PnL is calculated from filled quantities and proceeds in the bot.
-            # Older rows without absolute PnL use the configured trade size as a marked estimate.
-            estimated = row[3] is None
-            pnl = float(row[3]) if row[3] is not None else float(row[4] or 0.0) / 100.0 * TRADE_AMOUNT_USDT
+            quality = row[7] or "legacy_or_unverified"
+            if row[3] is None or quality not in ("actual", "estimated", "simulated"):
+                unverified_spot_trades += 1
+                continue
+            pnl = float(row[3])
+            quality_label = {
+                "actual": "صافي بعد رسوم فعلية",
+                "estimated": "صافي بعد رسوم مقدرة",
+                "simulated": "محاكاة برسوم مقدرة",
+                "legacy_or_unverified": "سجل قديم أو تكلفة غير مؤكدة",
+                "unverified": "تكلفة غير مؤكدة",
+            }.get(quality, "تكلفة غير مؤكدة")
             records.append({"market":"Spot", "symbol":row[0], "status":row[1], "time":row[2],
                 "pnl_usdt":pnl, "strategy":row[5] or "غير مسجل", "timeframe":row[6] or "غير مسجل",
-                "cost_basis":"تقديري بحجم الصفقة الحالي" if estimated else "صافي كما سجله البوت"})
+                "cost_basis":quality_label})
     except Exception as exc:
         print("[PERFORMANCE] Spot report unavailable: {}".format(type(exc).__name__), flush=True)
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, strategy, timeframe
-                    FROM futures_trades WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
+                rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, strategy, timeframe,
+                    cost_quality, fees_usdt, funding_usdt FROM futures_trades
+                    WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
             for row in rows:
+                quality = row[6] or "legacy_gross_before_fees"
+                quality_label = {
+                    "net_actual_costs": "صافي بعد رسوم فعلية وتمويل مُزامن",
+                    "net_estimated_costs": "صافي مع تكلفة مقدرة أو تمويل غير متاح",
+                    "legacy_gross_before_fees": "سجل قديم؛ إجمالي قبل الرسوم والتمويل",
+                }.get(quality, "تكلفة غير مؤكدة")
                 records.append({"market":"Futures Demo", "symbol":row[0], "status":row[1], "time":row[2],
                     "pnl_usdt":float(row[3] or 0.0), "strategy":row[4] or "غير مسجل",
-                    "timeframe":row[5] or "غير مسجل", "cost_basis":"إجمالي قبل رسوم Futures والتمويل"})
+                    "timeframe":row[5] or "غير مسجل", "cost_basis":quality_label,
+                    "fees_usdt":float(row[7] or 0.0), "funding_usdt":float(row[8] or 0.0)})
         except Exception as exc:
             print("[PERFORMANCE] Futures report unavailable: {}".format(type(exc).__name__), flush=True)
 
@@ -1616,7 +1787,8 @@ def get_performance_report(days=30, limit=5000):
             "sample_label":"عينة أولية" if len(values)<30 else "30 صفقة أو أكثر",
         })
     groups.sort(key=lambda item:(item["market"], -item["sample_size"], item["symbol"], item["strategy"]))
-    result = {"days":max(1,min(int(days),3650)), "minimum_sample":30, "groups":groups}
+    result = {"days":max(1,min(int(days),3650)), "minimum_sample":30, "groups":groups,
+              "unverified_spot_trades": unverified_spot_trades}
     PERFORMANCE_REPORT_CACHE.update({"updated_at":time.time(), "data":result})
     return result
 
@@ -1625,7 +1797,7 @@ def get_performance_report(days=30, limit=5000):
 def api_state():
     spot_prices_fresh = True
     total, wins, losses, win_rate, total_pnl, best, worst = get_performance_stats()
-    realized_total, realized_today = get_realized_stats()
+    realized_total, realized_today, unverified_spot_trades, estimated_spot_trades = get_realized_stats()
     free_usdt, total_usdt = get_binance_balance()
 
     positions = []
@@ -1637,15 +1809,17 @@ def api_state():
         high = pos.get('highest_price', entry)
         price, price_fresh = get_spot_mark_price(sym, entry)
         spot_prices_fresh = spot_prices_fresh and price_fresh
-        pnl_usdt = pos['amount'] * price - pos['cost']
+        pnl_usdt = (float(pos['amount']) * price - float(pos['cost'])
+                    + float(pos.get('partial_pnl_usdt') or 0.0))
         if not pos.get('simulated'):
             spot_position_value += float(pos.get('amount') or 0.0) * price
-        invested += pos['cost']
+        if not pos.get('simulated'):
+            invested += float(pos.get('cost') or 0.0)
         unrealized += pnl_usdt
         positions.append({
             'symbol': sym, 'entry': entry, 'amount': pos['amount'], 'cost': pos['cost'],
             'highest': high, 'price': price, 'pnl_usdt': pnl_usdt,
-            'pnl_pct': pnl_usdt / pos['cost'] * 100 if pos['cost'] else 0.0,
+            'pnl_pct': pnl_usdt / float(pos.get('initial_cost') or pos['cost'] or 1.0) * 100,
             'stop': max(pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100),
                         high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
             'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
@@ -1674,15 +1848,25 @@ def api_state():
             'reason': d.get('reason', '')
         })
 
+    futures_position_value = 0.0
     if futures_engine:
         for sym, pos in futures_engine.positions.items():
             price = float((futures_engine.snapshot.get(sym) or {}).get('price') or pos['entry_price'])
+            market = futures_engine.exchange.market(sym)
+            multiplier = float(market.get('contractSize') or 1)
+            contracts = float(pos.get('contracts') or 0.0)
             side = pos.get('side', 'long')
             direction = -1.0 if side == 'short' else 1.0
-            pnl = direction * (price - pos['entry_price']) * pos['contracts'] * float(futures_engine.exchange.market(sym).get('contractSize') or 1)
+            gross_pnl = direction * (price - pos['entry_price']) * contracts * multiplier
+            entry_fee_remaining = float(pos.get('remaining_entry_fee_usdt') or 0.0)
+            close_fee_estimate = abs(contracts * multiplier * price) * float(market.get('taker') or 0.0005)
+            pnl = (float(pos.get('partial_pnl_usdt') or 0.0) + gross_pnl - entry_fee_remaining
+                   - close_fee_estimate + float(pos.get('funding_usdt') or 0.0))
+            unrealized += pnl
+            futures_position_value += abs(contracts * multiplier * price)
             positions.append({'symbol': sym, 'entry': pos['entry_price'], 'amount': pos['amount'],
                 'cost': pos['cost'], 'highest': pos['highest_price'], 'price': price, 'pnl_usdt': pnl,
-                'pnl_pct': pnl / pos['cost'] * 100 if pos['cost'] else 0, 'stop': pos['stop_price'],
+                'pnl_pct': pnl / float(pos.get('initial_cost') or pos['cost'] or 1.0) * 100, 'stop': pos['stop_price'],
                 'target': pos['target_price'], 'strategy': pos['strategy'], 'timeframe': pos['timeframe'],
                 'side': side, 'simulated': False, 'time': pos['opened_at'], 'market_type': 'Futures Demo'})
     if futures_engine:
@@ -1705,14 +1889,16 @@ def api_state():
                     'reason': 'بانتظار أول فحص Futures'})
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
-        'status': t[5], 'time': t[6], 'pnl_usdt': t[7]
+        'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
+        'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated'))
     } for t in get_recent_trades(limit=8)]
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
+                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
             trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
-                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'market_type': 'Futures Demo'} for t in rows)
+                'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'cost_quality': t[9],
+                'pnl_known': t[9] in ('net_actual_costs', 'net_estimated_costs'), 'market_type': 'Futures Demo'} for t in rows)
             trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
         except Exception:
             pass
@@ -1765,9 +1951,13 @@ def api_state():
         'balance_age_seconds': int(max(0.0, time.time() - _balance_cache['t'])) if _balance_cache['t'] else None,
         'stats': {
             'realized_total': realized_total, 'realized_today': realized_today,
+            'unverified_spot_trades': unverified_spot_trades,
+            'estimated_spot_trades': estimated_spot_trades,
             'unrealized': unrealized, 'wins': wins, 'losses': losses, 'total': total,
             'win_rate': win_rate, 'best': best, 'worst': worst,
-            'exposure': min(invested / total_usdt * 100, 100.0) if total_usdt > 0 else 0.0
+            'exposure': min((invested + futures_position_value) /
+                           max(total_usdt + float(future_state.get('balance') or 0.0), 1e-12) * 100, 100.0)
+                        if total_usdt + float(future_state.get('balance') or 0.0) > 0 else 0.0
         },
         'params': {
             'timeframe': 'auto', 'strategy_mode': 'automatic',
@@ -1875,7 +2065,7 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         raise HTTPException(status_code=409, detail='Market scan in progress; retry shortly')
     try:
         try:
-            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event, record_decision)
+            candidate = BinanceFuturesDemo(payload.api_key.strip(), payload.secret_key.strip(), DB_NAME, log_event, record_decision, get_spot_hedge_exposures)
             balance_check = candidate.balance()
             if balance_check.get('error'):
                 raise RuntimeError('Futures API authentication failed')
@@ -1970,4 +2160,3 @@ def manual_check():
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
-

@@ -788,13 +788,17 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
           <div><small>اختيار آلي حسب بيانات كل زوج</small><h2 id="strategy-dialog-title">الاستراتيجية المتبعة الآن</h2></div>
           <button class="strategy-close" id="strategy-close" type="button" aria-label="إغلاق">×</button>
         </div>
-        <p class="strategy-intro">يقيّم البوت الاتجاه والاختراق والارتداد لكل سوق، ثم يعرض الاستراتيجية والإطار الزمني الذي اجتاز شروطها. قد تختلف الاستراتيجية بين Spot وFutures وبين العملات.</p>
+        <p class="strategy-intro">يختار البوت بين الاستراتيجيات الفنية والهجينة بحسب بيانات كل سوق. الأخبار سياق مساعد فقط ولا تنشئ إشارة وحدها. التحوّط يعمل في Futures Demo مقابل تعرض Spot مطابق، وبحد أقصى يضبطه إعداد نسبة التحوط.</p>
         <div id="strategy-current"><div class="empty">جارٍ تحميل الاستراتيجيات الحالية…</div></div>
         <div class="strategy-rules">
           <h3>قواعد الاختيار</h3>
           <div><b>تتبّع الاتجاه</b><span>يومي أو 4 ساعات: يقارن سعر الإغلاق بمتوسطَي آخر 20 و50 شمعة، ويتحقق من اتجاههما والزخم.</span></div>
           <div><b>الاختراق</b><span>ساعة أو 15 دقيقة: يبحث عن إغلاق خارج أعلى أو أدنى نطاق آخر 20 شمعة مع تداول نشط، ثم يتأكد من اتجاه 4 ساعات.</span></div>
           <div><b>الارتداد</b><span>15 أو 5 دقائق: يبحث عن رجوع السعر من نطاق بولينجر العلوي أو السفلي عندما يكون السوق جانبيًا.</span></div>
+          <div><b>هجين الزخم الكلي</b><span>يشترط توافق الاتجاه اليومي و4 ساعات، ثم يبحث عن دخول مع اتجاه الساعة؛ الأخبار السلبية الشديدة قد تمنع الشراء.</span></div>
+          <div><b>خوارزمي مع سياق الأخبار</b><span>اختراق خوارزمي مؤكد على 4 ساعات؛ الأخبار تدعم التقييم أو تمنعه عند الشدة، لكنها لا تنشئ صفقة وحدها ولا تتضمن حكمًا بشريًا.</span></div>
+          <div><b>نطاق حجم التداول</b><span>يقدّر منطقة القيمة ونقطة التحكم من حجم شموع الساعة، ثم يبحث عن ارتداد 15 دقيقة داخل نطاق 4 ساعات.</span></div>
+          <div><b>اختراق تقلب مع تحوّط</b><span>يفتح بيعًا في Futures Demo فقط بعد كسر هابط واتساع التقلب. عقود العملات المشتركة مخصصة للتحوّط فقط، ولا تتجاوز النسبة حد الإعداد مقابل مركز Spot مطابق؛ يعيد البوت الموازنة ويغلق التحوّط عند زواله.</span></div>
           <small><b>معاني المؤشرات:</b> EMA هو المتوسط المتحرك الأسي لسعر الإغلاق؛ EMA20 وEMA50 يحسبان متوسط آخر 20 أو 50 شمعة. RSI يقيس قوة الحركة، وMACD يوضح اتجاه الزخم، وATR يقيس تقلب السعر ويُستخدم لحساب الوقف والهدف. نطاقات بولينجر تقيس ابتعاد السعر عن متوسطه.</small>
           <small>هذه قراءة لقواعد الكود الحالية وليست توقعًا أو ضمانًا للربح.</small>
         </div>
@@ -933,9 +937,12 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
     var host = el('trade-history');
     if (!trades || !trades.length) { host.innerHTML = '<div class="empty">لا توجد صفقات مغلقة مسجلة بعد.</div>'; return; }
     host.innerHTML = '<div class="history-row history-head"><span>العملة</span><span>النتيجة</span><span>التغير</span><span>الوقت</span></div>' + trades.map(function (t) {
-      var cls = pnlClass(t.pnl_usdt);
+      var known = t.pnl_known !== false;
+      var cls = known ? pnlClass(t.pnl_usdt) : 'flat';
       var label = t.market_type === 'Futures Demo' ? (t.side === 'short' ? ' · شورت' : ' · لونغ') : '';
-      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + '</small></span><b class="' + cls + '" dir="ltr">' + usd(t.pnl_usdt, 2) + '</b><span class="' + cls + '" dir="ltr">' + num(t.pnl_pct, 2) + '%</span><small>' + esc(t.time || '—') + '</small></div>';
+      var quality = {actual:'رسوم فعلية', estimated:'رسوم مقدرة', simulated:'محاكاة', net_actual_costs:'صافي وتكاليف مسجلة', net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality] || (known ? 'صافي مسجل' : 'سجل قديم · الصافي غير مؤكد');
+      var change = known && t.pnl_pct != null ? num(t.pnl_pct, 2) + '%' : '—';
+      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + ' · ' + esc(quality) + '</small></span><b class="' + cls + '" dir="ltr">' + (known ? usd(t.pnl_usdt, 2) : '—') + '</b><span class="' + cls + '" dir="ltr">' + change + '</span><small>' + esc(t.time || '—') + '</small></div>';
     }).join('');
   }
   function renderDecisions(items) {
@@ -965,13 +972,14 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
     var period = el('performance-period');
     if (period) period.textContent = report && report.days ? 'آخر ' + report.days + ' يومًا' : 'آخر 30 يومًا';
     if (!rows.length) {
-      host.innerHTML = '<div class="empty">لا توجد صفقات مغلقة مسجلة خلال الفترة المحددة.</div>';
+      var oldCount = Number(report && report.unverified_spot_trades) || 0;
+      host.innerHTML = '<div class="empty">لا توجد نتائج موثقة خلال الفترة المحددة.' + (oldCount ? ' · تم استبعاد ' + oldCount + ' سجلات قديمة غير مؤكدة.' : '') + '</div>';
       return;
     }
     var body = rows.map(function (r) {
       var sample = Number(r.sample_size) || 0;
       var cls = pnlClass(r.pnl_per_trade);
-      var strategyLabels = {trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',forced_test:'اختبار Futures',test:'اختبار Spot'};
+      var strategyLabels = {trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',forced_test:'اختبار Futures',test:'اختبار Spot'};
       var strategy = strategyLabels[r.strategy] || r.strategy || 'غير مسجل';
       return '<tr><td>' + esc(r.market) + '</td><td class="pair-name">' + esc(r.symbol) + '</td>' +
         '<td>' + esc(strategy) + '<small class="sub-label">' + esc(timeframeLabel(r.timeframe)) + '</small></td>' +
@@ -980,7 +988,9 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
         '<td class="' + cls + '">' + usd(r.pnl_per_trade,2) + '<small class="sub-label">متوسط النتيجة للصفقة</small></td>' +
         '<td class="' + pnlClass(r.pnl_total) + '">' + usd(r.pnl_total,2) + '<small class="sub-label">' + esc(r.cost_basis || '') + '</small></td></tr>';
     }).join('');
-    host.innerHTML = '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>المجموع المسجل</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+    var oldCount = Number(report && report.unverified_spot_trades) || 0;
+    var note = oldCount ? '<div class="sub-label">استُبعد ' + oldCount + ' سجلًا قديمًا أو غير مكتمل من نتائج صافي الأرباح.</div>' : '';
+    host.innerHTML = note + '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>المجموع المسجل</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
   function renderNews(n) {
@@ -1081,7 +1091,7 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
     }
     el('realized-pl').textContent = usd(stats.realized_total, 2);
     el('realized-pl').className = pnlClass(stats.realized_total);
-    el('realized-sub').textContent = 'اليوم ' + usd(stats.realized_today, 2);
+    el('realized-sub').textContent = 'اليوم ' + usd(stats.realized_today, 2) + (stats.estimated_spot_trades ? ' · رسوم مقدرة في ' + stats.estimated_spot_trades + ' صفقة' : '') + (stats.unverified_spot_trades ? ' · ' + stats.unverified_spot_trades + ' سجل قديم مستبعد' : '');
     el('unrealized-pl').textContent = usd(stats.unrealized, 2);
     el('unrealized-pl').className = pnlClass(stats.unrealized);
     el('unrealized-sub').textContent = (d.positions || []).length + ' صفقات مفتوحة';
@@ -1351,4 +1361,3 @@ body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transp
 </script>
 </body>
 </html>
-

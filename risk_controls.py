@@ -1,6 +1,6 @@
 """Small persistent safety controls shared by Spot and Futures engines."""
 import datetime
-import sqlite3
+from database import get_db_connection
 
 
 def daily_loss_status(db_path, market, equity, limit_pct):
@@ -13,28 +13,23 @@ def daily_loss_status(db_path, market, equity, limit_pct):
                 "reason": "رصيد الحساب غير متاح؛ أُوقف فتح صفقات جديدة احترازيًا"}
 
     day = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
-    conn = sqlite3.connect(db_path, timeout=10.0)
-    try:
-        with conn:
-            conn.execute("""CREATE TABLE IF NOT EXISTS daily_equity_baselines (
-                market TEXT NOT NULL, day TEXT NOT NULL, equity REAL NOT NULL,
-                PRIMARY KEY (market, day))""")
-            row = conn.execute(
-                "SELECT equity FROM daily_equity_baselines WHERE market=? AND day=?",
-                (market, day)).fetchone()
-            if row is None:
-                conn.execute(
-                    "INSERT OR IGNORE INTO daily_equity_baselines (market, day, equity) VALUES (?, ?, ?)",
-                    (market, day, equity))
-                baseline = equity
-            else:
-                baseline = float(row[0])
-        loss_pct = max(0.0, (baseline - equity) / baseline * 100.0)
-        blocked = loss_pct >= limit_pct
-        return {"market": market, "blocked": blocked, "equity": equity,
-                "baseline": baseline, "loss_pct": loss_pct, "limit_pct": limit_pct,
-                "day_utc": day,
-                "reason": ("تم بلوغ حد الخسارة اليومية" if blocked else "ضمن حد الخسارة اليومية")}
-    finally:
-        conn.close()
-
+    with get_db_connection(db_path) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS daily_equity_baselines (
+            market TEXT NOT NULL, day TEXT NOT NULL, equity REAL NOT NULL,
+            PRIMARY KEY (market, day))""")
+        row = conn.execute(
+            "SELECT equity FROM daily_equity_baselines WHERE market=? AND day=?",
+            (market, day)).fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT OR IGNORE INTO daily_equity_baselines (market, day, equity) VALUES (?, ?, ?)",
+                (market, day, equity))
+            baseline = equity
+        else:
+            baseline = float(row[0])
+    loss_pct = max(0.0, (baseline - equity) / baseline * 100.0)
+    blocked = loss_pct >= limit_pct
+    return {"market": market, "blocked": blocked, "equity": equity,
+            "baseline": baseline, "loss_pct": loss_pct, "limit_pct": limit_pct,
+            "day_utc": day,
+            "reason": ("تم بلوغ حد الخسارة اليومية" if blocked else "ضمن حد الخسارة اليومية")}

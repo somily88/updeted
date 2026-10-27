@@ -12,7 +12,8 @@ import sys
 from collections import defaultdict
 
 import ccxt
-from strategy_engine import STRATEGY_RISK, RISK_PER_TRADE_PCT, evaluate_symbol, risk_sized_notional
+from strategy_engine import (STRATEGY_RISK, RISK_PER_TRADE_PCT, TRAILING_ACTIVATION_PCT,
+                             evaluate_symbol, risk_sized_notional)
 
 TIMEFRAME_MS = {
     "5m": 5 * 60_000,
@@ -88,7 +89,40 @@ def fetch_history(exchange, symbol, timeframe, since_ms, until_ms):
     return rows
 
 
-def load_market_data(exchange, symbols, days):
+def fetch_funding_history(exchange, symbol, since_ms, until_ms):
+    """Fetch public historical perpetual funding rates when CCXT exposes them."""
+    method = getattr(exchange, "fetch_funding_rate_history", None)
+    if not callable(method):
+        return [], False
+    rates = []
+    cursor = int(since_ms)
+    try:
+        for _ in range(500):
+            batch = method(symbol, since=cursor, limit=1000) or []
+            if not batch:
+                break
+            for item in batch:
+                stamp = int(item.get("timestamp") or 0)
+                if since_ms <= stamp <= until_ms and stamp:
+                    rates.append({
+                        "timestamp": stamp,
+                        "funding_rate": float(item.get("fundingRate") or 0.0),
+                        "mark_price": float(item.get("markPrice") or 0.0),
+                    })
+            last_stamp = int(batch[-1].get("timestamp") or 0)
+            if not last_stamp or last_stamp >= until_ms or len(batch) < 2:
+                break
+            next_cursor = last_stamp + 1
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+        rates.sort(key=lambda item: item["timestamp"])
+        return rates, bool(rates)
+    except Exception:
+        return [], False
+
+
+def load_market_data(exchange, symbols, days, include_funding=False):
     until_ms = exchange.milliseconds()
     since_ms = until_ms - int(days * 24 * 60 * 60_000)
     result = {symbol: {} for symbol in symbols}
@@ -99,6 +133,12 @@ def load_market_data(exchange, symbols, days):
                 exchange, symbol, timeframe, since_ms, until_ms)
             if not result[symbol][timeframe]:
                 raise RuntimeError("لا توجد بيانات تاريخية لـ {} {}".format(symbol, timeframe))
+        if include_funding:
+            funding, funding_available = fetch_funding_history(exchange, symbol, since_ms, until_ms)
+        else:
+            funding, funding_available = [], True
+        result[symbol]["funding"] = funding
+        result[symbol]["funding_history_available"] = funding_available
     return result
 
 
@@ -125,13 +165,21 @@ def adjusted_risk(strategy, profile):
 def close_position(pos, raw_exit, timestamp, reason, fee_rate, slippage_rate):
     direction = pos["direction"]
     exit_price = raw_exit * (1.0 - slippage_rate if direction == "long" else 1.0 + slippage_rate)
-    exit_notional = pos["quantity"] * exit_price
+    quantity = float(pos["quantity"])
+    exit_notional = quantity * exit_price
     exit_fee = exit_notional * fee_rate
-    gross = pos["quantity"] * (
+    remaining_gross = quantity * (
         exit_price - pos["entry_price"] if direction == "long"
         else pos["entry_price"] - exit_price
     )
-    net = gross - pos["entry_fee"] - exit_fee
+    gross = float(pos.get("partial_gross_pnl") or 0.0) + remaining_gross
+    fees = float(pos.get("fees_paid") or pos.get("entry_fee") or 0.0) + exit_fee
+    funding = float(pos.get("funding_usdt") or 0.0)
+    net = gross - fees + funding
+    partial_quantity = float(pos.get("partial_quantity") or 0.0)
+    total_closed_quantity = partial_quantity + quantity
+    avg_exit_price = ((float(pos.get("partial_exit_notional") or 0.0) + exit_notional)
+                      / total_closed_quantity if total_closed_quantity else exit_price)
     return {
         "signal_id": pos["signal_id"], "symbol": pos["symbol"],
         "strategy": pos["strategy"], "direction": direction,
@@ -140,10 +188,11 @@ def close_position(pos, raw_exit, timestamp, reason, fee_rate, slippage_rate):
         "entry_time_utc": pos["entry_time_utc"],
         "exit_time_utc": iso_utc(timestamp),
         "entry_price": round(pos["entry_price"], 10),
-        "exit_price": round(exit_price, 10),
+        "exit_price": round(avg_exit_price, 10),
         "notional_usdt": round(pos["notional"], 4),
         "gross_pnl_usdt": round(gross, 6),
-        "fees_usdt": round(pos["entry_fee"] + exit_fee, 6),
+        "fees_usdt": round(fees, 6),
+        "funding_usdt": round(funding, 6),
         "net_pnl_usdt": round(net, 6),
         "net_pnl_percent": round(net / pos["notional"] * 100.0, 6),
         "result": "WIN" if net > 0 else "LOSS",
@@ -157,38 +206,70 @@ def iso_utc(timestamp_ms):
 
 
 def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
-    """Conservative OHLC exit handling; if stop and target both touch, stop wins."""
+    """Model production exits; stop wins ambiguous OHLC bars, trails update for next bar."""
     op, high, low = float(candle[1]), float(candle[2]), float(candle[3])
     long_side = pos["direction"] == "long"
-    stop = pos["stop_price"]
-    target = pos["target_price"]
+    stop = float(pos["stop_price"])
+    target = pos.get("target_price")
 
     if long_side:
         if op <= stop:
             return close_position(pos, op, timestamp, "stop_gap", fee_rate, slippage_rate)
         if low <= stop:
             return close_position(pos, stop, timestamp, "stop", fee_rate, slippage_rate)
-        if op >= target:
-            return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
-        if high >= target:
-            return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
-        pos["extreme"] = max(pos["extreme"], high)
-        pos["stop_price"] = max(pos["stop_price"], pos["extreme"] - pos["trailing_distance"])
-        if low <= pos["stop_price"]:
-            return close_position(pos, pos["stop_price"], timestamp, "trailing_stop", fee_rate, slippage_rate)
+        if not pos.get("partial_taken") and target is not None:
+            if op >= target:
+                return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
+            if high >= target:
+                return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
+        risk_level = float(pos["entry_price"]) + float(pos["risk_distance"])
+        if not pos.get("partial_taken") and high >= risk_level:
+            partial_raw = op if op >= risk_level else risk_level
+            partial_price = partial_raw * (1.0 - slippage_rate)
+            partial_quantity = float(pos["quantity"]) * 0.5
+            partial_fee = partial_quantity * partial_price * fee_rate
+            partial_gross = partial_quantity * (partial_price - float(pos["entry_price"]))
+            pos["partial_gross_pnl"] = float(pos.get("partial_gross_pnl") or 0.0) + partial_gross
+            pos["partial_quantity"] = float(pos.get("partial_quantity") or 0.0) + partial_quantity
+            pos["partial_exit_notional"] = float(pos.get("partial_exit_notional") or 0.0) + partial_quantity * partial_price
+            pos["fees_paid"] = float(pos.get("fees_paid") or 0.0) + partial_fee
+            pos["quantity"] -= partial_quantity
+            pos["partial_taken"] = True
+            pos["target_price"] = None
+            pos["stop_price"] = max(float(pos["stop_price"]), float(pos["entry_price"]))
+        pos["extreme"] = max(float(pos["extreme"]), high)
+        if (pos.get("partial_taken")
+                and pos["extreme"] >= pos["entry_price"] * (1.0 + TRAILING_ACTIVATION_PCT / 100.0)):
+            pos["stop_price"] = max(float(pos["stop_price"]), pos["extreme"] - pos["trailing_distance"])
     else:
         if op >= stop:
             return close_position(pos, op, timestamp, "stop_gap", fee_rate, slippage_rate)
         if high >= stop:
             return close_position(pos, stop, timestamp, "stop", fee_rate, slippage_rate)
-        if op <= target:
-            return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
-        if low <= target:
-            return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
-        pos["extreme"] = min(pos["extreme"], low)
-        pos["stop_price"] = min(pos["stop_price"], pos["extreme"] + pos["trailing_distance"])
-        if high >= pos["stop_price"]:
-            return close_position(pos, pos["stop_price"], timestamp, "trailing_stop", fee_rate, slippage_rate)
+        if not pos.get("partial_taken") and target is not None:
+            if op <= target:
+                return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
+            if low <= target:
+                return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
+        risk_level = float(pos["entry_price"]) - float(pos["risk_distance"])
+        if not pos.get("partial_taken") and low <= risk_level:
+            partial_raw = op if op <= risk_level else risk_level
+            partial_price = partial_raw * (1.0 + slippage_rate)
+            partial_quantity = float(pos["quantity"]) * 0.5
+            partial_fee = partial_quantity * partial_price * fee_rate
+            partial_gross = partial_quantity * (float(pos["entry_price"]) - partial_price)
+            pos["partial_gross_pnl"] = float(pos.get("partial_gross_pnl") or 0.0) + partial_gross
+            pos["partial_quantity"] = float(pos.get("partial_quantity") or 0.0) + partial_quantity
+            pos["partial_exit_notional"] = float(pos.get("partial_exit_notional") or 0.0) + partial_quantity * partial_price
+            pos["fees_paid"] = float(pos.get("fees_paid") or 0.0) + partial_fee
+            pos["quantity"] -= partial_quantity
+            pos["partial_taken"] = True
+            pos["target_price"] = None
+            pos["stop_price"] = min(float(pos["stop_price"]), float(pos["entry_price"]))
+        pos["extreme"] = min(float(pos["extreme"]), low)
+        if (pos.get("partial_taken")
+                and pos["extreme"] <= pos["entry_price"] * (1.0 - TRAILING_ACTIVATION_PCT / 100.0)):
+            pos["stop_price"] = min(float(pos["stop_price"]), pos["extreme"] + pos["trailing_distance"])
     return None
 
 
@@ -203,13 +284,46 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
     }
     positions = {}
     trades = []
+    equity_curve = []
     signals = {}
     entered_keys = set()
     effective_slots = max(1, min(max_positions, int(capital // notional)))
     allow_short = mode == "futures"
 
+    def liquidation_equity(mark_open):
+        realized = sum(float(t["net_pnl_usdt"]) for t in trades)
+        unrealized = 0.0
+        for position_symbol, pos in positions.items():
+            mark_bar = base_by_open[position_symbol].get(mark_open)
+            mark = (float(pos["entry_price"]) if int(pos["entry_ms"]) > int(mark_open)
+                    else float(mark_bar[4]) if mark_bar else float(pos["entry_price"]))
+            exit_mark = mark * (1.0 - slippage_rate if pos["direction"] == "long"
+                                else 1.0 + slippage_rate)
+            gross = float(pos["quantity"]) * (
+                exit_mark - float(pos["entry_price"]) if pos["direction"] == "long"
+                else float(pos["entry_price"]) - exit_mark)
+            exit_fee = float(pos["quantity"]) * exit_mark * fee_rate
+            unrealized += (float(pos.get("partial_gross_pnl") or 0.0) + gross
+                           - float(pos.get("fees_paid") or pos["entry_fee"]) - exit_fee
+                           + float(pos.get("funding_usdt") or 0.0))
+        return float(capital) + realized + unrealized
+
     for now_ms in segment_times:
         closed_bar_open = now_ms - TIMEFRAME_MS["5m"]
+        for symbol, pos in positions.items():
+            for funding in data[symbol].get("funding", []):
+                stamp = int(funding["timestamp"])
+                if (int(pos.get("last_funding_ms", pos["entry_ms"])) < stamp <= now_ms
+                        and int(pos["entry_ms"]) < stamp):
+                    mark = float(funding.get("mark_price") or 0.0)
+                    if mark <= 0:
+                        mark_open = (stamp - (stamp % TIMEFRAME_MS["5m"]) - TIMEFRAME_MS["5m"])
+                        mark_bar = base_by_open[symbol].get(mark_open)
+                        mark = float(mark_bar[4]) if mark_bar else float(pos["entry_price"])
+                    direction_sign = 1.0 if pos["direction"] == "long" else -1.0
+                    pos["funding_usdt"] = float(pos.get("funding_usdt") or 0.0) - (
+                        direction_sign * float(pos["quantity"]) * mark * float(funding["funding_rate"]))
+                    pos["last_funding_ms"] = stamp
         # Match production scan order: manage exits before considering new entries.
         for symbol in list(positions):
             candle = base_by_open[symbol].get(closed_bar_open)
@@ -262,7 +376,7 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             entry_price = raw_entry * (1.0 + slippage_rate if direction == "long" else 1.0 - slippage_rate)
             atr = max(float(setup.get("atr") or 0.0), entry_price * 0.0005)
             risk = adjusted_risk(setup["strategy"], profile)
-            current_equity = float(capital) + sum(float(t["net_pnl_usdt"]) for t in trades)
+            current_equity = liquidation_equity(closed_bar_open)
             sized_notional = risk_sized_notional(
                 current_equity, entry_price, atr * risk["stop_atr"], notional,
                 RISK_PER_TRADE_PCT)
@@ -282,13 +396,21 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 "signal_strength": setup.get("signal_strength", 0),
                 "signal_time_utc": iso_utc(now_ms), "entry_time_utc": iso_utc(now_ms),
                 "entry_ms": now_ms, "entry_price": entry_price, "quantity": quantity,
-                "notional": sized_notional, "entry_fee": entry_fee, "stop_price": stop,
+                "notional": sized_notional, "entry_fee": entry_fee, "fees_paid": entry_fee,
+                "partial_gross_pnl": 0.0, "partial_quantity": 0.0,
+                "partial_exit_notional": 0.0, "partial_taken": False,
+                "risk_distance": atr * risk["stop_atr"], "stop_price": stop,
                 "target_price": target, "trailing_distance": atr * risk["trail_atr"],
-                "extreme": extreme,
+                "extreme": extreme, "funding_usdt": 0.0,
+                "last_funding_ms": now_ms,
             }
             entered_keys.add(signal_id)
             signals[signal_id].update({"status": "open", "entry_price": round(entry_price, 10),
                                        "entry_time_utc": iso_utc(now_ms)})
+
+        # Include open positions and liquidation costs in both sizing and drawdown.
+        equity_curve.append(liquidation_equity(closed_bar_open))
+
     # Close remaining positions at the final available close and charge exit costs.
     final_close_ms = segment_times[-1]
     last_open = final_close_ms - TIMEFRAME_MS["5m"]
@@ -303,7 +425,9 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 "net_pnl_usdt": trade["net_pnl_usdt"], "exit_time_utc": trade["exit_time_utc"],
                 "exit_reason": trade["exit_reason"],
             })
-    return {"metrics": metrics(trades, capital), "trades": trades,
+    if trades:
+        equity_curve.append(float(capital) + sum(float(t["net_pnl_usdt"]) for t in trades))
+    return {"metrics": metrics(trades, capital, equity_curve), "trades": trades,
             "signals": list(signals.values())}
 
 
@@ -313,7 +437,7 @@ def empty_metrics():
             "max_drawdown_usdt": 0.0, "return_on_capital_percent": 0.0}
 
 
-def metrics(trades, capital):
+def metrics(trades, capital, equity_curve=None):
     if not trades:
         return empty_metrics()
     pnls = [float(t["net_pnl_usdt"]) for t in trades]
@@ -321,8 +445,9 @@ def metrics(trades, capital):
     losses = [x for x in pnls if x < 0]
     equity = peak = float(capital)
     max_dd = 0.0
-    for pnl in pnls:
-        equity += pnl
+    curve = equity_curve or [equity]
+    for mark in curve:
+        equity = float(mark)
         peak = max(peak, equity)
         max_dd = max(max_dd, peak - equity)
     return {
@@ -356,7 +481,7 @@ def run(args):
     if not symbols:
         raise ValueError("حدد زوجًا واحدًا على الأقل عبر --symbols")
     exchange = ccxt.binanceusdm({"enableRateLimit": True}) if args.market == "futures" else ccxt.binance({"enableRateLimit": True})
-    data = load_market_data(exchange, symbols, args.days)
+    data = load_market_data(exchange, symbols, args.days, include_funding=args.market == "futures")
     # The simulator uses 5m close timestamps as a common clock. All strategy
     # timeframes are multiples of 5m.
     timeline = sorted({
@@ -369,6 +494,8 @@ def run(args):
     split_ms = timeline[split_index]
     end_ms = timeline[-1] + 1
     events = generate_signal_events(data, symbols, timeline, allow_short=args.market == "futures")
+    funding_history_complete = (args.market != "futures" or all(
+        data[symbol].get("funding_history_available") for symbol in symbols))
 
     fee_percent = args.fee_percent
     if fee_percent is None:
@@ -391,14 +518,18 @@ def run(args):
 
     baseline_oos = summaries["baseline"]["out_of_sample"]
     eligible = [
-        name for name in PROFILES if name != "baseline"
+        name for name in PROFILES if funding_history_complete and name != "baseline"
         and summaries[name]["train"]["trades"] >= args.min_trades
         and summaries[name]["out_of_sample"]["trades"] >= args.min_trades
     ]
     winner = max(eligible, key=lambda n: profile_score({"metrics": summaries[n]["train"]})) if eligible else None
+    if args.market == "futures" and not funding_history_complete:
+        recommendation_message = "لا توجد توصية لـ Futures: سجل التمويل التاريخي غير متاح لكل الأزواج، فلا يمكن مقارنة صافي النتائج بأمان."
+    else:
+        recommendation_message = "لا توجد توصية مدعومة بعينة كافية وتحسن خارج العينة."
     recommendation = {
         "status": "no_change",
-        "message": "لا توجد توصية مدعومة بعينة كافية وتحسن خارج العينة.",
+        "message": recommendation_message,
         "candidate": None,
         "requires_manual_review": True,
     }
@@ -425,6 +556,10 @@ def run(args):
         "out_of_sample_end_utc": iso_utc(end_ms),
         "cost_model": {
             "fee_percent_per_side": fee_percent,
+            "funding_history": ("included from public historical rates" if funding_history_complete
+                                and args.market == "futures" else
+                                "not applicable to Spot" if args.market == "spot" else
+                                "unavailable; Futures recommendations suppressed"),
             "slippage_percent_per_side": args.slippage_percent,
             "trade_notional_usdt": args.trade_usdt,
             "capital_usdt": args.capital_usdt,
@@ -438,7 +573,10 @@ def run(args):
             "إشارات الدخول مأخوذة من strategy_engine.py دون تعديل.",
             "الاختبارات تقارن مخارج ATR فقط؛ لا تغيّر قواعد الإشارة.",
             "الرسوم والانزلاق تقديرات ثابتة لكل جانب وليست رسوم حسابك الفعلية.",
-            "لا يشمل هذا النموذج فلتر الأخبار التاريخي أو تمويل Futures أو الإضافة إلى مراكز Spot.",
+            "لا تتوفر بيانات أخبار تاريخية؛ لذا تُختبر الاستراتيجيات المعتمدة على الأخبار بسياق محايد، ولا يثبت ذلك أثر الأخبار.",
+            "تحوّط تقلب Futures يحتاج تعرض Spot حيًا مرتبطًا؛ لا يحاكيه هذا الاختبار ولا يعرض له نتيجة أداء.",
+            "منطقة حجم التداول تقدير من حجم الشموع والسعر النموذجي، وليست ملف حجم حقيقيًا على مستوى الصفقات.",
+            "تمويل Futures يُستخدم فقط عند توافر السجل التاريخي لكل الأزواج.",
             "تُستخدم شموع 5m مع معالجة محافظة؛ إذا لامس الوقف والهدف في الشمعة نفسها يُحتسب الوقف أولاً.",
             "النتيجة التاريخية لا تضمن أداءً مستقبليًا.",
         ],

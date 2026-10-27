@@ -21,6 +21,12 @@ MIN_SPOT_QUOTE_VOLUME_USDT = float(os.getenv("MIN_SPOT_QUOTE_VOLUME_USDT", "1000
 MIN_FUTURES_QUOTE_VOLUME_USDT = float(os.getenv("MIN_FUTURES_QUOTE_VOLUME_USDT", "100000"))
 MAX_SPOT_SPREAD_PCT = float(os.getenv("MAX_SPOT_SPREAD_PCT", "0.15"))
 MAX_FUTURES_SPREAD_PCT = float(os.getenv("MAX_FUTURES_SPREAD_PCT", "0.25"))
+MAX_TICKER_AGE_SECONDS = float(os.getenv("MAX_TICKER_AGE_SECONDS", "120"))
+if not 5.0 <= MAX_TICKER_AGE_SECONDS <= 900.0:
+    raise ValueError("MAX_TICKER_AGE_SECONDS must be between 5 and 900")
+MAX_SPOT_HEDGE_RATIO = float(os.getenv("MAX_SPOT_HEDGE_RATIO", "0.5"))
+if not 0.0 < MAX_SPOT_HEDGE_RATIO <= 1.0:
+    raise ValueError("MAX_SPOT_HEDGE_RATIO must be greater than 0 and at most 1")
 
 
 def retry_api_read(operation, *args, attempts=3, **kwargs):
@@ -36,6 +42,20 @@ def retry_api_read(operation, *args, attempts=3, **kwargs):
             if not transient or attempt + 1 >= attempts:
                 raise
             time.sleep(min(0.25 * (2 ** attempt), 1.0))
+
+
+def fetch_fresh_ticker(exchange, symbol):
+    """Fetch a ticker and reject it when the exchange supplies an old timestamp."""
+    ticker = retry_api_read(exchange.fetch_ticker, symbol)
+    timestamp = ticker.get("timestamp")
+    if timestamp is not None:
+        age_seconds = (time.time() * 1000.0 - float(timestamp)) / 1000.0
+        if age_seconds > MAX_TICKER_AGE_SECONDS:
+            raise TimeoutError("Ticker for {} is stale ({:.0f}s)".format(symbol, age_seconds))
+    price = float(ticker.get("last") or 0.0)
+    if price <= 0:
+        raise ValueError("Ticker for {} has no usable last price".format(symbol))
+    return ticker
 
 
 def market_liquidity_check(exchange, symbol, market_type):
@@ -91,8 +111,18 @@ STRATEGY_RISK = {
     "trend": {"stop_atr": 1.5, "target_atr": 3.0, "trail_atr": 1.5},
     "breakout": {"stop_atr": 1.0, "target_atr": 2.0, "trail_atr": 1.0},
     "bounce": {"stop_atr": 1.0, "target_atr": 1.5, "trail_atr": 0.75},
+    "macro_momentum_hybrid": {"stop_atr": 1.5, "target_atr": 2.7, "trail_atr": 1.25},
+    "algorithmic_discretionary_hybrid": {"stop_atr": 1.25, "target_atr": 2.2, "trail_atr": 1.0},
+    "volume_profile_range": {"stop_atr": 0.9, "target_atr": 1.4, "trail_atr": 0.7},
+    "volatility_breakout_hedge": {"stop_atr": 1.1, "target_atr": 2.0, "trail_atr": 1.0},
 }
-STRATEGY_LABELS = {"trend": "تتبّع الاتجاه", "breakout": "الاختراق", "bounce": "الارتداد"}
+STRATEGY_LABELS = {
+    "trend": "تتبّع الاتجاه", "breakout": "الاختراق", "bounce": "الارتداد",
+    "macro_momentum_hybrid": "هجين الزخم الكلي",
+    "algorithmic_discretionary_hybrid": "خوارزمي مع سياق الأخبار",
+    "volume_profile_range": "نطاق حجم التداول",
+    "volatility_breakout_hedge": "اختراق تقلب مع تحوّط",
+}
 
 
 def _ema(values, period):
@@ -296,6 +326,189 @@ def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
                           "long", strength)
     return None
 
+
+def _regime_direction(v):
+    if not v or not v["atr"]:
+        return None
+    if (v["ref_close"] > v["ema50"] and v["ema20"] > v["ema50"]
+            and v["ema50"] > v["ema50_old"] and v["hist"] >= 0):
+        return "long"
+    if (v["ref_close"] < v["ema50"] and v["ema20"] < v["ema50"]
+            and v["ema50"] < v["ema50_old"] and v["hist"] <= 0):
+        return "short"
+    return None
+
+
+def _news_allows(context, direction):
+    context = context or {}
+    sentiment = str(context.get("news_sentiment") or "neutral").lower()
+    severity = int(context.get("news_severity") or 0)
+    if direction == "long" and sentiment == "negative" and severity >= 3:
+        return False
+    if direction == "short" and sentiment == "positive" and severity >= 4:
+        return False
+    return True
+
+
+def _macro_momentum_candidate(exchange, symbol, cache, context, direction):
+    daily = _view(_load(exchange, symbol, "1d", cache))
+    four_hour = _view(_load(exchange, symbol, "4h", cache))
+    hourly = _view(_load(exchange, symbol, "1h", cache))
+    if not daily or not four_hour or not hourly:
+        return None
+    if (_regime_direction(daily) != direction or _regime_direction(four_hour) != direction
+            or not _news_allows(context, direction)):
+        return None
+    hourly_candidate = _trend_candidate(exchange, symbol, "1h", cache, direction)
+    if not hourly_candidate:
+        return None
+    slope_score = min(10.0, abs(daily["ema50"] / daily["ema50_old"] - 1.0) * 1000.0)
+    strength = min(97.0, float(hourly_candidate["signal_strength"]) + slope_score)
+    sentiment = str((context or {}).get("news_sentiment") or "neutral").lower()
+    reason = ("اتفق اتجاه اليومي و4 ساعات مع زخم الساعة؛ مرشح الأخبار: {}"
+              .format({"positive":"إيجابي", "negative":"سلبي", "neutral":"محايد"}.get(sentiment, "محايد")))
+    return _candidate("macro_momentum_hybrid", "1h", hourly, reason, direction, strength)
+
+
+def _algorithmic_discretionary_candidate(exchange, symbol, cache, context, direction):
+    context = context or {}
+    sentiment = str(context.get("news_sentiment") or "neutral").lower()
+    severity = int(context.get("news_severity") or 0)
+    if not _news_allows(context, direction):
+        return None
+    for timeframe in ("1h", "15m"):
+        technical = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
+        if not technical or not _higher_timeframe_confirms(exchange, symbol, cache, direction):
+            continue
+        view = _view(_load(exchange, symbol, timeframe, cache))
+        if not view:
+            continue
+        supports_direction = ((direction == "long" and sentiment == "positive")
+                              or (direction == "short" and sentiment == "negative"))
+        opposes_direction = ((direction == "long" and sentiment == "negative")
+                             or (direction == "short" and sentiment == "positive"))
+        news_boost = 6.0 if supports_direction else 0.0
+        strength = min(98.0, float(technical["signal_strength"]) + news_boost)
+        context_text = ("يدعم الاتجاه" if supports_direction else
+                        "يعارض الاتجاه دون بلوغ حد الاستبعاد" if opposes_direction else
+                        "محايد ولا يضيف تأكيدًا")
+        if severity:
+            context_text += " (خطورة {})".format(severity)
+        reason = "اختراق خوارزمي مؤكد على 4 ساعات مع مرشح سياقي للأخبار: {}؛ الأخبار لا تنشئ إشارة وحدها".format(context_text)
+        return _candidate("algorithmic_discretionary_hybrid", timeframe, view,
+                          reason, direction, strength)
+    return None
+
+
+def _volume_profile(candles, bins=24, value_area_fraction=0.70):
+    sample = candles[-60:]
+    if len(sample) < 30:
+        return None
+    low = min(float(c[3]) for c in sample)
+    high = max(float(c[2]) for c in sample)
+    if high <= low:
+        return None
+    width = (high - low) / bins
+    volumes = [0.0] * bins
+    for candle in sample:
+        typical = (float(candle[2]) + float(candle[3]) + float(candle[4])) / 3.0
+        index = max(0, min(bins - 1, int((typical - low) / width)))
+        volumes[index] += max(0.0, float(candle[5]))
+    total = sum(volumes)
+    if total <= 0:
+        return None
+    poc_index = max(range(bins), key=lambda i: volumes[i])
+    left = right = poc_index
+    accumulated = volumes[poc_index]
+    target = total * value_area_fraction
+    while accumulated < target and (left > 0 or right < bins - 1):
+        left_volume = volumes[left - 1] if left > 0 else -1.0
+        right_volume = volumes[right + 1] if right < bins - 1 else -1.0
+        if right_volume > left_volume:
+            right += 1
+            accumulated += max(0.0, right_volume)
+        else:
+            left -= 1
+            accumulated += max(0.0, left_volume)
+    return {"poc": low + (poc_index + 0.5) * width,
+            "val": low + left * width, "vah": low + (right + 1) * width,
+            "volume": total}
+
+
+def _volume_profile_candidate(exchange, symbol, cache, direction):
+    if not _range_ok(_view(_load(exchange, symbol, "4h", cache))):
+        return None
+    profile_candles = _load(exchange, symbol, "1h", cache)
+    profile = _volume_profile(profile_candles)
+    timeframe = "15m"
+    candles = _load(exchange, symbol, timeframe, cache)
+    v = _view(candles)
+    if not profile or not v or not v["atr"]:
+        return None
+    last, previous = candles[-1], candles[-2]
+    if direction == "short":
+        distance = (profile["vah"] - float(last[4])) / v["atr"]
+        rejection = (float(last[2]) >= profile["vah"] - 0.25 * v["atr"]
+                     and float(last[4]) < float(last[1]) and float(last[4]) < float(previous[4])
+                     and v["rsi"] >= 50)
+        if not rejection:
+            return None
+    else:
+        distance = (float(last[4]) - profile["val"]) / v["atr"]
+        rejection = (float(last[3]) <= profile["val"] + 0.25 * v["atr"]
+                     and float(last[4]) > float(last[1]) and float(last[4]) > float(previous[4])
+                     and v["rsi"] <= 50)
+        if not rejection:
+            return None
+    if distance < -0.35 or distance > 0.65:
+        return None
+    strength = min(94.0, 62.0 + max(0.0, 0.65 - abs(distance)) * 24.0)
+    return _candidate("volume_profile_range", timeframe, v,
+                      "رفض سعري عند حد منطقة القيمة {:.8g} مع بقاء سوق 4 ساعات ضمن نطاق؛ الهدف الأول قرب نقطة التحكم {:.8g}".format(
+                          profile["vah"] if direction == "short" else profile["val"], profile["poc"]),
+                      direction, strength)
+
+
+def _volatility_breakout_hedge_candidate(exchange, symbol, cache, context):
+    context = context or {}
+    exposure = float(context.get("spot_exposure_usdt") or 0.0)
+    if exposure <= 0:
+        return None
+    timeframe = "15m"
+    candles = _load(exchange, symbol, timeframe, cache)
+    v = _view(candles)
+    if not v or len(candles) < 60 or not v["atr"]:
+        return None
+    previous = candles[-21:-1]
+    average_volume = sum(float(c[5]) for c in previous) / len(previous)
+    if average_volume <= 0 or float(candles[-1][5]) < average_volume * 1.4:
+        return None
+    atr_samples = [_atr(candles[:i], 14) for i in range(max(15, len(candles) - 36), len(candles))]
+    atr_samples = [value for value in atr_samples if value > 0]
+    if len(atr_samples) < 16:
+        return None
+    older_atr = sorted(atr_samples[:-8])
+    recent_atr = sorted(atr_samples[-8:])
+    older_median = older_atr[len(older_atr) // 2]
+    recent_median = recent_atr[len(recent_atr) // 2]
+    last = candles[-1]
+    floor = min(float(c[3]) for c in previous)
+    contraction = recent_median <= older_median * 0.8
+    expansion = v["atr"] >= recent_median * 1.15
+    bearish_break = float(last[4]) < floor and float(last[4]) < float(last[1])
+    if not (contraction and expansion and bearish_break):
+        return None
+    ratio = MAX_SPOT_HEDGE_RATIO
+    extension = abs(float(last[4]) - floor) / v["atr"]
+    strength = min(96.0, 64.0 + min(18.0, max(0.0, float(last[5]) / average_volume - 1.4) * 12.0)
+                   + max(0.0, 8.0 - extension * 6.0))
+    setup = _candidate("volatility_breakout_hedge", timeframe, v,
+                       "كسر هابط بعد انضغاط ثم اتساع التقلب مع حجم مرتفع؛ تحوّط Futures محدود إلى {:.0f}% من تعرض Spot الطويل".format(ratio * 100),
+                       "short", strength)
+    setup.update({"hedge_base": str(context.get("spot_base") or symbol.split("/")[0]),
+                  "hedge_exposure_usdt": exposure, "hedge_ratio": ratio})
+    return setup
+
 def _higher_timeframe_confirms(exchange, symbol, cache, direction):
     """Require the 4h trend to agree with 15m/1h breakout entries."""
     v = _view(_load(exchange, symbol, "4h", cache))
@@ -311,27 +524,26 @@ def _higher_timeframe_confirms(exchange, symbol, cache, direction):
             and (v["hist"] >= 0 or v["hist"] > previous_hist))
 
 
-def evaluate_symbol(exchange, symbol, allow_short=False):
-    """Evaluate every strategy/timeframe and return the strongest confirmed setup."""
+def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
+                    enable_hybrids=True, allowed_strategies=None):
+    """Evaluate established and hybrid strategies using closed candles only."""
+    context = context or {}
     directions = ("long", "short") if allow_short else ("long",)
     cache = {}
     candidates = []
 
-    # Fast breakouts: 1h/15m. Rank both directions instead of taking the first match.
     for timeframe in ("1h", "15m"):
         for direction in directions:
             found = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
             if found and _higher_timeframe_confirms(exchange, symbol, cache, direction):
                 candidates.append(found)
 
-    # Swing trend following: daily/4h.
     for timeframe in ("1d", "4h"):
         for direction in directions:
             found = _trend_candidate(exchange, symbol, timeframe, cache, direction)
             if found:
                 candidates.append(found)
 
-    # Mean reversion is considered only when the higher-timeframe regime is ranging.
     range_view = _view(_load(exchange, symbol, "4h", cache))
     if _range_ok(range_view):
         for timeframe in ("15m", "5m"):
@@ -339,7 +551,27 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
                 found = _bounce_candidate(exchange, symbol, timeframe, cache, direction)
                 if found:
                     candidates.append(found)
+        if enable_hybrids:
+            for direction in directions:
+                found = _volume_profile_candidate(exchange, symbol, cache, direction)
+                if found:
+                    candidates.append(found)
 
+    if enable_hybrids:
+        for direction in directions:
+            found = _macro_momentum_candidate(exchange, symbol, cache, context, direction)
+            if found:
+                candidates.append(found)
+            found = _algorithmic_discretionary_candidate(exchange, symbol, cache, context, direction)
+            if found:
+                candidates.append(found)
+        if allow_short:
+            found = _volatility_breakout_hedge_candidate(exchange, symbol, cache, context)
+            if found:
+                candidates.append(found)
+
+    if allowed_strategies is not None:
+        candidates = [item for item in candidates if item.get("strategy") in allowed_strategies]
     selected = _select_best(candidates)
     if selected:
         return selected
@@ -348,7 +580,8 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
     if v:
         return {
             "signal": False, "strategy": "wait", "strategy_label": "انتظار",
-            "direction": "flat", "timeframe": "15m", "reason": "لم تكتمل شروط أي من الاستراتيجيات الثلاث للدخول",
+            "direction": "flat", "timeframe": "15m",
+            "reason": "لم تكتمل شروط الاستراتيجيات الفنية والهجينة المتاحة",
             "atr": v["atr"], "rsi": v["rsi"], "ema": v["ema50"], "hist": v["hist"],
             "ref_close": v["ref_close"], "candle_ts": v["candles"][-1][0],
             "signal_strength": 0.0,
@@ -361,5 +594,3 @@ def evaluate_symbol(exchange, symbol, allow_short=False):
         "candle_ts": None, "signal_strength": 0.0,
         "conds": {"ema": False, "macd": False, "rsi": False},
     }
-
-
