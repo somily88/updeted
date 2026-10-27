@@ -451,6 +451,95 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
 .performance-report .empty { background:#f7f8fa; }
 @media(max-width:720px) { .performance-report { padding:12px; } .performance-report-head { flex-direction:column; } }
 
+
+/* ---------- Low-glare dark palette ---------- */
+:root { --bg:#15171b; --card:#1c2026; --card-hi:#232831; --line:#303640; --text:#e5e5e1; --muted:#a2a7af; --lime:#b7cf70; --spot:#60b7a5; --futures:#b19ae1; --up:#69c99b; --down:#e27e7e; --bar:#353b44; }
+html,body { background:var(--bg); color:var(--text); }
+body { background:radial-gradient(ellipse at 15% 0%,rgba(72,83,54,.12),transparent 38%),#15171b; }
+.top { border-color:var(--line); }
+.logo,.nav-item,.section-title,.tx-head-row h3,.market-group-head h3,.risk h2 { color:var(--text); }
+.logo i { color:var(--lime); }
+.pill { color:var(--text); background:#20242a; border-color:#373d47; }
+.pill-on::before { background:var(--spot); box-shadow:0 0 7px rgba(96,183,165,.42); }
+.btn-scan { color:var(--lime); border-color:#7f914a; }
+.btn-scan:hover { color:#14170e; background:var(--lime); }
+.strategy-open { color:var(--text); background:#22262d; border-color:#414852; }
+.strategy-open:hover { color:var(--lime); border-color:var(--lime); background:#292d34; }
+.news-ticker { background:#1b1f25; border-color:var(--line); border-inline-start-color:var(--lime); box-shadow:0 4px 16px rgba(0,0,0,.14); }
+.ticker-item { color:#d1d2ce; } .ticker-source { color:var(--lime); }
+.wallet-top,.stat,.account-card,.futures-market-section,.chart-card,.latest-decision-card,.open-positions-section,.performance-report,.market-group,.mkt,.risk,.tx,.tx-history,.decision-section,.news-card {
+  background:#1c2026; border-color:#303640; box-shadow:0 4px 18px rgba(0,0,0,.16);
+}
+.wallet-top { border-inline-start-color:var(--lime); }
+.wallet-label,.wallet-value h1 { color:var(--text); }
+.range { background:#22262d; border-color:#383e48; color:var(--muted); }
+.range.active { background:#303526; border-color:#8da34d; color:#d5e69a; }
+.stat { border-inline-start:3px solid var(--lime); }
+.stat:nth-child(2) { border-inline-start-color:var(--futures); }
+.stat:nth-child(3) { border-inline-start-color:#75a9d9; }
+.stat:nth-child(4) { border-inline-start-color:#d1a75b; }
+.stat b,.account-balance,.account-name { color:var(--text); }
+.account-card { border-inline-start:3px solid var(--spot); }
+.account-card:nth-child(2) { border-inline-start-color:var(--futures); }
+.account-icon { color:var(--text); background:#292e36; }
+.account-symbols span { color:#d1d3d6; border-color:#3b424c; }
+.account-symbols-unavailable span { color:var(--muted); border-color:#444b55; }
+.tradfi-consent { background:#20242a; border-color:#363d47; }
+.tradfi-consent label { color:var(--text); }
+.tradfi-consent a { color:#8dd0bf; }
+.tradfi-sign-button { color:#171a12; background:var(--lime); border-color:#90a653; }
+.futures-market-section { border-inline-start:3px solid var(--futures); }
+.futures-market-section .market-group-head h3 { color:var(--futures); }
+.futures-market-section .mkt { background:#22242c; border-color:#403951; }
+.market-group { background:#1a1e24; border-color:#303640; }
+.market-group-head h3 { color:var(--text); }
+.mkt { background:#20242a; border-color:#343b45; }
+.mkt:hover { border-color:#82964b; }
+.mkt-title b,.mkt-price { color:var(--text); }
+.coin { color:#fff; }
+.risk { border-top:2px solid #8fa452; }
+.meter { background:repeating-linear-gradient(90deg,#3a4048 0 1.5px,transparent 1.5px 5px); }
+.meter-fill { background:#a8c65e; }
+.open-positions-section { background:#1b1f25; border-color:#343a43; }
+.open-positions-title { color:#e3e4dd; }
+.positions-meta #open-count { color:#d7e69e; }
+.position-table-row,.positions-table-head { background:#1c2026; border-color:#343a43; }
+.position-table-row { color:var(--text); }
+.position-table-head { background:#20242a; color:var(--muted); }
+.position-table-row.spot-position { border-inline-start-color:var(--spot); }
+.position-table-row.futures-position { border-inline-start-color:var(--futures); }
+.performance-report-head h3 { color:var(--text); }
+.performance-report-head b { color:var(--lime); }
+.performance-table th { color:var(--muted); border-color:#343a43; }
+.performance-table td { color:var(--text); border-color:#303640; }
+.performance-sample { background:#303326; color:#d0e08f; }
+.performance-sample.low { background:#3a3021; color:#e7c27b; }
+.decision-row { background:#20242a; border-color:#353c46; }
+.decision-reason { color:#e3e4e0; }
+.decision-meta,.sub-label { color:var(--muted); }
+.decision-pill { color:#bdc2ca; background:#30353d; }
+.decision-pill.ok { color:#85d2ad; background:#26382f; }
+.decision-pill.bad { color:#ef9a9a; background:#3c292b; }
+.decision-api { color:#ef9999; }
+.empty { color:var(--muted); background:#20242a; }
+.tx.position-card { background:#20242a; }
+.tx.hl { background:#343c2a; color:var(--text); }
+.tx.hl small,.tx.hl .tx-sub,.tx.hl .tx-status { color:#c4caaf; }
+.tx.hl .tx-val { color:#e6e8dd; }
+.history-row { border-color:#343a43; }
+.strategy-dialog { color:var(--text); background:#1d2127; border-color:#3a414a; box-shadow:0 25px 90px rgba(0,0,0,.62); }
+.strategy-dialog::backdrop { background:rgba(0,0,0,.68); }
+.strategy-intro,.strategy-rules div span,.strategy-rules>small { color:var(--muted); }
+.strategy-group { background:#242830; border-color:#383f49; }
+.strategy-market-row { border-color:#3a414a; color:var(--text); }
+.strategy-rules { background:#181c21; }
+.strategy-rules div { border-color:#343b44; }
+.strategy-rules div b { color:#d0e18e; }
+.strategy-close { background:#252a31; color:var(--text); border-color:#424a55; }
+.news-list li { color:#d1d3d6; }
+:focus-visible { outline-color:#c5dc7d; }
+@media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--text); } }
+
 </style>
 </head>
 <body>
@@ -466,6 +555,7 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
       <span class="pill" id="mode-pill">—</span>
       <span class="pill" id="risk-pill">حد الخسارة اليومي: —</span>
       <span class="pill" id="last-update">آخر تحديث: —</span>
+      <button class="strategy-open" id="strategy-open" type="button">الاستراتيجية المتبعة</button>
       <a class="btn-scan" href="/check">افحص السوق الآن</a>
     </div>
   </header>
@@ -592,8 +682,7 @@ html,body { background:var(--bg); } body { padding:26px; background:linear-gradi
 
       <div class="section-title-row">
         <h2 class="section-title">الأسواق والإشارات</h2>
-        <button class="strategy-open" id="strategy-open" type="button">الاستراتيجية المتبعة</button>
-      </div>
+        </div>
       <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
       <section class="decision-section" aria-label="سجل قرارات البوت">
         <div class="tx-head-row"><h3>سجل قرارات البوت</h3><small id="decision-count">آخر القرارات</small></div>
