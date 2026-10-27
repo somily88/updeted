@@ -581,6 +581,60 @@ body { background:radial-gradient(ellipse at 15% 0%,rgba(72,83,54,.12),transpare
 .latest-decision-card .decision-api { color:#f1a1a1; background:#39292c; padding:8px 10px; border-radius:8px; }
 .latest-decision-card .empty { background:#22272e; border:1px dashed #414953; color:#aeb5bd; }
 
+/* ---------- More vibrant dashboard accents ---------- */
+:root {
+  --bg:#10151f; --card:#171f2d; --card-hi:#202c3d; --line:#2b3b52;
+  --text:#eef4ff; --muted:#a4b3c9; --lime:#a7f04a; --spot:#27d6b0;
+  --futures:#9b7bff; --up:#45e39a; --down:#ff6b7d; --bar:#31435a;
+}
+body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transparent 34%),radial-gradient(ellipse at 92% 4%,rgba(155,123,255,.14),transparent 30%),#10151f; }
+.wallet-top,.stat,.account-card,.futures-market-section,.chart-card,.latest-decision-card,.open-positions-section,.performance-report,.market-group,.mkt,.risk,.tx,.tx-history,.decision-section,.news-card {
+  background-color:#171f2d; border-color:#2b3b52; box-shadow:0 8px 24px rgba(0,0,0,.22);
+}
+.top { border-color:#2b3b52; }
+.logo i,.performance-report-head b,.tx-head-row span { color:#a7f04a; }
+.pill { background:#1b2738; border-color:#344963; }
+.pill-on::before { background:#27d6b0; box-shadow:0 0 10px rgba(39,214,176,.65); }
+.btn-scan { color:#a7f04a; border-color:#6b9f38; box-shadow:0 0 16px rgba(167,240,74,.08); }
+.btn-scan:hover { background:#a7f04a; color:#14200c; }
+.news-ticker { background:linear-gradient(100deg,#172435,#1a2234); border-color:#344963; border-inline-start-color:#a7f04a; }
+.ticker-source { color:#a7f04a; }
+.wallet-top { border-inline-start-color:#a7f04a; }
+.range.active { background:rgba(167,240,74,.13); border-color:#a7f04a; color:#c8ff83; }
+.stat { border-inline-start-color:#a7f04a; }
+.stat:nth-child(2) { border-inline-start-color:#9b7bff; }
+.stat:nth-child(3) { border-inline-start-color:#39b8ff; }
+.stat:nth-child(4) { border-inline-start-color:#ffb454; }
+.account-card { border-inline-start-color:#27d6b0; }
+.account-card:nth-child(2),.futures-market-section { border-inline-start-color:#9b7bff; }
+.account-icon { background:linear-gradient(145deg,#243c50,#243044); }
+.futures-market-section .market-group-head h3,.position-table-row.futures-position { color:#c2adff; }
+.futures-market-section .mkt { background:#211e35; border-color:#524274; }
+.market-group { background:#141c29; }
+.mkt { background:#192436; border-color:#2e435c; }
+.mkt:hover { border-color:#a7f04a; box-shadow:0 0 0 1px rgba(167,240,74,.18),0 8px 22px rgba(0,0,0,.2); }
+.risk { border-top-color:#a7f04a; }
+.meter-fill { background:linear-gradient(90deg,#27d6b0,#a7f04a); }
+.open-positions-section { background:linear-gradient(135deg,#172231,#151d2a); border-color:#344963; }
+.positions-meta #open-count { color:#c8ff83; }
+.position-table-row.spot-position { border-inline-start-color:#27d6b0; }
+.position-table-row.futures-position { border-inline-start-color:#9b7bff; }
+.decision-section { border-top-color:#39b8ff; }
+.decision-row.spot { border-inline-start-color:#27d6b0; }
+.decision-row.futures { border-inline-start-color:#9b7bff; }
+.latest-decision-card { background:linear-gradient(145deg,#1e2c40,#171f2d 72%); border-color:#3b5270; border-top-color:#a7f04a; }
+.latest-decision-card h3 { color:#d8edff; border-bottom-color:#31445d; }
+.latest-decision-card .decision-row { background:linear-gradient(115deg,#1b2a3d,#1c2433); border-color:#344963; }
+.latest-decision-card .decision-row.spot { border-inline-start-color:#27d6b0; }
+.latest-decision-card .decision-row.futures { border-inline-start-color:#9b7bff; }
+.decision-pill.ok { color:#7bf0b4; background:rgba(69,227,154,.14); }
+.decision-pill.bad { color:#ff9aa6; background:rgba(255,107,125,.15); }
+.performance-sample { background:rgba(167,240,74,.14); color:#d0ff92; }
+.performance-sample.low { background:rgba(255,180,84,.14); color:#ffd08d; }
+.strategy-open:hover { color:#c8ff83; border-color:#a7f04a; background:rgba(167,240,74,.09); }
+.strategy-group { background:#1d2939; border-color:#344963; }
+.strategy-rules { background:#131b27; }
+:focus-visible { outline-color:#a7f04a; }
 </style>
 </head>
 <body>
