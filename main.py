@@ -200,6 +200,10 @@ def init_db():
             cursor.execute('ALTER TABLE trades ADD COLUMN pnl_usdt REAL')
         except sqlite3.OperationalError:
             pass  # العمود موجود مسبقاً
+        trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
+        for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT')]:
+            if column not in trade_columns:
+                cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -268,15 +272,17 @@ def load_saved_binance_credentials(platform='binance'):
     return None
 
 
-def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None):
+def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
+              strategy=None, timeframe=None):
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
         now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''
-            INSERT INTO trades (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (symbol, entry_price, exit_price, pnl_pct, status, now_str, pnl_usdt))
+            INSERT INTO trades
+                (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (symbol, entry_price, exit_price, pnl_pct, status, now_str, pnl_usdt, strategy, timeframe))
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1228,7 +1234,8 @@ def check_and_close_positions():
                 title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
             log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
-            log_trade(symbol, entry_price, sale['price'], realized_pnl, status, total_pnl)
+            log_trade(symbol, entry_price, sale['price'], realized_pnl, status, total_pnl,
+                       pos.get('strategy'), pos.get('timeframe'))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -1555,6 +1562,65 @@ def read_root():
         )
 
 
+PERFORMANCE_REPORT_CACHE = {"updated_at": 0.0, "data": None}
+def get_performance_report(days=30, limit=5000):
+    """Aggregate closed trades by venue, strategy, and symbol without hiding cost gaps."""
+    cached = PERFORMANCE_REPORT_CACHE
+    if cached["data"] is not None and time.time() - cached["updated_at"] < 60:
+        return cached["data"]
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=max(1, min(int(days), 3650)))).strftime("%Y-%m-%d %H:%M:%S")
+    records = []
+    try:
+        with sqlite3.connect(DB_NAME, timeout=10.0) as conn:
+            rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, pnl_pct, strategy, timeframe
+                FROM trades WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
+        for row in rows:
+            # Spot PnL is calculated from filled quantities and proceeds in the bot.
+            # Older rows without absolute PnL use the configured trade size as a marked estimate.
+            estimated = row[3] is None
+            pnl = float(row[3]) if row[3] is not None else float(row[4] or 0.0) / 100.0 * TRADE_AMOUNT_USDT
+            records.append({"market":"Spot", "symbol":row[0], "status":row[1], "time":row[2],
+                "pnl_usdt":pnl, "strategy":row[5] or "غير مسجل", "timeframe":row[6] or "غير مسجل",
+                "cost_basis":"تقديري بحجم الصفقة الحالي" if estimated else "صافي كما سجله البوت"})
+    except Exception as exc:
+        print("[PERFORMANCE] Spot report unavailable: {}".format(type(exc).__name__), flush=True)
+    if futures_engine:
+        try:
+            with futures_engine._connect() as conn:
+                rows = conn.execute("""SELECT symbol, status, timestamp, pnl_usdt, strategy, timeframe
+                    FROM futures_trades WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
+            for row in rows:
+                records.append({"market":"Futures Demo", "symbol":row[0], "status":row[1], "time":row[2],
+                    "pnl_usdt":float(row[3] or 0.0), "strategy":row[4] or "غير مسجل",
+                    "timeframe":row[5] or "غير مسجل", "cost_basis":"إجمالي قبل رسوم Futures والتمويل"})
+        except Exception as exc:
+            print("[PERFORMANCE] Futures report unavailable: {}".format(type(exc).__name__), flush=True)
+
+    grouped = {}
+    for item in records:
+        key=(item["market"], item["symbol"], item["strategy"], item["timeframe"], item["cost_basis"])
+        grouped.setdefault(key, []).append(item)
+    groups=[]
+    for key, items in grouped.items():
+        values=[item["pnl_usdt"] for item in items]
+        wins=[value for value in values if value > 0]
+        losses=[value for value in values if value < 0]
+        groups.append({
+            "market":key[0], "symbol":key[1], "strategy":key[2], "timeframe":key[3],
+            "cost_basis":key[4], "sample_size":len(values),
+            "wins":len(wins), "losses":len(losses),
+            "win_rate":len(wins)/len(values)*100 if values else 0.0,
+            "pnl_total":sum(values), "pnl_per_trade":sum(values)/len(values) if values else 0.0,
+            "avg_win":sum(wins)/len(wins) if wins else 0.0,
+            "avg_loss":sum(losses)/len(losses) if losses else 0.0,
+            "sample_label":"عينة أولية" if len(values)<30 else "30 صفقة أو أكثر",
+        })
+    groups.sort(key=lambda item:(item["market"], -item["sample_size"], item["symbol"], item["strategy"]))
+    result = {"days":max(1,min(int(days),3650)), "minimum_sample":30, "groups":groups}
+    PERFORMANCE_REPORT_CACHE.update({"updated_at":time.time(), "data":result})
+    return result
+
+
 @app.get("/api/state", dependencies=[Depends(require_dashboard_auth)])
 def api_state():
     spot_prices_fresh = True
@@ -1714,6 +1780,7 @@ def api_state():
         'markets': markets,
         'positions': positions,
         'trades': trades,
+        'performance_report': get_performance_report(days=30),
         'platforms': [
             {'id': 'binance', 'name': 'Binance Spot', 'connected': bool(BINANCE_API_KEY and BINANCE_SECRET_KEY), 'environment': BINANCE_ENV, 'trading_enabled': TRADING_ENABLED, 'balance': total_usdt, 'free_balance': free_usdt, 'open_positions': len(active_positions), 'realized_pnl': realized_total, 'closed_trades': total, 'status': 'connected' if BINANCE_API_KEY and BINANCE_SECRET_KEY else 'credentials missing'},
             {'id': 'binance_futures', 'name': 'Binance Futures', 'connected': future_state['connected'], 'environment': 'demo', 'trading_enabled': bool(future_state['connected'] and TRADING_ENABLED), 'balance': future_state['balance'], 'free_balance': future_state['free_balance'], 'open_positions': future_state['open_positions'], 'realized_pnl': future_state['realized_pnl'], 'closed_trades': future_state['closed'], 'symbols': future_state['symbols'], 'status': 'connected' if future_state['connected'] else 'credentials missing'},
