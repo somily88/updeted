@@ -57,3 +57,18 @@ def test_position_round_trip(tmp_path):
     assert got["side"] == "short"
     assert got["entry_price"] == 2000.0
     assert got["fees_usdt"] == pytest.approx(0.5)
+
+
+def test_dust_position_is_archived_not_loaded(tmp_path):
+    engine = _engine(tmp_path)
+    pos = {"symbol": "META/USDT:USDT", "entry_price": 641.85, "amount": 1.3877787807814457e-17,
+           "contracts": 1.3877787807814457e-17, "cost": 1.4e-14, "highest_price": 610.57,
+           "stop_price": 641.85, "target_price": 621.0, "trailing_distance": 5.0,
+           "strategy": "trend", "timeframe": "4h", "opened_at": "2026-10-26 16:00:52",
+           "side": "short", "fees_usdt": 0.1}
+    engine._save_position(pos)
+    assert "META/USDT:USDT" not in engine._load_positions()
+    assert "META/USDT:USDT" not in engine._load_positions()
+    with engine._connect() as conn:
+        reasons = [r[0] for r in conn.execute("SELECT exit_reason FROM futures_trades")]
+    assert reasons == ["zero_qty_cleanup"]
