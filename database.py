@@ -1,8 +1,15 @@
+"""Shared SQLite connection helpers.
+
+The database path is read from DB_PATH (default data/trading_bot.db) so every
+module (main, futures_engine, risk_controls) uses the same file. Schema creation
+and trade logging live in main.py / futures_engine.py; the duplicated, unused
+init_db/log_trade/get_recent_trades helpers that used a different path were removed.
+"""
 import contextlib
-import datetime
+import os
 import sqlite3
 
-DB_NAME = "trading_bot.db"
+DB_NAME = os.getenv("DB_PATH", "data/trading_bot.db")
 
 
 def open_db_connection(db_name=DB_NAME):
@@ -25,38 +32,3 @@ def get_db_connection(db_name=DB_NAME):
         raise
     finally:
         conn.close()
-
-
-def init_db():
-    """Create the trade history table when it does not exist."""
-    with get_db_connection() as conn:
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS trades (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT,
-                entry_price REAL,
-                exit_price REAL,
-                pnl_pct REAL,
-                status TEXT,
-                timestamp TEXT
-            )
-        ''')
-
-
-def log_trade(symbol, entry_price, exit_price, pnl_pct, status):
-    """Record a closed trade."""
-    with get_db_connection() as conn:
-        conn.execute('''
-            INSERT INTO trades (symbol, entry_price, exit_price, pnl_pct, status, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (symbol, entry_price, exit_price, pnl_pct, status,
-              datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-
-
-def get_recent_trades(limit=10):
-    """Return the most recent trades as sqlite3.Row values."""
-    with get_db_connection() as conn:
-        return conn.execute('''
-            SELECT symbol, entry_price, exit_price, pnl_pct, status, timestamp
-            FROM trades ORDER BY id DESC LIMIT ?
-        ''', (limit,)).fetchall()

@@ -13,7 +13,13 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 5. نسخ باقي ملفات المشروع (main.py وأي ملفات ملحقة)
-COPY . .
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/data && chown -R appuser:appuser /app
+
+COPY --chown=appuser:appuser . .
+
+# تشغيل التطبيق بمستخدم عادي بدل root
+USER appuser
 
 # 6. فتح المنفذ 8000 لواجهة الويب FastAPI / Tailwind
 EXPOSE 8000

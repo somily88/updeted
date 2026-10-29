@@ -7,6 +7,7 @@ import html
 import sqlite3
 import datetime
 import threading
+import logging
 from collections import deque
 import urllib.request
 import urllib.error
@@ -30,69 +31,17 @@ from futures_engine import BinanceFuturesDemo
 from exchange_client import make_binance_exchange
 from risk_controls import (daily_loss_status, portfolio_risk_status,
                            MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
+import database
 from database import get_db_connection, open_db_connection
 
-# =====================================================================
-# 0. الإعدادات (من متغيرات البيئة)
-# =====================================================================
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip().strip('"').strip("'")
-BINANCE_SECRET_KEY = os.getenv("BINANCE_SECRET_KEY", "").strip().strip('"').strip("'")
-BINANCE_FUTURES_API_KEY = os.getenv("BINANCE_FUTURES_API_KEY", "").strip().strip('"').strip("'")
-BINANCE_FUTURES_SECRET_KEY = os.getenv("BINANCE_FUTURES_SECRET_KEY", "").strip().strip('"').strip("'")
-BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet | live
+from config import *  # noqa: F401,F403  (configuration moved to config.py)
 
-# حجم كل صفقة بالدولار (USDT)
-TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "1000"))
-MAX_SPOT_CONCURRENT_TRADES = int(os.getenv("MAX_SPOT_CONCURRENT_TRADES", "6"))
-MAX_FUTURES_CONCURRENT_TRADES = int(os.getenv("MAX_FUTURES_CONCURRENT_TRADES", "6"))
-CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "").strip()
+# Guards runtime settings/credentials that are mutated from API threads and the scheduler.
+settings_lock = threading.RLock()
 
-# تنفيذ الأوامر الفعلية:
-#  - demo/testnet: مفعّل افتراضياً (TRADING_ENABLED=false لجعله محاكاة فقط)
-#  - live: لا يُنفَّذ أي أمر إلا إذا وضعت CONFIRM_LIVE_TRADING=yes صراحةً
-if BINANCE_ENV == "live":
-    TRADING_ENABLED = os.getenv("CONFIRM_LIVE_TRADING", "").strip().lower() == "yes"
-else:
-    TRADING_ENABLED = os.getenv("TRADING_ENABLED", "true").strip().lower() == "true"
-
-# --- معاملات الاستراتيجية (مطابقة لـ backtest.py) ---
-TIMEFRAME = os.getenv("TIMEFRAME", "1h").strip()          # 1h افتراضياً (مثل backtest.py)، جرّب 15m لإشارات أكثر
-CANDLES_LIMIT = 500
-RSI_MAX_ENTRY = float(os.getenv("RSI_MAX_ENTRY", "70"))
-EMA_PERIOD = int(os.getenv("EMA_PERIOD", "50"))
-REQUIRE_MACD = os.getenv("REQUIRE_MACD", "true").strip().lower() == "true"
-MACD_HIST_TOLERANCE_PCT = float(os.getenv("MACD_HIST_TOLERANCE_PCT", "0.10"))
-if not 0.0 <= MACD_HIST_TOLERANCE_PCT <= 0.50:
-    raise ValueError("MACD_HIST_TOLERANCE_PCT must be between 0 and 0.50")
-TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))  # هدف الربح الإجمالي لكل صفقة، قبل الرسوم
-INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
-TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
-
-SYMBOLS = ["BTC/USDT","ETH/USDT","BNB/USDT","SOL/USDT","XRP/USDT","ADA/USDT","DOGE/USDT","LINK/USDT","AVAX/USDT","DOT/USDT","LTC/USDT","BCH/USDT","TRX/USDT","NEAR/USDT","SPCXB/USDT"]
-SUPPORTED_SYMBOLS = set(SYMBOLS)
-UNSUPPORTED_SYMBOLS = {}
-
-# صفقة اختبار واحدة: تُفتح فوراً عند التشغيل وتُغلق تلقائياً بعد دقيقتين (للتأكد من عمل الأوامر)
-FORCE_TEST_TRADE = os.getenv("FORCE_TEST_TRADE", "false").strip().lower() == "true"
-TEST_TRADE_SECONDS = 120
-test_trade_done = False
-FORCE_FUTURES_TEST_TRADE = os.getenv("FORCE_FUTURES_TEST_TRADE", "false").strip().lower() == "true"
-FORCE_FUTURES_TEST_ID = os.getenv("FORCE_FUTURES_TEST_ID", "").strip()
-FORCE_FUTURES_TEST_SIDE = os.getenv("FORCE_FUTURES_TEST_SIDE", "long").strip().lower()
-
-# --- فلتر الأخبار: يوقف الشراء الجديد فقط عند أخبار سلبية قوية (لا يغيّر الاستراتيجية ولا يغلق صفقات مفتوحة) ---
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()   # فارغ = يكتشف البوت نموذجاً متاحاً لحسابك تلقائياً
-NEWS_FILTER = os.getenv("NEWS_FILTER", "true").strip().lower() == "true"
-NEWS_PAUSE_HOURS = float(os.getenv("NEWS_PAUSE_HOURS", "3"))     # مدة إيقاف الشراء بعد آخر خبر سلبي قوي
-NEWS_WINDOW_HOURS = float(os.getenv("NEWS_WINDOW_HOURS", "6"))   # نافذة العناوين المعتبرة
-NEWS_BLOCK_SEVERITY = int(os.getenv("NEWS_BLOCK_SEVERITY", "4")) # الخطورة (1-5) التي تُوقف الشراء
-NEWS_FEEDS = [
-    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
-    ("Cointelegraph", "https://cointelegraph.com/rss"),
-]
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(),
+                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("sobhi_trader")
 
 print("🔐 [CONFIG] Binance credentials loaded:", bool(BINANCE_API_KEY and BINANCE_SECRET_KEY))
 print("🌐 [ENV] Binance environment:", BINANCE_ENV)
@@ -115,13 +64,13 @@ def send_telegram_message(message: str):
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         urllib.request.urlopen(req, timeout=5)
     except Exception as e:
-        print("Telegram Error: {}".format(e))
+        logger.error("Telegram Error: %s", e)
 
 
 # =====================================================================
 # 1. قاعدة البيانات
 # =====================================================================
-DB_NAME = os.getenv("DB_PATH", "data/trading_bot.db")
+DB_NAME = database.DB_NAME
 _db_dir = os.path.dirname(DB_NAME)
 if _db_dir:
     os.makedirs(_db_dir, exist_ok=True)
@@ -129,96 +78,94 @@ if _db_dir:
 
 def init_db():
     try:
-        conn = open_db_connection(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS trades (
+        with get_db_connection(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    entry_price REAL NOT NULL,
+                    exit_price REAL NOT NULL,
+                    pnl_pct REAL NOT NULL,
+                    status TEXT NOT NULL,
+                    timestamp TEXT NOT NULL
+                )
+            ''')
+            # الصفقات المفتوحة تُحفظ هنا كي لا تضيع عند إعادة تشغيل الحاوية
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS open_positions (
+                    symbol TEXT PRIMARY KEY,
+                    entry_price REAL NOT NULL,
+                    amount REAL NOT NULL,
+                    cost REAL NOT NULL,
+                    highest_price REAL NOT NULL,
+                    opened_at TEXT NOT NULL,
+                    simulated INTEGER NOT NULL DEFAULT 0
+                )
+            ''')
+            for column, definition in [
+                ('strategy', "TEXT NOT NULL DEFAULT 'trend'"),
+                ('timeframe', "TEXT NOT NULL DEFAULT '1h'"),
+                ('stop_price', 'REAL'),
+                ('target_price', 'REAL'),
+                ('trailing_distance', 'REAL'),
+                ('entries', 'INTEGER NOT NULL DEFAULT 1'),
+                ('last_add_candle', 'TEXT'),
+                ('add_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+                ('risk_distance', 'REAL'),
+                ('partial_taken', 'INTEGER NOT NULL DEFAULT 0'),
+                ('partial_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+                ('partial_pnl_usdt', 'REAL NOT NULL DEFAULT 0'),
+                ('initial_cost', 'REAL'),
+                ('exit_attempted', 'INTEGER NOT NULL DEFAULT 0'),
+                ('fee_quality', "TEXT NOT NULL DEFAULT 'unverified'"),
+                ('protective_order_id', 'TEXT'),
+                ('protective_client_id', 'TEXT'),
+                ('protective_stop_price', 'REAL'),
+                ('reconciliation_required', 'INTEGER NOT NULL DEFAULT 0'),
+                ('fees_usdt', 'REAL NOT NULL DEFAULT 0'),
+            ]:
+                existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
+                if column not in existing:
+                    cursor.execute('ALTER TABLE open_positions ADD COLUMN {} {}'.format(column, definition))
+            # لقطات قيمة المحفظة (للرسم البياني في لوحة التحكم)
+            cursor.execute('CREATE TABLE IF NOT EXISTS equity (ts INTEGER PRIMARY KEY, value REAL NOT NULL)')
+            cursor.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            cursor.executemany('INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)', [
+                ('trade_amount_usdt', str(TRADE_AMOUNT_USDT)),
+                ('spot_max_concurrent_trades', str(MAX_SPOT_CONCURRENT_TRADES)),
+                ('futures_max_concurrent_trades', str(MAX_FUTURES_CONCURRENT_TRADES))
+            ])
+            cursor.execute('CREATE TABLE IF NOT EXISTS platform_credentials (platform TEXT PRIMARY KEY, api_key_enc TEXT NOT NULL, secret_enc TEXT NOT NULL, updated_at TEXT NOT NULL)')
+            cursor.execute('''CREATE TABLE IF NOT EXISTS decision_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                market TEXT NOT NULL,
                 symbol TEXT NOT NULL,
-                entry_price REAL NOT NULL,
-                exit_price REAL NOT NULL,
-                pnl_pct REAL NOT NULL,
-                status TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        ''')
-        # الصفقات المفتوحة تُحفظ هنا كي لا تضيع عند إعادة تشغيل الحاوية
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS open_positions (
-                symbol TEXT PRIMARY KEY,
-                entry_price REAL NOT NULL,
-                amount REAL NOT NULL,
-                cost REAL NOT NULL,
-                highest_price REAL NOT NULL,
-                opened_at TEXT NOT NULL,
-                simulated INTEGER NOT NULL DEFAULT 0
-            )
-        ''')
-        for column, definition in [
-            ('strategy', "TEXT NOT NULL DEFAULT 'trend'"),
-            ('timeframe', "TEXT NOT NULL DEFAULT '1h'"),
-            ('stop_price', 'REAL'),
-            ('target_price', 'REAL'),
-            ('trailing_distance', 'REAL'),
-            ('entries', 'INTEGER NOT NULL DEFAULT 1'),
-            ('last_add_candle', 'TEXT'),
-            ('add_attempted', 'INTEGER NOT NULL DEFAULT 0'),
-            ('risk_distance', 'REAL'),
-            ('partial_taken', 'INTEGER NOT NULL DEFAULT 0'),
-            ('partial_attempted', 'INTEGER NOT NULL DEFAULT 0'),
-            ('partial_pnl_usdt', 'REAL NOT NULL DEFAULT 0'),
-            ('initial_cost', 'REAL'),
-            ('exit_attempted', 'INTEGER NOT NULL DEFAULT 0'),
-            ('fee_quality', "TEXT NOT NULL DEFAULT 'unverified'"),
-            ('protective_order_id', 'TEXT'),
-            ('protective_client_id', 'TEXT'),
-            ('protective_stop_price', 'REAL'),
-            ('reconciliation_required', 'INTEGER NOT NULL DEFAULT 0'),
-            ('fees_usdt', 'REAL NOT NULL DEFAULT 0'),
-        ]:
-            existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
-            if column not in existing:
-                cursor.execute('ALTER TABLE open_positions ADD COLUMN {} {}'.format(column, definition))
-        # لقطات قيمة المحفظة (للرسم البياني في لوحة التحكم)
-        cursor.execute('CREATE TABLE IF NOT EXISTS equity (ts INTEGER PRIMARY KEY, value REAL NOT NULL)')
-        cursor.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-        cursor.executemany('INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)', [
-            ('trade_amount_usdt', str(TRADE_AMOUNT_USDT)),
-            ('spot_max_concurrent_trades', str(MAX_SPOT_CONCURRENT_TRADES)),
-            ('futures_max_concurrent_trades', str(MAX_FUTURES_CONCURRENT_TRADES))
-        ])
-        cursor.execute('CREATE TABLE IF NOT EXISTS platform_credentials (platform TEXT PRIMARY KEY, api_key_enc TEXT NOT NULL, secret_enc TEXT NOT NULL, updated_at TEXT NOT NULL)')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS decision_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            market TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            signal TEXT NOT NULL,
-            strategy TEXT NOT NULL,
-            timeframe TEXT NOT NULL,
-            price REAL,
-            price_updated_at TEXT,
-            outcome TEXT NOT NULL,
-            reason TEXT NOT NULL,
-            order_status TEXT,
-            order_id TEXT,
-            api_message TEXT
-        )''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_decision_log_created_at ON decision_log(id DESC)')
-        try:
-            cursor.execute('ALTER TABLE trades ADD COLUMN pnl_usdt REAL')
-        except sqlite3.OperationalError:
-            pass  # العمود موجود مسبقاً
-        trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
-        for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
-                                   ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
-                                   ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL')]:
-            if column not in trade_columns:
-                cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
-        conn.commit()
-        conn.close()
+                signal TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                timeframe TEXT NOT NULL,
+                price REAL,
+                price_updated_at TEXT,
+                outcome TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                order_status TEXT,
+                order_id TEXT,
+                api_message TEXT
+            )''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_decision_log_created_at ON decision_log(id DESC)')
+            try:
+                cursor.execute('ALTER TABLE trades ADD COLUMN pnl_usdt REAL')
+            except sqlite3.OperationalError:
+                pass  # العمود موجود مسبقاً
+            trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
+            for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
+                                       ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
+                                       ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL')]:
+                if column not in trade_columns:
+                    cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
     except Exception as e:
-        print("Database Init Error: {}".format(e))
+        logger.error("Database Init Error: %s", e)
 
 
 
@@ -262,7 +209,7 @@ def load_runtime_settings():
                              (setting_key, str(requested_value)))
                 conn.commit()
     except Exception as e:
-        print("Settings Load Error: {}".format(e))
+        logger.error("Settings Load Error: %s", e)
     finally:
         if conn is not None:
             conn.close()
@@ -272,9 +219,8 @@ def load_saved_binance_credentials(platform='binance'):
     if not CREDENTIAL_ENCRYPTION_KEY:
         return None
     try:
-        conn = open_db_connection(DB_NAME)
-        row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', (platform,)).fetchone()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            row = conn.execute('SELECT api_key_enc, secret_enc FROM platform_credentials WHERE platform = ?', (platform,)).fetchone()
         if row:
             cipher = _credential_cipher()
             return cipher.decrypt(row[0].encode()).decode(), cipher.decrypt(row[1].encode()).decode()
@@ -286,18 +232,16 @@ def load_saved_binance_credentials(platform='binance'):
 def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
               strategy=None, timeframe=None):
     try:
-        conn = open_db_connection(DB_NAME)
-        cursor = conn.cursor()
-        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute('''
-            INSERT INTO trades
-                (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (symbol, entry_price, exit_price, pnl_pct, status, now_str, pnl_usdt, strategy, timeframe))
-        conn.commit()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            cursor = conn.cursor()
+            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute('''
+                INSERT INTO trades
+                    (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (symbol, entry_price, exit_price, pnl_pct, status, now_str, pnl_usdt, strategy, timeframe))
     except Exception as e:
-        print("Log Trade Error: {}".format(e))
+        logger.error("Log Trade Error: %s", e)
 
 
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
@@ -371,109 +315,101 @@ def record_equity():
     try:
         _, total = get_binance_balance()
         if total and total > 0:
-            conn = open_db_connection(DB_NAME)
-            conn.execute('INSERT OR REPLACE INTO equity (ts, value) VALUES (?, ?)', (int(time.time()), float(total)))
-            conn.commit()
-            conn.close()
+            with get_db_connection(DB_NAME) as conn:
+                conn.execute('INSERT OR REPLACE INTO equity (ts, value) VALUES (?, ?)', (int(time.time()), float(total)))
     except Exception as e:
-        print("Record Equity Error: {}".format(e))
+        logger.error("Record Equity Error: %s", e)
 
 
 def get_equity_series(range_key="1d", max_points=300):
     try:
         seconds = EQUITY_RANGES.get(range_key, 86400)
-        conn = open_db_connection(DB_NAME)
-        cursor = conn.cursor()
-        if seconds:
-            cursor.execute('SELECT ts, value FROM equity WHERE ts >= ? ORDER BY ts', (int(time.time()) - seconds,))
-        else:
-            cursor.execute('SELECT ts, value FROM equity ORDER BY ts')
-        rows = cursor.fetchall()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            cursor = conn.cursor()
+            if seconds:
+                cursor.execute('SELECT ts, value FROM equity WHERE ts >= ? ORDER BY ts', (int(time.time()) - seconds,))
+            else:
+                cursor.execute('SELECT ts, value FROM equity ORDER BY ts')
+            rows = cursor.fetchall()
         if len(rows) > max_points:
             step = len(rows) / float(max_points)
             rows = [rows[int(i * step)] for i in range(max_points)] + [rows[-1]]
         return [{'t': r[0], 'v': r[1]} for r in rows]
     except Exception as e:
-        print("Equity Series Error: {}".format(e))
+        logger.error("Equity Series Error: %s", e)
         return []
 
 
 def save_position(symbol, pos):
     try:
-        conn = open_db_connection(DB_NAME)
-        conn.execute('''
-            INSERT OR REPLACE INTO open_positions
-            (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
-             strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
-             risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
-             exit_attempted, fee_quality, protective_order_id, protective_client_id,
-             protective_stop_price, reconciliation_required, fees_usdt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
-              pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
-              pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
-              pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance'),
-              max(1, int(pos.get('entries', 1))), pos.get('last_add_candle'),
-              1 if pos.get('add_attempted') else 0, pos.get('risk_distance'),
-              1 if pos.get('partial_taken') else 0, 1 if pos.get('partial_attempted') else 0,
-              float(pos.get('partial_pnl_usdt') or 0.0),
-              float(pos.get('initial_cost') or pos.get('cost') or 0.0),
-              1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified'),
-              pos.get('protective_order_id'), pos.get('protective_client_id'),
-              pos.get('protective_stop_price'), 1 if pos.get('reconciliation_required') else 0,
-              float(pos.get('fees_usdt') or 0.0)))
-        conn.commit()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            conn.execute('''
+                INSERT OR REPLACE INTO open_positions
+                (symbol, entry_price, amount, cost, highest_price, opened_at, simulated,
+                 strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
+                 risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
+                 exit_attempted, fee_quality, protective_order_id, protective_client_id,
+                 protective_stop_price, reconciliation_required, fees_usdt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
+                  pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
+                  pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
+                  pos.get('stop_price'), pos.get('target_price'), pos.get('trailing_distance'),
+                  max(1, int(pos.get('entries', 1))), pos.get('last_add_candle'),
+                  1 if pos.get('add_attempted') else 0, pos.get('risk_distance'),
+                  1 if pos.get('partial_taken') else 0, 1 if pos.get('partial_attempted') else 0,
+                  float(pos.get('partial_pnl_usdt') or 0.0),
+                  float(pos.get('initial_cost') or pos.get('cost') or 0.0),
+                  1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified'),
+                  pos.get('protective_order_id'), pos.get('protective_client_id'),
+                  pos.get('protective_stop_price'), 1 if pos.get('reconciliation_required') else 0,
+                  float(pos.get('fees_usdt') or 0.0)))
         return True
     except Exception as e:
-        print("Save Position Error: {}".format(e))
+        logger.error("Save Position Error: %s", e)
         return False
 
 
 def delete_position(symbol):
     try:
-        conn = open_db_connection(DB_NAME)
-        conn.execute('DELETE FROM open_positions WHERE symbol = ?', (symbol,))
-        conn.commit()
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            conn.execute('DELETE FROM open_positions WHERE symbol = ?', (symbol,))
     except Exception as e:
-        print("Delete Position Error: {}".format(e))
+        logger.error("Delete Position Error: %s", e)
 
 
 def load_positions():
     result = {}
     try:
-        conn = open_db_connection(DB_NAME)
-        cursor = conn.cursor()
-        cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
-                          simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
-                          entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
-                          partial_pnl_usdt, initial_cost, exit_attempted, fee_quality, protective_order_id,
-                          protective_client_id, protective_stop_price, reconciliation_required, fees_usdt
-                          FROM open_positions''')
-        for r in cursor.fetchall():
-            result[r[0]] = {
-                'entry_price': r[1], 'amount': r[2], 'cost': r[3],
-                'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6]),
-                'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
-                'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
-                'entries': max(1, int(r[12] or 1)), 'last_add_candle': r[13],
-                'add_attempted': bool(r[14]), 'risk_distance': float(r[15] or 0.0),
-                'partial_taken': bool(r[16]), 'partial_attempted': bool(r[17]),
-                'partial_pnl_usdt': float(r[18] or 0.0), 'initial_cost': float(r[19] or r[3] or 0.0),
-                'exit_attempted': bool(r[20]), 'fee_quality': r[21] or 'unverified',
-                'protective_order_id': r[22], 'protective_client_id': r[23],
-                'protective_stop_price': float(r[24] or 0.0),
-                'reconciliation_required': bool(r[25]), 'fees_usdt': float(r[26] or 0.0),
-            }
-            if result[r[0]]['fees_usdt'] <= 0 and result[r[0]]['initial_cost'] > 0:
-                result[r[0]]['fees_usdt'] = result[r[0]]['initial_cost'] * 0.001
-                if result[r[0]].get('fee_quality') == 'unverified':
-                    result[r[0]]['fee_quality'] = 'estimated'
-        conn.close()
+        with get_db_connection(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''SELECT symbol, entry_price, amount, cost, highest_price, opened_at,
+                              simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
+                              entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
+                              partial_pnl_usdt, initial_cost, exit_attempted, fee_quality, protective_order_id,
+                              protective_client_id, protective_stop_price, reconciliation_required, fees_usdt
+                              FROM open_positions''')
+            for r in cursor.fetchall():
+                result[r[0]] = {
+                    'entry_price': r[1], 'amount': r[2], 'cost': r[3],
+                    'highest_price': r[4], 'time': r[5], 'simulated': bool(r[6]),
+                    'strategy': r[7] or 'trend', 'timeframe': r[8] or '1h',
+                    'stop_price': r[9], 'target_price': r[10], 'trailing_distance': r[11],
+                    'entries': max(1, int(r[12] or 1)), 'last_add_candle': r[13],
+                    'add_attempted': bool(r[14]), 'risk_distance': float(r[15] or 0.0),
+                    'partial_taken': bool(r[16]), 'partial_attempted': bool(r[17]),
+                    'partial_pnl_usdt': float(r[18] or 0.0), 'initial_cost': float(r[19] or r[3] or 0.0),
+                    'exit_attempted': bool(r[20]), 'fee_quality': r[21] or 'unverified',
+                    'protective_order_id': r[22], 'protective_client_id': r[23],
+                    'protective_stop_price': float(r[24] or 0.0),
+                    'reconciliation_required': bool(r[25]), 'fees_usdt': float(r[26] or 0.0),
+                }
+                if result[r[0]]['fees_usdt'] <= 0 and result[r[0]]['initial_cost'] > 0:
+                    result[r[0]]['fees_usdt'] = result[r[0]]['initial_cost'] * 0.001
+                    if result[r[0]].get('fee_quality') == 'unverified':
+                        result[r[0]]['fee_quality'] = 'estimated'
     except Exception as e:
-        print("Load Positions Error: {}".format(e))
+        logger.error("Load Positions Error: %s", e)
     return result
 
 
@@ -670,7 +606,7 @@ async def lifespan(app: FastAPI):
                 print("⚠️ [MARKETS] Pairs unavailable in Demo: {}".format(", ".join(sorted(UNSUPPORTED_SYMBOLS))))
             print("✅ [MARKETS] Active spot pairs: {}".format(", ".join(sorted(SUPPORTED_SYMBOLS))))
     except Exception as e:
-        print("Load Markets Error: {}".format(e))
+        logger.error("Load Markets Error: %s", e)
     try:
         if not _reconcile_spot_positions():
             log_event('ERR', 'توقفت إدخالات Spot الجديدة: توجد مراكز تحتاج مطابقة')
@@ -810,6 +746,7 @@ def get_spot_hedge_exposures():
         try:
             price, fresh = get_spot_mark_price(symbol, pos.get('entry_price'))
         except Exception:
+            logger.debug("Suppressed error in %s", "get_spot_hedge_exposures", exc_info=True)
             return None
         if not fresh or price <= 0:
             return None
@@ -912,6 +849,7 @@ def portfolio_risk_snapshot():
                               'risk_usdt': max(0.0, float(pos.get('contracts') or 0.0)
                                                * multiplier * distance)})
         except Exception:
+            logger.debug("Suppressed error in %s", "portfolio_risk_snapshot", exc_info=True)
             return {'open_risks': risks, 'equity': 0.0, 'available': False}
 
     try:
@@ -923,6 +861,7 @@ def portfolio_risk_snapshot():
         return {'open_risks': risks, 'equity': float(spot_equity or 0.0) + futures_equity,
                 'available': available}
     except Exception:
+        logger.debug("Suppressed error in %s", "portfolio_risk_snapshot", exc_info=True)
         return {'open_risks': risks, 'equity': 0.0, 'available': False}
 
 
@@ -968,6 +907,7 @@ def _fees_quote_equivalent(order, symbol, price):
                 raise ValueError('Commission currency is missing')
         return total, 'actual'
     except Exception:
+        logger.debug("Suppressed error in %s", "_fees_quote_equivalent", exc_info=True)
         rate = market.get('taker')
         rate = float(rate) if rate is not None else 0.001
         notional = float((order or {}).get('cost') or 0.0)
@@ -1096,6 +1036,7 @@ def _cancel_spot_protective_stop(symbol, pos):
     try:
         exchange.cancel_order(str(order_id), symbol)
     except Exception:
+        logger.debug("Suppressed error in %s", "_cancel_spot_protective_stop", exc_info=True)
         confirmed = retry_api_read(exchange.fetch_order, str(order_id), symbol)
         confirmed_status = str(confirmed.get('status') or '').lower()
         if confirmed_status not in ('canceled', 'cancelled', 'expired', 'rejected'):
@@ -1180,12 +1121,14 @@ def _ensure_spot_protective_stop(symbol, pos, stop_price=None):
         order = exchange.create_order(symbol, 'market', 'sell', amount, None,
             {'stopLossPrice': desired, 'clientOrderId': client_id})
     except Exception:
+        logger.debug("Suppressed error in %s", "_ensure_spot_protective_stop", exc_info=True)
         # The create response may have been lost. Search by the unique client ID;
         # never submit another stop until the first request has been reconciled.
         try:
             orders = retry_api_read(exchange.fetch_open_orders, symbol)
             order = next((item for item in orders if _spot_order_client_id(item) == client_id), None)
         except Exception:
+            logger.debug("Suppressed error in %s", "_ensure_spot_protective_stop", exc_info=True)
             order = None
         if not order:
             _mark_spot_reconciliation_required(symbol, pos,
@@ -1242,6 +1185,7 @@ def _poll_spot_protective_stop(symbol, pos):
         try:
             exchange.cancel_order(str(order_id), symbol)
         except Exception:
+            logger.debug("Suppressed error in %s", "_poll_spot_protective_stop", exc_info=True)
             pass
         order = retry_api_read(exchange.fetch_order, str(order_id), symbol)
         status_value = str(order.get('status') or '').lower()
@@ -1437,6 +1381,7 @@ def fetch_headlines():
                     if ts is not None and ts.tzinfo is None:
                         ts = ts.replace(tzinfo=datetime.timezone.utc)
                 except Exception:
+                    logger.debug("Suppressed error in %s", "fetch_headlines", exc_info=True)
                     ts = None
                 if ts is not None and ts < cutoff:
                     continue
@@ -1630,7 +1575,7 @@ def check_news():
             send_telegram_message("📰 <b>عاد الشراء الجديد للعمل</b>\nانتهت مدة الإيقاف ولا توجد أخبار سلبية قوية الآن.")
     except Exception as e:
         news_state['error'] = str(e)
-        print("📰 [NEWS] خطأ: {}".format(e))
+        logger.error("📰 [NEWS] خطأ: %s", e)
 
 
 # =====================================================================
@@ -2408,6 +2353,7 @@ def api_state():
                 'market_type': 'Futures Demo'} for t in rows)
             trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
         except Exception:
+            logger.debug("Suppressed error in %s", "api_state", exc_info=True)
             pass
 
     spot_open_trade_slots = sum(max(1, int(pos.get('entries', 1))) for pos in active_positions.values()) + sum(
@@ -2427,6 +2373,7 @@ def api_state():
             agreement_row and current_fingerprint and secrets.compare_digest(agreement_row[0], current_fingerprint)
         )
     except Exception:
+        logger.debug("Suppressed error in %s", "api_state", exc_info=True)
         future_state['tradfi_agreement_signed'] = False
     return {
         'as_of': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -2505,17 +2452,16 @@ def update_runtime_settings(payload: RuntimeSettings):
     if not scan_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
     try:
-        conn = open_db_connection(DB_NAME)
-        conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [
-            ('trade_amount_usdt', str(payload.trade_amount_usdt)),
-            ('spot_max_concurrent_trades', str(payload.spot_max_concurrent_trades)),
-            ('futures_max_concurrent_trades', str(payload.futures_max_concurrent_trades))
-        ])
-        conn.commit()
-        conn.close()
-        TRADE_AMOUNT_USDT = float(payload.trade_amount_usdt)
-        MAX_SPOT_CONCURRENT_TRADES = int(payload.spot_max_concurrent_trades)
-        MAX_FUTURES_CONCURRENT_TRADES = int(payload.futures_max_concurrent_trades)
+        with get_db_connection(DB_NAME) as conn:
+            conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [
+                ('trade_amount_usdt', str(payload.trade_amount_usdt)),
+                ('spot_max_concurrent_trades', str(payload.spot_max_concurrent_trades)),
+                ('futures_max_concurrent_trades', str(payload.futures_max_concurrent_trades))
+            ])
+        with settings_lock:
+            TRADE_AMOUNT_USDT = float(payload.trade_amount_usdt)
+            MAX_SPOT_CONCURRENT_TRADES = int(payload.spot_max_concurrent_trades)
+            MAX_FUTURES_CONCURRENT_TRADES = int(payload.futures_max_concurrent_trades)
         log_event("SETTINGS", "حد Spot {} · حد Futures {} · حجم الصفقة {} USDT".format(
             MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES, TRADE_AMOUNT_USDT))
         return {
@@ -2547,14 +2493,13 @@ def update_binance_credentials(payload: BinanceCredentials):
         except Exception:
             raise HTTPException(status_code=400, detail="Binance Demo could not verify these credentials")
         cipher = _credential_cipher()
-        conn = open_db_connection(DB_NAME)
-        conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
-                     ('binance', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
-        conn.commit()
-        conn.close()
-        exchange = candidate
-        BINANCE_API_KEY = payload.api_key.strip()
-        BINANCE_SECRET_KEY = payload.secret_key.strip()
+        with get_db_connection(DB_NAME) as conn:
+            conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
+                         ('binance', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
+        with settings_lock:
+            exchange = candidate
+            BINANCE_API_KEY = payload.api_key.strip()
+            BINANCE_SECRET_KEY = payload.secret_key.strip()
         log_event("PLATFORM", "تم تحديث اتصال Binance Demo")
         return {'ok': True, 'platform': 'binance', 'environment': BINANCE_ENV, 'message': 'Binance Demo credentials saved encrypted'}
     finally:
@@ -2581,13 +2526,13 @@ def update_binance_futures_credentials(payload: FuturesCredentials):
         except Exception:
             raise HTTPException(status_code=400, detail='تعذر التحقق من Binance Futures Demo أو أن عقود النفط/الذهب غير متاحة في حساب الديمو')
         cipher = _credential_cipher()
-        conn = open_db_connection(DB_NAME)
-        conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
-            ('binance_futures', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
-        conn.commit(); conn.close()
-        futures_engine = candidate
-        BINANCE_FUTURES_API_KEY = payload.api_key.strip()
-        BINANCE_FUTURES_SECRET_KEY = payload.secret_key.strip()
+        with get_db_connection(DB_NAME) as conn:
+            conn.execute('INSERT OR REPLACE INTO platform_credentials (platform, api_key_enc, secret_enc, updated_at) VALUES (?, ?, ?, ?)',
+                ('binance_futures', cipher.encrypt(payload.api_key.strip().encode()).decode(), cipher.encrypt(payload.secret_key.strip().encode()).decode(), datetime.datetime.now().isoformat(timespec='seconds')))
+        with settings_lock:
+            futures_engine = candidate
+            BINANCE_FUTURES_API_KEY = payload.api_key.strip()
+            BINANCE_FUTURES_SECRET_KEY = payload.secret_key.strip()
         log_event('PLATFORM', 'تم ربط Binance Futures Demo')
         return {'ok': True, 'platform': 'binance_futures', 'environment': 'demo', 'symbols': candidate.symbols,
             'message': 'Binance Futures Demo credentials saved encrypted'}
@@ -2631,6 +2576,7 @@ def sign_binance_tradfi_agreement(payload: TradFiAgreementConsent):
                 message = str(error_data.get("msg") or "Binance rejected the request")[:180]
                 code = error_data.get("code")
             except Exception:
+                logger.debug("Suppressed error in %s", "sign_binance_tradfi_agreement", exc_info=True)
                 message, code = "Binance rejected the request", None
             detail = {"message": "لم يقبل Binance طلب توقيع الاتفاقية في Demo", "reason": message}
             if code is not None:
@@ -2661,7 +2607,9 @@ def api_equity(range: str = "1d"):
 
 @app.get("/check", dependencies=[Depends(require_dashboard_auth)])
 def manual_check():
-    automated_market_scan()
+    # Run the scan in the background so the HTTP request is not blocked by
+    # exchange calls (including the time.sleep() retry in _complete_order).
+    threading.Thread(target=automated_market_scan, name="manual-scan", daemon=True).start()
     return RedirectResponse(url="/", status_code=303)
 
 
