@@ -1494,21 +1494,84 @@ def fetch_headlines():
                 items.append((ts or datetime.datetime.now(datetime.timezone.utc), name, title))
         except Exception as e:
             print("📰 [NEWS] فشل جلب {}: {}".format(name, e))
-    if ok_feeds == 0:
+    try:
+        fc_items = fetch_firecrawl_headlines()
+    except Exception:
+        fc_items = []
+    if ok_feeds == 0 and not fc_items:
         raise RuntimeError("تعذر جلب أي مصدر أخبار")
     items.sort(key=lambda x: x[0], reverse=True)
-    return items[:20]
+    rss_titles = {t.lower() for (_, _, t) in items}
+    fc_items = [i for i in fc_items if i[2].lower() not in rss_titles]
+    return items[:15] + fc_items[:5]
 
 
-GROQ_BASE = "https://api.groq.com/openai/v1"
-GROQ_NON_CHAT = ("whisper", "tts", "guard", "embed", "orpheus", "playai", "transcribe", "moderation", "safeguard")
-GROQ_PREFERRED = ("llama-3.3-70b", "gpt-oss-120b", "llama-4", "gpt-oss-20b", "qwen", "llama-3.1-70b", "llama-3.1-8b")
+# --- Firecrawl: عناوين إضافية عبر البحث، مع ذاكرة مؤقتة وحد للاستدعاءات لتوفير الرصيد ---
+FIRECRAWL_SEARCH_URL = "https://api.firecrawl.dev/v2/search"
+_fc_cache = {'at': 0.0, 'items': []}
+_fc_calls = []
+_fc_lock = threading.Lock()
+
+
+def _firecrawl_search(query):
+    body = {"query": query, "limit": 5, "tbs": "qdr:d", "sources": ["news", "web"]}
+    req = urllib.request.Request(
+        FIRECRAWL_SEARCH_URL, data=json.dumps(body).encode('utf-8'),
+        headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + FIRECRAWL_API_KEY,
+                 'User-Agent': 'crypto-bot/1.0'})
+    data = json.loads(urllib.request.urlopen(req, timeout=FIRECRAWL_TIMEOUT).read().decode('utf-8')).get('data') or {}
+    if isinstance(data, list):
+        results = data
+    else:
+        results = list(data.get('news') or []) + list(data.get('web') or [])
+    return [str(r.get('title') or '').strip() for r in results if isinstance(r, dict) and r.get('title')]
+
+
+def fetch_firecrawl_headlines():
+    """يرجع (وقت, مصدر, عنوان) من Firecrawl. لا يرمي أي خطأ: عند الفشل يرجع قائمة فارغة."""
+    if not FIRECRAWL_API_KEY:
+        return []
+    now = time.time()
+    with _fc_lock:
+        if _fc_cache['items'] and now - _fc_cache['at'] < FIRECRAWL_CACHE_MINUTES * 60:
+            return list(_fc_cache['items'])
+        _fc_calls[:] = [t for t in _fc_calls if now - t < 3600]
+        stamp = datetime.datetime.now(datetime.timezone.utc)
+        titles, seen = [], set()
+        for q in FIRECRAWL_QUERIES:
+            if len(_fc_calls) >= FIRECRAWL_MAX_CALLS_PER_HOUR:
+                print("📰 [NEWS] تم بلوغ الحد الأقصى لاستدعاءات Firecrawl في الساعة")
+                break
+            _fc_calls.append(now)
+            try:
+                for t in _firecrawl_search(q):
+                    if t.lower() not in seen:
+                        seen.add(t.lower())
+                        titles.append(t)
+            except Exception as e:
+                print("📰 [NEWS] فشل بحث Firecrawl ({}): {}".format(q, type(e).__name__))
+        items = [(stamp, "Firecrawl", t) for t in titles[:10]]
+        if items:
+            _fc_cache.update({'at': now, 'items': items})
+            print("📰 [NEWS] Firecrawl: {} عنواناً".format(len(items)))
+        return list(items)
+
+
+def _llm_base():
+    if LLM_BASE_URL:
+        return LLM_BASE_URL
+    return "https://api.x.ai/v1" if GROQ_API_KEY.startswith("xai-") else "https://api.groq.com/openai/v1"
+
+
+GROQ_BASE = _llm_base()
+GROQ_NON_CHAT = ("whisper", "tts", "guard", "embed", "orpheus", "playai", "transcribe", "moderation", "safeguard", "imagine", "image", "video", "reasoning-", "multi-agent", "grok-build")
+GROQ_PREFERRED = ("grok-4.20-0309-non-reasoning", "grok-4-fast-non-reasoning", "grok-3-mini", "llama-3.3-70b", "gpt-oss-120b", "llama-4", "gpt-oss-20b", "qwen", "llama-3.1-70b", "llama-3.1-8b")
 _groq_model = {'name': GROQ_MODEL}
 
 
 def _groq_call(path, body=None):
     req = urllib.request.Request(
-        GROQ_BASE + path,
+        _llm_base() + path,
         data=json.dumps(body).encode('utf-8') if body is not None else None,
         headers={'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_API_KEY,
                  'User-Agent': 'crypto-bot/1.0'})
