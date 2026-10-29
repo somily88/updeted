@@ -632,7 +632,7 @@ async def lifespan(app: FastAPI):
         logger.error("Load Markets Error: %s", e)
     try:
         if not _reconcile_spot_positions():
-            log_event('ERR', 'توقفت إدخالات Spot الجديدة: توجد مراكز تحتاج مطابقة')
+            log_event('ERR', 'مراكز Spot تحتاج مطابقة؛ أُوقف الدخول لهذه الأزواج فقط')
     except Exception as exc:
         log_event('ERR', 'تعذر بدء مطابقة Spot Demo ({})'.format(type(exc).__name__))
     global futures_engine
@@ -1242,58 +1242,91 @@ def _poll_spot_protective_stop(symbol, pos):
             'order_id': order.get('id')}
 
 
+def _spot_inventory(symbol):
+    base = symbol.split('/')[0]
+    balances = retry_api_read(exchange.fetch_balance)
+    total = (balances.get('total') or {}).get(base)
+    if total is None:
+        total = (float((balances.get('free') or {}).get(base) or 0.0)
+                 + float((balances.get('used') or {}).get(base) or 0.0))
+    return base, float(total or 0.0)
+
+
+def _spot_inventory_tolerance(symbol, tracked):
+    """Allowed shortfall: one lot step plus 0.2% for fees charged in the base asset."""
+    step = 0.0
+    try:
+        market = exchange.market(symbol) or {}
+        prec = (market.get('precision') or {}).get('amount')
+        if prec is not None:
+            prec = float(prec)
+            step = prec if prec < 1 else 10 ** (-prec)
+        step = max(step, float(((market.get('limits') or {}).get('amount') or {}).get('min') or 0.0))
+    except Exception:
+        step = 0.0
+    return max(step, abs(float(tracked)) * 0.002, 1e-12)
+
+
+def _reconcile_spot_position(symbol, pos):
+    """Reconcile one persisted Spot Demo position. Returns True when it is safe to manage."""
+    if pos.get('simulated'):
+        return True
+    try:
+        if not _spot_demo_endpoint_ready():
+            _mark_spot_reconciliation_required(symbol, pos,
+                'إعداد الاتصال لا يشير إلى Binance Demo؛ لم تُعدّل أوامر الحساب')
+            return False
+        if pos.get('protective_order_id'):
+            # A stop may have filled while the service was down, reducing inventory.
+            order = retry_api_read(exchange.fetch_order, str(pos['protective_order_id']), symbol)
+            status_value = str(order.get('status') or '').lower()
+            if float(order.get('filled') or 0.0) > 0:
+                return True  # handled by _poll_spot_protective_stop in the monitor
+            if status_value not in ('open', 'new', 'partially_filled'):
+                if status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
+                    _clear_spot_protection(pos)
+                else:
+                    _mark_spot_reconciliation_required(symbol, pos,
+                        'تعذر العثور على وقف الحماية المحفوظ في Binance')
+                    return False
+        base, inventory = _spot_inventory(symbol)
+        tracked = float(pos.get('amount') or 0.0)
+        tolerance = _spot_inventory_tolerance(symbol, tracked)
+        pending = bool(pos.get('partial_attempted') and not pos.get('partial_taken')) or bool(pos.get('exit_attempted'))
+        if inventory + tolerance < tracked:
+            reason = ('يوجد أمر بيع جزئي أو إغلاق سابق غير محسوم' if pending else
+                      'رصيد Binance من {} ({:.8g}) أقل من الكمية المحفوظة ({:.8g})'.format(base, inventory, tracked))
+            _mark_spot_reconciliation_required(symbol, pos, reason)
+            return False
+        if pending or pos.get('partial_attempted'):
+            # Binance still holds the full tracked inventory (within fee/lot tolerance),
+            # so the earlier sell attempt never executed: clear the stale pending flags.
+            if pos.get('partial_attempted') and not pos.get('partial_taken'):
+                pos['partial_attempted'] = False
+            pos['exit_attempted'] = False
+            log_event('INFO', 'Spot {}: رصيد Binance ({:.8g}) يغطي الكمية المحفوظة؛ أُلغي تعليق أمر البيع السابق'.format(
+                symbol, inventory))
+        if 0 < inventory < tracked:
+            # Shortfall is within fee/lot tolerance: track what Binance actually holds.
+            pos['cost'] = float(pos.get('cost') or 0.0) * inventory / tracked
+            pos['amount'] = inventory
+        pos['reconciliation_required'] = False
+        active_positions[symbol] = pos
+        save_position(symbol, pos)
+        _ensure_spot_protective_stop(symbol, pos, pos.get('protective_stop_price') or pos.get('stop_price'))
+        log_event('INFO', 'تمت مطابقة Spot Demo {} والوقف'.format(symbol))
+        return not pos.get('reconciliation_required')
+    except Exception as exc:
+        _mark_spot_reconciliation_required(symbol, pos,
+            'فشلت مطابقة الرصيد أو وقف الحماية ({})'.format(type(exc).__name__))
+        return False
+
+
 def _reconcile_spot_positions():
     """Verify persisted Spot Demo inventory and stop orders after a process restart."""
-    if not active_positions:
-        return True
     okay = True
     for symbol, pos in list(active_positions.items()):
-        if pos.get('simulated'):
-            continue
-        try:
-            if pos.get('partial_attempted') or pos.get('exit_attempted'):
-                _mark_spot_reconciliation_required(symbol, pos,
-                    'يوجد أمر بيع جزئي أو إغلاق سابق غير محسوم')
-                okay = False
-                continue
-            if not _spot_demo_endpoint_ready():
-                _mark_spot_reconciliation_required(symbol, pos,
-                    'إعداد الاتصال لا يشير إلى Binance Demo؛ لم تُعدّل أوامر الحساب')
-                okay = False
-                continue
-            if pos.get('protective_order_id'):
-                # A stop may have filled while the service was down, reducing inventory.
-                order = retry_api_read(exchange.fetch_order, str(pos['protective_order_id']), symbol)
-                status_value = str(order.get('status') or '').lower()
-                if float(order.get('filled') or 0.0) > 0:
-                    continue
-                if status_value not in ('open', 'new', 'partially_filled'):
-                    if status_value in ('canceled', 'cancelled', 'expired', 'rejected'):
-                        _clear_spot_protection(pos)
-                    else:
-                        _mark_spot_reconciliation_required(symbol, pos,
-                            'تعذر العثور على وقف الحماية المحفوظ في Binance')
-                        okay = False
-                        continue
-            base = symbol.split('/')[0]
-            balances = retry_api_read(exchange.fetch_balance)
-            inventory = float(balances.get('total', {}).get(base)
-                              or (float(balances.get('free', {}).get(base) or 0.0)
-                                  + float(balances.get('used', {}).get(base) or 0.0)))
-            tracked = float(pos.get('amount') or 0.0)
-            tolerance = max(float(exchange.amount_to_precision(symbol, max(tracked, 1e-12))) * 1e-6, 1e-12)
-            if inventory + tolerance < tracked:
-                _mark_spot_reconciliation_required(symbol, pos,
-                    'رصيد Binance من {} ({:.8g}) أقل من الكمية المحفوظة ({:.8g})'.format(base, inventory, tracked))
-                okay = False
-                continue
-            pos['reconciliation_required'] = False
-            active_positions[symbol] = pos
-            _ensure_spot_protective_stop(symbol, pos, pos.get('protective_stop_price') or pos.get('stop_price'))
-            log_event('INFO', 'تمت مطابقة Spot Demo {} والوقف بعد التشغيل'.format(symbol))
-        except Exception as exc:
-            _mark_spot_reconciliation_required(symbol, pos,
-                'فشلت مطابقة الرصيد أو وقف الحماية ({})'.format(type(exc).__name__))
+        if not _reconcile_spot_position(symbol, pos):
             okay = False
     return okay
 
@@ -1605,8 +1638,14 @@ def check_news():
 # =====================================================================
 # 5. إدارة الصفقات والفحص الدوري
 # =====================================================================
+# Symbols whose Spot position awaits reconciliation with Binance. Only these
+# symbols are frozen; an unexpected monitor error still blocks all entries.
+spot_frozen_symbols = set()
+
+
 def check_and_close_positions():
     monitor_ok = True
+    spot_frozen_symbols.clear()
     for symbol in list(active_positions.keys()):
         current_price, sale = None, None
         try:
@@ -1616,17 +1655,21 @@ def check_and_close_positions():
                 sale = _poll_spot_protective_stop(symbol, pos)
                 if sale is not None:
                     pos['reconciliation_required'] = False
+            if (pos.get('reconciliation_required') and not pos.get('protective_order_id')
+                    and (pos.get('partial_attempted') or pos.get('exit_attempted'))):
+                _reconcile_spot_position(symbol, pos)
+                pos = active_positions.get(symbol, pos)
             if pos.get('reconciliation_required'):
-                monitor_ok = False
+                spot_frozen_symbols.add(symbol)
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None,
                                 'تجميد متابعة المركز', 'المركز يحتاج مطابقة مع Binance قبل أي أمر جديد', order_status='غير مؤكد')
                 continue
             if pos.get('partial_attempted') and not pos.get('partial_taken'):
-                monitor_ok = False
+                spot_frozen_symbols.add(symbol)
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'أمر بيع جزئي غير مؤكد؛ يلزم مطابقته مع Binance قبل المتابعة', order_status='غير مؤكد')
                 continue  # ambiguous tranche order: freeze automated entries and exits until reconciled
             if pos.get('exit_attempted') and sale is None:
-                monitor_ok = False
+                spot_frozen_symbols.add(symbol)
                 record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, None, 'تجميد متابعة المركز', 'حالة أمر الإغلاق السابق غير مؤكدة؛ طابق سجل Binance قبل أي أمر آخر', order_status='غير مؤكد')
                 continue
             current_price = fetch_fresh_ticker(exchange, symbol)['last']
@@ -1838,6 +1881,11 @@ def automated_market_scan():
                 setup.update({'price': current_price, 'time': datetime.datetime.now().strftime("%H:%M:%S"),
                                'updated_at': time.time(), 'price_updated_at': price_updated_at})
                 market_snapshot[symbol] = setup
+                if setup.get('signal') and symbol in spot_frozen_symbols:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'مركز {} يحتاج مطابقة مع Binance؛ أُوقف الدخول لهذا الزوج فقط'.format(symbol),
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if setup.get('signal') and not position_monitor_ok:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
                                     'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ',
