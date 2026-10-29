@@ -1,1369 +1,399 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-theme="dark">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>صبحي تريدر · لوحة التداول</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>SobhiTrader · لوحة التحكم</title>
+<script>(function(){try{var t=localStorage.getItem('theme');if(!t)t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.dataset.theme=t;}catch(e){}})();</script>
 <style>
-:root {
-  --bg: #07101c;
-  --card: #0e1a2a;
-  --card-hi: #14253a;
-  --line: #203650;
-  --text: #edf5ff;
-  --muted: #91a5bd;
-  --lime: #4de0bd;
-  --up: #43d6a0;
-  --down: #ff7182;
-  --bar: #263a52;
-  --spot: #38d9bc;
-  --futures: #a78bfa;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html { background: var(--bg); }
-body {
-  font-family: 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  min-height: 100vh;
-  padding: 28px;
-}
-button { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
-
-.shell { max-width: 1320px; margin: 0 auto; }
-
-/* ---------- header ---------- */
-.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 36px; flex-wrap: wrap; }
-.brand { display: flex; align-items: center; gap: 28px; flex-wrap: wrap; }
-.logo { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; }
-.logo i { font-style: normal; color: var(--lime); }
-.nav-item { font-size: 15px; font-weight: 500; }
-.top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.pill {
-  display: inline-flex; align-items: center; gap: 7px;
-  height: 36px; padding: 0 14px; border-radius: 12px;
-  background: var(--card); border: 1px solid var(--line);
-  font-size: 13px; font-weight: 500; white-space: nowrap;
-}
-.pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
-.pill-on::before { background: var(--lime); box-shadow: 0 0 8px var(--lime); }
-.pill-off::before { background: #e8a33d; }
-.btn-scan {
-  height: 36px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--lime);
-  background: transparent; color: var(--lime); font-size: 13px; font-weight: 600;
-  text-decoration: none; display: inline-flex; align-items: center; transition: background .15s, color .15s;
-}
-.btn-scan:hover { background: var(--lime); color: #000; }
-
-
-/* ---------- moving news ticker ---------- */
-.news-ticker { display:flex; align-items:center; gap:16px; min-height:52px; margin:-18px 0 26px; padding:0 16px; overflow:hidden; background:var(--card); border:1px solid var(--line); border-inline-start:3px solid var(--lime); border-radius:14px; }
-.ticker-label { display:flex; align-items:center; gap:8px; flex:none; white-space:nowrap; }
-.ticker-label b { font-size:13px; font-weight:600; }
-.ticker-label small { font-size:11px; }
-.ticker-dot { width:8px; height:8px; border-radius:50%; background:var(--lime); box-shadow:0 0 8px var(--lime); }
-.ticker-dot.paused { background:#e8a33d; box-shadow:none; }
-.ticker-viewport { min-width:0; flex:1; overflow:hidden; direction:ltr; }
-.ticker-track { display:flex; width:max-content; align-items:center; white-space:nowrap; direction:ltr; }
-.ticker-track.is-moving { animation:news-scroll var(--ticker-duration, 48s) linear infinite; will-change:transform; }
-.news-ticker:hover .ticker-track, .news-ticker:focus-within .ticker-track { animation-play-state:paused; }
-.ticker-sequence { display:flex; align-items:center; flex:none; }
-.ticker-item { display:inline-flex; align-items:center; gap:9px; padding-inline:24px; color:#dedede; font-size:13px; }
-.ticker-item::before { content:""; width:5px; height:5px; border-radius:50%; background:var(--lime); flex:none; }
-.ticker-source { color:var(--lime); font-size:11px; }
-@keyframes news-scroll { from { transform:translateX(0); } to { transform:translateX(-50%); } }
-@media (prefers-reduced-motion:reduce) { .ticker-track.is-moving { animation:none; } }
-
-/* ---------- layout ---------- */
-.grid { display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:24px; align-items:start; }
-.up { color: var(--up); }
-.down { color: var(--down); }
-.flat { color: var(--muted); }
-small { color: var(--muted); font-size: 12px; font-weight: 400; }
-
-/* ---------- wallet ---------- */
-.wallet-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; margin-bottom: 22px; }
-.wallet-label { font-size: 20px; color: var(--muted); margin-bottom: 6px; }
-.wallet-value { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
-.wallet-value h1 { font-size: clamp(44px, 6vw, 68px); font-weight: 500; letter-spacing: -0.035em; line-height: 1; }
-.change { font-size: 18px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
-.change.up, .change.down { }
-.ranges { display: flex; gap: 8px; flex-wrap: wrap; }
-.range {
-  min-width: 44px; height: 34px; padding: 0 12px; border-radius: 10px; cursor: pointer;
-  background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 500;
-}
-.range:hover { color: var(--text); }
-.range.active { border-color: var(--lime); color: var(--text); }
-
-/* ---------- top wallet and Futures Demo contracts ---------- */
-.overview-top { display:grid; grid-template-columns:minmax(280px,.9fr) minmax(0,1.1fr); gap:14px; align-items:stretch; margin-bottom:22px; }
-.wallet-top { display:flex; align-items:center; min-width:0; padding:22px; background:var(--card); border:1px solid var(--line); border-radius:18px; }
-.wallet-top .wallet-row { width:100%; flex-direction:column; align-items:flex-start; justify-content:center; flex-wrap:nowrap; gap:22px; margin:0; }
-.wallet-top .wallet-value h1 { font-size:clamp(40px,5vw,58px); }
-.futures-market-section { margin-top:0; min-width:0; padding:18px; background:var(--card); border:1px solid var(--line); border-radius:18px; }
-.futures-market-section .market-group-head { margin-top:0; }
-.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); }
-.futures-market-section .mkt { padding:12px; background:var(--card-hi); }
-@media (max-width:900px) { .overview-top { grid-template-columns:1fr; } .wallet-top { padding:18px; } }
-
-/* ---------- chart ---------- */
-.chart-card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:0; position:relative; height:180px; overflow:hidden; margin-bottom:20px; }
-#chart { position: absolute; inset: 0; touch-action: pan-y; }
-#chart svg { display: block; width: 100%; height: 100%; }
-.chart-empty { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; text-align: center; padding: 24px; color: var(--muted); font-size: 15px; line-height: 1.5; }
-.tip {
-  position: absolute; top: 14px; pointer-events: none; display: none;
-  font-size: 22px; font-weight: 500; white-space: nowrap; transform: translateX(-50%);
-}
-.tip small { display: block; text-align: center; margin-top: 2px; direction: rtl; unicode-bidi: plaintext; }
-
-/* ---------- stat cards ---------- */
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 36px; }
-.stat { background: var(--card); border-radius: 16px; padding: 16px 18px; min-width: 0; }
-.stat > small { display: block; margin-bottom: 10px; }
-.stat b { display: block; font-size: 22px; font-weight: 500; letter-spacing: -0.02em; margin-bottom: 8px; }
-.stat .sub { font-size: 12px; color: var(--muted); }
-
-/* ---------- account cards ---------- */
-.accounts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0 0 22px; }
-.account-card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; min-width:0; }
-.account-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:18px; }
-.account-name { display:flex; align-items:center; gap:10px; font-size:16px; font-weight:600; }
-.account-icon { width:34px; height:34px; border-radius:11px; display:grid; place-items:center; background:var(--card-hi); color:var(--lime); font-size:13px; font-weight:700; direction:ltr; }
-.account-state { font-size:12px; color:var(--muted); }
-.account-state::before { content:''; display:inline-block; width:7px; height:7px; margin-inline-end:7px; border-radius:50%; background:#e8a33d; }
-.account-state.online::before { background:var(--lime); box-shadow:0 0 8px var(--lime); }
-.account-balance { font-size:28px; font-weight:600; letter-spacing:-.02em; margin-bottom:15px; direction:ltr; text-align:right; }
-.account-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; border-top:1px solid var(--line); padding-top:13px; }
-.account-metrics small { display:block; margin-bottom:4px; font-size:11px; }
-.account-metrics b { font-size:14px; font-weight:500; }
-.account-symbols { display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
-.account-symbols span { padding:5px 8px; border-radius:8px; border:1px solid var(--line); color:#c8c8c8; font-size:11px; direction:ltr; }
-.account-symbols-unavailable { flex-basis:100%; display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:2px; }
-.account-symbols-unavailable small { flex-basis:100%; color:var(--muted); font-size:10px; }
-.account-symbols-unavailable span { padding:4px 7px; border:1px dashed var(--line); border-radius:8px; color:var(--muted); font-size:10px; direction:ltr; }
-.market-group { grid-column:1/-1; min-width:0; }
-.market-group-head { display:flex; justify-content:space-between; align-items:center; margin:3px 0 10px; }
-.market-group-head h3 { font-size:15px; font-weight:600; }
-.market-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
-.market-group + .market-group { margin-top:10px; }
-.tx-head small { display:block; margin-top:3px; }
-@media (max-width:720px) {
-  .accounts { grid-template-columns:1fr; }
-  .account-metrics { gap:6px; }
-  .account-metrics b { font-size:13px; }
-  .market-cards { grid-template-columns:1fr; }
-}
-
-/* ---------- markets ---------- */
-.section-title { font-size: 22px; font-weight: 500; margin-bottom: 14px; letter-spacing: -0.01em; }
-.markets { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.mkt { background: var(--card); border-radius: 18px; padding: 18px; }
-.mkt-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.mkt-title { flex: 1; min-width: 0; }
-.mkt-title b { display: block; font-size: 15px; font-weight: 600; }
-.mkt .pill { height: 30px; font-size: 12px; padding: 0 11px; }
-.mkt-price { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; margin-bottom: 16px; }
-.mkt-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
-.mkt-grid small { display: block; margin-bottom: 4px; }
-.mkt-grid b { font-size: 15px; font-weight: 500; }
-
-
-/* ---------- news ---------- */
-.news-card { background: var(--card); border-radius: 18px; padding: 18px; }
-.news-head { margin-bottom: 14px; }
-.news-head .pill { height: 30px; font-size: 12px; padding: 0 11px; }
-.news-reason { font-size: 14px; line-height: 1.7; margin-bottom: 12px; }
-.news-list { list-style: none; border-top: 1px solid var(--line); padding-top: 12px; margin-bottom: 12px; display: grid; gap: 8px; }
-.news-list li { font-size: 13px; line-height: 1.5; color: #d0d0d0; }
-.freshness { color: var(--muted); font-size: 11px; margin-top: 7px; }
-.mkt.stale { border: 1px solid rgba(255,107,94,.55); }
-.history-section { margin-top: 22px; }
-.tx-history { margin-top: 0; background: var(--card); border:1px solid var(--line); border-radius: 16px; padding: 12px; overflow-x: auto; }
-.history-row { display: grid; grid-template-columns: 1fr .9fr .8fr 1fr; gap: 7px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 11px; align-items: center; min-width: 280px; }
-.history-row:first-child { border-top: 0; }
-.history-head { color: var(--muted); font-size: 11px; }
-
-/* ---------- coin ---------- */
-.coin {
-  width: 38px; height: 38px; border-radius: 50%; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: #fff; font-size: 18px; font-weight: 700;
-}
-.futures-market-section .coin {
-  width:40px; height:40px; border:1px solid rgba(255,255,255,.15);
-  box-shadow:inset 0 0 0 1px rgba(0,0,0,.08), 0 5px 12px rgba(0,0,0,.2);
-  font-size:15px; letter-spacing:-.04em;
-}
-
-/* ---------- right column ---------- */
-.risk { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:20px; margin-bottom:20px; }
-.risk-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
-.risk h2 { font-size: 30px; font-weight: 500; line-height: 1.08; letter-spacing: -0.025em; }
-.risk-note { text-align: end; font-size: 12px; color: var(--muted); line-height: 1.4; }
-.meter { margin-top: 20px; height: 34px; border-radius: 4px; position: relative; overflow: hidden;
-  background: repeating-linear-gradient(90deg, #2a2a2a 0 1.5px, transparent 1.5px 5px); }
-.meter-fill { position: absolute; inset-block: 0; inset-inline-start: 0; background: var(--lime); border-start-start-radius: 4px; border-end-start-radius: 4px; min-width: 0; width: 0%; transition: width .25s ease; }
-.meter-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 8px; }
-.risk-text { margin-top: 14px; font-size: 14px; color: var(--muted); }
-.risk-text b { color: var(--text); font-weight: 600; }
-
-.tx-head-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
-.tx-head-row h3 { font-size: 17px; font-weight: 500; }
-.tx-head-row span { font-size: 14px; color: var(--lime); }
-.txs { display:grid; grid-template-columns:1fr; gap:10px; }
-.tx { background: var(--card); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 22px; min-height: 172px; }
-.tx.position-card { border:1px solid rgba(77,224,189,.14); transition:border-color .25s ease, box-shadow .25s ease; }
-.tx.position-enter { animation:position-enter .45s ease both; }
-.tx.position-tick-up { animation:position-tick-up .85s ease; }
-.tx.position-tick-down { animation:position-tick-down .85s ease; }
-.tx.position-tick { animation:position-tick .65s ease; }
-.positions-meta { display:flex; align-items:center; gap:12px; }
-.positions-live { display:inline-flex; align-items:center; gap:6px; color:var(--muted)!important; font-size:10px!important; white-space:nowrap; }
-.positions-live i { width:7px; height:7px; border-radius:50%; background:var(--lime); box-shadow:0 0 8px var(--lime); animation:live-pulse 1.6s ease-in-out infinite; }
-@keyframes position-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-@keyframes position-tick-up { 0% { border-color:rgba(67,214,160,.85); box-shadow:0 0 0 0 rgba(67,214,160,.32); } 100% { border-color:rgba(77,224,189,.14); box-shadow:0 0 0 8px transparent; } }
-@keyframes position-tick-down { 0% { border-color:rgba(255,113,130,.9); box-shadow:0 0 0 0 rgba(255,113,130,.3); } 100% { border-color:rgba(77,224,189,.14); box-shadow:0 0 0 8px transparent; } }
-@keyframes position-tick { 0% { border-color:rgba(167,139,250,.9); } 100% { border-color:rgba(77,224,189,.14); } }
-@keyframes live-pulse { 50% { opacity:.35; box-shadow:0 0 2px var(--lime); } }
-@media (prefers-reduced-motion:reduce) { .tx.position-enter,.tx.position-tick-up,.tx.position-tick-down,.tx.position-tick,.positions-live i { animation:none!important; } }
-.tx-head { display: flex; align-items: center; gap: 10px; }
-.tx-head b { display: block; font-size: 13px; font-weight: 500; }
-.tx-head small { font-size: 11px; }
-.tx-body { display: flex; flex-direction: column; gap: 3px; flex: 1; }
-.tx-sym { font-size: 12px; font-weight: 600; }
-.tx-val { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
-.tx-sub { font-size: 11px; color: var(--muted); line-height: 1.35; }
-.tx-status { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
-.tx-status::before { content: ''; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; }
-.tx-status.win { color: var(--up); }
-.tx-status.loss { color: var(--down); }
-.tx-status.open { color: #e8a33d; }
-.tx.hl { background: var(--lime); color: #000; }
-.tx.hl small, .tx.hl .tx-sub, .tx.hl .tx-status { color: rgba(0,0,0,.65); }
-.tx.hl .tx-val { color: #000; }
-.empty { grid-column: 1 / -1; background: var(--card); border-radius: 18px; padding: 22px; color: var(--muted); font-size: 14px; line-height: 1.6; }
-
-/* ---------- responsive ---------- */
-@media (max-width: 1100px) {
-  .grid { grid-template-columns: 1fr; gap: 30px; }
-}
-@media (max-width: 720px) {
-  body { padding: 16px; }
-  .stats { grid-template-columns: repeat(2, 1fr); }
-  .chart-card { height: 170px; }
-  .txs { grid-template-columns: 1fr; }
-  .wallet-label { font-size: 17px; }
-}
-
-/* ---------- Operations control-room design ---------- */
-body {
-  background:
-    radial-gradient(ellipse at 10% 0%, rgba(32, 91, 124, .22), transparent 35%),
-    radial-gradient(ellipse at 100% 24%, rgba(105, 72, 168, .12), transparent 32%),
-    var(--bg);
-}
-.shell { max-width: 1500px; }
-.top { padding-bottom: 16px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
-.logo { letter-spacing: -.04em; }
-.logo i { color: var(--spot); }
-.grid { grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; }
-.pill, .stat, .account-card, .wallet-top, .futures-market-section,
-.chart-card, .mkt, .news-card, .risk, .tx, .tx-history {
-  box-shadow: 0 12px 28px rgba(0, 0, 0, .14);
-}
-.overview-top { gap: 12px; margin-bottom: 14px; }
-.wallet-top { border-inline-start: 3px solid var(--spot); }
-.futures-market-section { border-inline-start: 3px solid var(--futures); }
-.futures-market-section .market-group-head h3 { color: var(--futures); }
-.futures-market-section .mkt { border: 1px solid rgba(167, 139, 250, .18); }
-.stats { gap: 10px; margin-bottom: 18px; }
-.stat { border: 1px solid var(--line); border-top: 2px solid var(--spot); padding: 15px 16px; }
-.stat:nth-child(2) { border-top-color: var(--futures); }
-.stat:nth-child(3) { border-top-color: #6aa7ff; }
-.stat:nth-child(4) { border-top-color: #f5bd62; }
-.accounts { gap: 10px; margin-bottom: 16px; }
-.account-card { border-inline-start: 3px solid var(--spot); }
-.account-card:nth-child(2) { border-inline-start-color: var(--futures); }
-.account-card:nth-child(2) .account-icon { color: var(--futures); }
-.account-card:first-child .account-icon { color: var(--spot); }
-.market-group { padding: 16px; background: rgba(14, 26, 42, .72); border: 1px solid var(--line); border-radius: 18px; }
-.market-group-head h3 { color: var(--spot); }
-.market-cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-.mkt { border: 1px solid var(--line); transition: transform .16s ease, border-color .16s ease; }
-.mkt:hover { transform: translateY(-2px); border-color: rgba(77, 224, 189, .42); }
-.risk { border-top: 2px solid var(--futures); }
-.txs { gap: 8px; }
-.tx { min-height: 0; gap: 12px; border: 1px solid var(--line); }
-.tx.hl { border-color: var(--spot); }
-.history-section { margin-top: 16px; }
-.news-ticker { background: rgba(14, 26, 42, .9); }
-@media (max-width: 1100px) {
-  .grid { grid-template-columns: 1fr; }
-  aside { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
-  .risk, .history-section { margin: 0; }
-  aside > section:nth-child(2) { grid-row: span 2; }
-}
-@media (max-width: 720px) {
-  aside { display: flex; flex-direction: column; }
-  .grid { gap: 18px; }
-  .market-group { padding: 12px; }
-  .market-cards { grid-template-columns: 1fr; }
-}
-
-.tradfi-consent { margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(0,0,0,.14); display: grid; gap: 9px; }
-.tradfi-consent p, .tradfi-consent small { margin: 0; color: var(--muted); line-height: 1.55; font-size: 12px; }
-.tradfi-consent a { color: var(--spot); text-decoration: underline; }
-.tradfi-consent label { display: flex; gap: 8px; align-items: flex-start; color: var(--text); font-size: 12px; line-height: 1.5; }
-.tradfi-consent input { accent-color: var(--spot); margin-top: 3px; }
-.tradfi-sign-button { justify-self: start; border: 1px solid var(--spot); border-radius: 9px; padding: 9px 12px; background: var(--spot); color: #10120a; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
-.tradfi-sign-button:disabled { opacity: .45; cursor: not-allowed; }
-.tradfi-status { font-size: 12px; color: var(--muted); }
-
-/* ---------- balanced overview layout ---------- */
-.overview-top { grid-template-columns:minmax(0,1fr); }
-.wallet-top { min-height:190px; }
-.wallet-top .wallet-row { flex-direction:row; align-items:center; justify-content:space-between; gap:22px; }
-.wallet-top .wallet-value h1 { font-size:clamp(44px,5vw,64px); }
-.futures-market-section { margin:0 0 18px; }
-.futures-market-section .market-cards { grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
-.futures-market-section .mkt { min-height:230px; }
-@media (max-width:720px) {
-  .wallet-top { min-height:0; }
-  .wallet-top .wallet-row { flex-direction:column; align-items:flex-start; gap:18px; }
-  .wallet-top .ranges { width:100%; }
-  .wallet-top .range { flex:1; }
-}
-
-/* ---------- full-width open positions ---------- */
-.open-positions-section { margin:0 0 20px; padding:16px; background:rgba(14,26,42,.62); border:1px solid var(--line); border-radius:18px; }
-.open-positions-section .tx-head-row { margin-bottom:12px; }
-.open-positions-section .txs { grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:10px; }
-.open-positions-section .tx.position-card { min-height:160px; }
-.open-positions-section .tx.position-card.spot-position { border:1px solid rgba(56,217,188,.5); border-inline-start:3px solid var(--spot); }
-.open-positions-section .tx.position-card.futures-position { border:1px solid rgba(167,139,250,.58); border-inline-start:3px solid var(--futures); }
-@media (max-width:720px) {
-  .open-positions-section { padding:12px; }
-  .open-positions-section .txs { grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }
-}
-
-.open-positions-title { animation: open-title-glow 2.8s ease-in-out infinite; }
-@keyframes open-title-glow {
-  0%,100% { color:var(--spot); text-shadow:0 0 0 rgba(56,217,188,0); }
-  50% { color:var(--futures); text-shadow:0 0 12px rgba(167,139,250,.45); }
-}
-@media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--spot); text-shadow:none; } }
-
-.decision-section { margin-top:16px; padding:14px; background:var(--card); border:1px solid var(--line); border-top:2px solid var(--spot); border-radius:16px; min-width:0; }
-.section-title-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:18px 0 12px; }
-.section-title-row .section-title { margin:0; }
-.strategy-open,.strategy-close { border:1px solid var(--line); background:var(--card); color:var(--lime); border-radius:10px; cursor:pointer; }
-.strategy-open { padding:9px 14px; font-size:12px; white-space:nowrap; }
-.strategy-open:hover { border-color:var(--lime); background:rgba(56,217,188,.08); }
-.strategy-dialog { width:min(760px,calc(100vw - 28px)); max-height:min(82vh,760px); overflow:auto; margin:auto; padding:22px; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:18px; box-shadow:0 25px 90px rgba(0,0,0,.58); }
-.strategy-dialog::backdrop { background:rgba(2,8,16,.76); backdrop-filter:blur(3px); }
-.strategy-dialog-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:12px; }
-.strategy-dialog-head h2 { font-size:21px; }
-.strategy-close { width:36px; height:36px; font-size:24px; line-height:1; color:var(--text); }
-.strategy-intro { color:var(--muted); line-height:1.7; font-size:13px; margin-bottom:16px; }
-.strategy-group { border:1px solid var(--line); border-radius:13px; padding:12px; margin:9px 0; background:rgba(20,37,58,.55); }
-.strategy-group-head { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:8px; }
-.strategy-market-row { display:grid; grid-template-columns:minmax(90px,.7fr) minmax(0,1.3fr); gap:5px 12px; padding:8px 0; border-top:1px solid rgba(32,54,80,.7); font-size:12px; }
-.strategy-market-row small { grid-column:1/-1; line-height:1.55; }
-.strategy-rules { margin-top:16px; padding:14px; border-radius:13px; background:rgba(7,16,28,.65); }
-.strategy-rules h3 { margin-bottom:9px; font-size:14px; }
-.strategy-rules div { display:grid; grid-template-columns:130px 1fr; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:12px; line-height:1.6; }
-.strategy-rules div b { color:var(--lime); }
-.strategy-rules div span,.strategy-rules>small { color:var(--muted); }
-.strategy-rules>small { display:block; margin-top:9px; line-height:1.6; }
-@media (max-width:520px) { .strategy-dialog { padding:16px; } .strategy-rules div { grid-template-columns:1fr; gap:2px; } .strategy-market-row { grid-template-columns:1fr; } .section-title-row { align-items:flex-start; } }
-.decision-list { display:flex; flex-direction:column; gap:8px; max-height:560px; overflow:auto; }
-.decision-row { padding:10px; border:1px solid var(--line); border-radius:12px; background:rgba(14,26,42,.55); font-size:11px; line-height:1.55; }
-.decision-row.spot { border-inline-start:3px solid var(--spot); }
-.decision-row.futures { border-inline-start:3px solid var(--futures); }
-.decision-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
-.decision-symbol { font-weight:700; font-size:12px; }
-.decision-meta { color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 10px; margin-top:5px; }
-.decision-reason { margin-top:5px; color:var(--text); overflow-wrap:anywhere; }
-.decision-api { color:var(--down); margin-top:4px; overflow-wrap:anywhere; }
-.decision-order { color:var(--futures); }
-.decision-pill { border-radius:999px; padding:2px 7px; background:rgba(148,163,184,.12); color:var(--muted); white-space:nowrap; }
-.decision-pill.ok { color:var(--up); background:rgba(77,224,189,.1); }
-.decision-pill.bad { color:var(--down); background:rgba(255,91,91,.1); }
-@media (max-width:1100px) { .decision-section { margin:0; } }
-
-/* ---------- Refreshed light command center ---------- */
-:root { --bg:#f1f3f6; --card:#fff; --card-hi:#f7f8fa; --line:#e2e6ec; --text:#171b22; --muted:#707987; --lime:#5146e5; --spot:#087f70; --futures:#7652c8; --up:#16845f; --down:#d64f55; --bar:#dce1e8; }
-html,body { background:var(--bg); } body { padding:26px; background:linear-gradient(180deg,#f8f9fb 0,#f1f3f6 360px); }
-.shell { max-width:1480px; } .top { margin-bottom:18px; padding:0 0 15px; border-color:var(--line); }
-.logo { color:var(--text); } .logo i { color:var(--lime); } .nav-item { color:var(--muted); }
-.pill { background:#fff; color:var(--text); border-color:var(--line); } .btn-scan { border-color:var(--lime); color:var(--lime); } .btn-scan:hover { background:var(--lime); color:#fff; }
-.news-ticker { background:#fff; border-color:var(--line); border-inline-start-color:var(--lime); box-shadow:0 3px 14px rgba(24,35,52,.04); } .ticker-item { color:#353b45; }
-.grid { grid-template-columns:minmax(0,1fr) 300px; gap:18px; } .overview-top { margin-bottom:14px; }
-.wallet-top { background:#fff; border:1px solid var(--line); border-inline-start:4px solid var(--lime); box-shadow:0 5px 20px rgba(24,35,52,.045); }
-.wallet-label { color:var(--muted); } .wallet-value h1 { color:var(--text); } .range { background:#fff; border-color:var(--line); color:var(--muted); } .range.active { background:#f0efff; border-color:var(--lime); color:var(--lime); }
-.stats { margin-bottom:14px; gap:12px; } .stat,.account-card,.futures-market-section,.chart-card,.mkt,.news-card,.risk,.tx,.tx-history,.decision-section { background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.045); }
-.stat { border-top:0; border-inline-start:3px solid var(--lime); padding:17px; } .stat:nth-child(2) { border-inline-start-color:var(--futures); } .stat:nth-child(3) { border-inline-start-color:#3983d5; } .stat:nth-child(4) { border-inline-start-color:#d99a35; } .stat b { color:var(--text); }
-.performance-band { display:grid; grid-template-columns:minmax(0,1.65fr) minmax(280px,1fr); gap:14px; margin-bottom:16px; } .chart-card { height:250px; margin:0; }
-.latest-decision-card { min-width:0; padding:17px; background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 4px 16px rgba(24,35,52,.045); }
-.latest-decision-card h3 { margin-bottom:12px; font-size:15px; } .latest-decision-card .decision-row { min-height:150px; padding:14px; background:#f8f9fb; border-color:var(--line); font-size:12px; }
-.latest-decision-card .decision-meta { color:var(--muted); } .latest-decision-card .decision-reason { color:var(--text); line-height:1.75; }
-.accounts { margin:0 0 15px; } .account-card { border-inline-start:3px solid var(--spot); } .account-card:nth-child(2) { border-inline-start-color:var(--futures); }
-.account-icon { background:#f0f1f5; } .account-balance { color:var(--text); } .account-symbols span { color:#414957; } .tradfi-consent { background:#f7f8fa; } .tradfi-consent label { color:var(--text); } .tradfi-sign-button { color:#fff; }
-.open-positions-section { margin-bottom:16px; padding:16px; background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.045); }
-.open-positions-title { animation:none; color:var(--text); text-shadow:none; } .positions-meta #open-count { color:var(--text); font-weight:600; } .positions-live { color:var(--muted)!important; }
-.positions-table { overflow-x:auto; } .positions-table-head,.position-table-row { display:grid; grid-template-columns:1.1fr .9fr 1fr 1fr .9fr; align-items:center; gap:12px; min-width:650px; padding:12px 14px; }
-.positions-table-head { color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); } .position-table-row { background:#fff; border-bottom:1px solid var(--line); font-size:12px; transition:background .2s; }
-.position-table-row:last-child { border-bottom:0; } .position-table-row.spot-position { border-inline-start:3px solid var(--spot); } .position-table-row.futures-position { border-inline-start:3px solid var(--futures); }
-.position-table-row.position-enter { animation:position-enter .45s ease both; } .position-table-row.position-tick-up { animation:position-tick-up .85s ease; } .position-table-row.position-tick-down { animation:position-tick-down .85s ease; }
-.position-pair { display:flex; align-items:center; gap:8px; font-weight:600; } .position-pair .coin { width:28px; height:28px; font-size:14px; } .position-venue { display:block; color:var(--muted); font-size:10px; font-weight:400; margin-top:2px; }
-.position-numbers { direction:ltr; unicode-bidi:isolate; text-align:right; } .position-value { direction:ltr; unicode-bidi:isolate; text-align:right; font-weight:600; }
-.futures-market-section { border-inline-start:3px solid var(--futures); } .futures-market-section .market-group-head h3 { color:var(--futures); } .futures-market-section .mkt { background:#faf9ff; border-color:#e7e0f7; }
-.market-group { background:#fff; border-color:var(--line); box-shadow:0 4px 16px rgba(24,35,52,.04); } .market-group-head h3 { color:var(--text); } .mkt { background:#fff; border-color:var(--line); } .mkt:hover { border-color:var(--lime); }
-.risk { border-top:2px solid var(--lime); } .risk h2 { color:var(--text); } .meter { background:repeating-linear-gradient(90deg,#e1e5eb 0 1.5px,transparent 1.5px 5px); }
-.tx-head-row h3,.section-title { color:var(--text); } .tx-head-row span { color:var(--lime); } .tx.position-card { background:#fff; } .tx.hl { background:var(--lime); } .empty { background:#f7f8fa; }
-.history-row { border-color:var(--line); } .decision-section { border-top-color:var(--lime); } .decision-row { background:#f8f9fb; border-color:var(--line); } .decision-meta { color:var(--muted); } .decision-reason { color:var(--text); } .decision-pill { background:#eef0f4; }
-.strategy-dialog { color:var(--text); background:#fff; border-color:var(--line); box-shadow:0 25px 90px rgba(24,35,52,.2); } .strategy-dialog::backdrop { background:rgba(19,25,38,.45); }
-.strategy-group { background:#f8f9fb; } .strategy-market-row { border-color:var(--line); } .strategy-rules { background:#f2f4f8; } .strategy-rules div { border-color:var(--line); } .strategy-rules div b { color:var(--lime); } .news-list li { color:#343a44; }
-@media (max-width:1100px) { .grid { grid-template-columns:1fr; } } @media (max-width:820px) { .performance-band { grid-template-columns:1fr; } }
-@media (prefers-reduced-motion:reduce) { .position-table-row.position-enter,.position-table-row.position-tick-up,.position-table-row.position-tick-down { animation:none!important; } }
-
-
-.performance-report { margin:16px 0; padding:16px; background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 4px 16px rgba(24,35,52,.045); }
-.performance-report-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:12px; }
-.performance-report-head h3 { font-size:16px; margin-bottom:4px; color:var(--text); }
-.performance-report-head b { color:var(--lime); white-space:nowrap; font-size:12px; }
-.performance-table-wrap { overflow-x:auto; }
-.performance-table { width:100%; min-width:840px; border-collapse:collapse; font-size:12px; text-align:right; }
-.performance-table th { padding:10px 9px; color:var(--muted); font-weight:500; border-bottom:1px solid var(--line); white-space:nowrap; }
-.performance-table td { padding:11px 9px; border-bottom:1px solid var(--line); vertical-align:top; }
-.performance-table tr:last-child td { border-bottom:0; }
-.performance-table .pair-name { direction:ltr; unicode-bidi:isolate; font-weight:600; white-space:nowrap; }
-.performance-table .sub-label { display:block; color:var(--muted); font-size:10px; margin-top:3px; }
-.performance-sample { display:inline-block; padding:3px 7px; border-radius:999px; background:#f0efff; color:#5749ba; white-space:nowrap; }
-.performance-sample.low { background:#fff5df; color:#936318; }
-.performance-report .empty { background:#f7f8fa; }
-@media(max-width:720px) { .performance-report { padding:12px; } .performance-report-head { flex-direction:column; } }
-
-
-/* ---------- Low-glare dark palette ---------- */
-:root { --bg:#15171b; --card:#1c2026; --card-hi:#232831; --line:#303640; --text:#e5e5e1; --muted:#a2a7af; --lime:#b7cf70; --spot:#60b7a5; --futures:#b19ae1; --up:#69c99b; --down:#e27e7e; --bar:#353b44; }
-html,body { background:var(--bg); color:var(--text); }
-body { background:radial-gradient(ellipse at 15% 0%,rgba(72,83,54,.12),transparent 38%),#15171b; }
-.top { border-color:var(--line); }
-.logo,.nav-item,.section-title,.tx-head-row h3,.market-group-head h3,.risk h2 { color:var(--text); }
-.logo i { color:var(--lime); }
-.pill { color:var(--text); background:#20242a; border-color:#373d47; }
-.pill-on::before { background:var(--spot); box-shadow:0 0 7px rgba(96,183,165,.42); }
-.btn-scan { color:var(--lime); border-color:#7f914a; }
-.btn-scan:hover { color:#14170e; background:var(--lime); }
-.strategy-open { color:var(--text); background:#22262d; border-color:#414852; }
-.strategy-open:hover { color:var(--lime); border-color:var(--lime); background:#292d34; }
-.news-ticker { background:#1b1f25; border-color:var(--line); border-inline-start-color:var(--lime); box-shadow:0 4px 16px rgba(0,0,0,.14); }
-.ticker-item { color:#d1d2ce; } .ticker-source { color:var(--lime); }
-.wallet-top,.stat,.account-card,.futures-market-section,.chart-card,.latest-decision-card,.open-positions-section,.performance-report,.market-group,.mkt,.risk,.tx,.tx-history,.decision-section,.news-card {
-  background:#1c2026; border-color:#303640; box-shadow:0 4px 18px rgba(0,0,0,.16);
-}
-.wallet-top { border-inline-start-color:var(--lime); }
-.wallet-label,.wallet-value h1 { color:var(--text); }
-.range { background:#22262d; border-color:#383e48; color:var(--muted); }
-.range.active { background:#303526; border-color:#8da34d; color:#d5e69a; }
-.stat { border-inline-start:3px solid var(--lime); }
-.stat:nth-child(2) { border-inline-start-color:var(--futures); }
-.stat:nth-child(3) { border-inline-start-color:#75a9d9; }
-.stat:nth-child(4) { border-inline-start-color:#d1a75b; }
-.stat b,.account-balance,.account-name { color:var(--text); }
-.account-card { border-inline-start:3px solid var(--spot); }
-.account-card:nth-child(2) { border-inline-start-color:var(--futures); }
-.account-icon { color:var(--text); background:#292e36; }
-.account-symbols span { color:#d1d3d6; border-color:#3b424c; }
-.account-symbols-unavailable span { color:var(--muted); border-color:#444b55; }
-.tradfi-consent { background:#20242a; border-color:#363d47; }
-.tradfi-consent label { color:var(--text); }
-.tradfi-consent a { color:#8dd0bf; }
-.tradfi-sign-button { color:#171a12; background:var(--lime); border-color:#90a653; }
-.futures-market-section { border-inline-start:3px solid var(--futures); }
-.futures-market-section .market-group-head h3 { color:var(--futures); }
-.futures-market-section .mkt { background:#22242c; border-color:#403951; }
-.market-group { background:#1a1e24; border-color:#303640; }
-.market-group-head h3 { color:var(--text); }
-.mkt { background:#20242a; border-color:#343b45; }
-.mkt:hover { border-color:#82964b; }
-.mkt-title b,.mkt-price { color:var(--text); }
-.coin { color:#fff; }
-.risk { border-top:2px solid #8fa452; }
-.meter { background:repeating-linear-gradient(90deg,#3a4048 0 1.5px,transparent 1.5px 5px); }
-.meter-fill { background:#a8c65e; }
-.open-positions-section { background:#1b1f25; border-color:#343a43; }
-.open-positions-title { color:#e3e4dd; }
-.positions-meta #open-count { color:#d7e69e; }
-.position-table-row,.positions-table-head { background:#1c2026; border-color:#343a43; }
-.position-table-row { color:var(--text); }
-.position-table-head { background:#20242a; color:var(--muted); }
-.position-table-row.spot-position { border-inline-start-color:var(--spot); }
-.position-table-row.futures-position { border-inline-start-color:var(--futures); }
-.performance-report-head h3 { color:var(--text); }
-.performance-report-head b { color:var(--lime); }
-.performance-table th { color:var(--muted); border-color:#343a43; }
-.performance-table td { color:var(--text); border-color:#303640; }
-.performance-sample { background:#303326; color:#d0e08f; }
-.performance-sample.low { background:#3a3021; color:#e7c27b; }
-.decision-row { background:#20242a; border-color:#353c46; }
-.decision-reason { color:#e3e4e0; }
-.decision-meta,.sub-label { color:var(--muted); }
-.decision-pill { color:#bdc2ca; background:#30353d; }
-.decision-pill.ok { color:#85d2ad; background:#26382f; }
-.decision-pill.bad { color:#ef9a9a; background:#3c292b; }
-.decision-api { color:#ef9999; }
-.empty { color:var(--muted); background:#20242a; }
-.tx.position-card { background:#20242a; }
-.tx.hl { background:#343c2a; color:var(--text); }
-.tx.hl small,.tx.hl .tx-sub,.tx.hl .tx-status { color:#c4caaf; }
-.tx.hl .tx-val { color:#e6e8dd; }
-.history-row { border-color:#343a43; }
-.strategy-dialog { color:var(--text); background:#1d2127; border-color:#3a414a; box-shadow:0 25px 90px rgba(0,0,0,.62); }
-.strategy-dialog::backdrop { background:rgba(0,0,0,.68); }
-.strategy-intro,.strategy-rules div span,.strategy-rules>small { color:var(--muted); }
-.strategy-group { background:#242830; border-color:#383f49; }
-.strategy-market-row { border-color:#3a414a; color:var(--text); }
-.strategy-rules { background:#181c21; }
-.strategy-rules div { border-color:#343b44; }
-.strategy-rules div b { color:#d0e18e; }
-.strategy-close { background:#252a31; color:var(--text); border-color:#424a55; }
-.news-list li { color:#d1d3d6; }
-:focus-visible { outline-color:#c5dc7d; }
-@media (prefers-reduced-motion:reduce) { .open-positions-title { animation:none; color:var(--text); } }
-
-
-/* ---------- Emphasize the latest bot decision ---------- */
-.latest-decision-card {
-  background:linear-gradient(145deg,#242a31 0%,#1c2026 72%);
-  border:1px solid #424a54;
-  border-top:3px solid #b7cf70;
-  box-shadow:0 8px 22px rgba(0,0,0,.24),inset 0 1px 0 rgba(255,255,255,.025);
-}
-.latest-decision-card h3 {
-  color:#e8eadf;
-  padding-bottom:10px;
-  border-bottom:1px solid #353c45;
-  letter-spacing:.01em;
-}
-.latest-decision-card .decision-row {
-  background:#20252c;
-  border:1px solid #3b444e;
-  border-radius:13px;
-  padding:15px;
-  line-height:1.7;
-}
-.latest-decision-card .decision-row.spot { border-inline-start:4px solid #60b7a5; }
-.latest-decision-card .decision-row.futures { border-inline-start:4px solid #b19ae1; }
-.latest-decision-card .decision-symbol { color:#f0f1ec; font-size:15px; letter-spacing:.02em; }
-.latest-decision-card .decision-pill { padding:4px 10px; border:1px solid #46505b; background:#303640; color:#d0d5dc; }
-.latest-decision-card .decision-pill.ok { color:#91d9b3; background:#263a31; border-color:#3b6550; }
-.latest-decision-card .decision-pill.bad { color:#f1a0a0; background:#402e31; border-color:#694348; }
-.latest-decision-card .decision-meta { color:#b0b7c0; gap:6px 12px; }
-.latest-decision-card .decision-reason {
-  margin-top:9px;
-  padding:10px 12px;
-  color:#e5e7e2;
-  background:#292f36;
-  border-radius:9px;
-  border-inline-start:2px solid #9eb55d;
-  overflow-wrap:anywhere;
-}
-.latest-decision-card .decision-order { color:#c4b2ed; }
-.latest-decision-card .decision-api { color:#f1a1a1; background:#39292c; padding:8px 10px; border-radius:8px; }
-.latest-decision-card .empty { background:#22272e; border:1px dashed #414953; color:#aeb5bd; }
-
-/* ---------- More vibrant dashboard accents ---------- */
-:root {
-  --bg:#10151f; --card:#171f2d; --card-hi:#202c3d; --line:#2b3b52;
-  --text:#eef4ff; --muted:#a4b3c9; --lime:#a7f04a; --spot:#27d6b0;
-  --futures:#9b7bff; --up:#45e39a; --down:#ff6b7d; --bar:#31435a;
-}
-body { background:radial-gradient(ellipse at 12% -8%,rgba(39,214,176,.13),transparent 34%),radial-gradient(ellipse at 92% 4%,rgba(155,123,255,.14),transparent 30%),#10151f; }
-.wallet-top,.stat,.account-card,.futures-market-section,.chart-card,.latest-decision-card,.open-positions-section,.performance-report,.market-group,.mkt,.risk,.tx,.tx-history,.decision-section,.news-card {
-  background-color:#171f2d; border-color:#2b3b52; box-shadow:0 8px 24px rgba(0,0,0,.22);
-}
-.top { border-color:#2b3b52; }
-.logo i,.performance-report-head b,.tx-head-row span { color:#a7f04a; }
-.pill { background:#1b2738; border-color:#344963; }
-.pill-on::before { background:#27d6b0; box-shadow:0 0 10px rgba(39,214,176,.65); }
-.btn-scan { color:#a7f04a; border-color:#6b9f38; box-shadow:0 0 16px rgba(167,240,74,.08); }
-.btn-scan:hover { background:#a7f04a; color:#14200c; }
-.news-ticker { background:linear-gradient(100deg,#172435,#1a2234); border-color:#344963; border-inline-start-color:#a7f04a; }
-.ticker-source { color:#a7f04a; }
-.wallet-top { border-inline-start-color:#a7f04a; }
-.range.active { background:rgba(167,240,74,.13); border-color:#a7f04a; color:#c8ff83; }
-.stat { border-inline-start-color:#a7f04a; }
-.stat:nth-child(2) { border-inline-start-color:#9b7bff; }
-.stat:nth-child(3) { border-inline-start-color:#39b8ff; }
-.stat:nth-child(4) { border-inline-start-color:#ffb454; }
-.account-card { border-inline-start-color:#27d6b0; }
-.account-card:nth-child(2),.futures-market-section { border-inline-start-color:#9b7bff; }
-.account-icon { background:linear-gradient(145deg,#243c50,#243044); }
-.futures-market-section .market-group-head h3,.position-table-row.futures-position { color:#c2adff; }
-.futures-market-section .mkt { background:#211e35; border-color:#524274; }
-.market-group { background:#141c29; }
-.mkt { background:#192436; border-color:#2e435c; }
-.mkt:hover { border-color:#a7f04a; box-shadow:0 0 0 1px rgba(167,240,74,.18),0 8px 22px rgba(0,0,0,.2); }
-.risk { border-top-color:#a7f04a; }
-.meter-fill { background:linear-gradient(90deg,#27d6b0,#a7f04a); }
-.open-positions-section { background:linear-gradient(135deg,#172231,#151d2a); border-color:#344963; }
-.positions-meta #open-count { color:#c8ff83; }
-.position-table-row.spot-position { border-inline-start-color:#27d6b0; }
-.position-table-row.futures-position { border-inline-start-color:#9b7bff; }
-.decision-section { border-top-color:#39b8ff; }
-.decision-row.spot { border-inline-start-color:#27d6b0; }
-.decision-row.futures { border-inline-start-color:#9b7bff; }
-.latest-decision-card { background:linear-gradient(145deg,#1e2c40,#171f2d 72%); border-color:#3b5270; border-top-color:#a7f04a; }
-.latest-decision-card h3 { color:#d8edff; border-bottom-color:#31445d; }
-.latest-decision-card .decision-row { background:linear-gradient(115deg,#1b2a3d,#1c2433); border-color:#344963; }
-.latest-decision-card .decision-row.spot { border-inline-start-color:#27d6b0; }
-.latest-decision-card .decision-row.futures { border-inline-start-color:#9b7bff; }
-.decision-pill.ok { color:#7bf0b4; background:rgba(69,227,154,.14); }
-.decision-pill.bad { color:#ff9aa6; background:rgba(255,107,125,.15); }
-.performance-sample { background:rgba(167,240,74,.14); color:#d0ff92; }
-.performance-sample.low { background:rgba(255,180,84,.14); color:#ffd08d; }
-.strategy-open:hover { color:#c8ff83; border-color:#a7f04a; background:rgba(167,240,74,.09); }
-.strategy-group { background:#1d2939; border-color:#344963; }
-.strategy-rules { background:#131b27; }
-:focus-visible { outline-color:#a7f04a; }
+:root{--r:16px;--gap:16px;--font:system-ui,-apple-system,"Segoe UI",Tahoma,"Noto Sans Arabic","Geeza Pro",sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+[data-theme=dark]{--bg:#0b0f17;--bg2:#0f1521;--card:#131a27;--card2:#18212f;--line:#243044;--text:#e7ecf3;--muted:#8b97aa;--acc:#5b8cff;--acc2:#7c5cff;--up:#22c55e;--down:#f43f5e;--warn:#f59e0b;--shadow:0 10px 30px rgba(0,0,0,.35)}
+[data-theme=light]{--bg:#f3f5f9;--bg2:#e9edf4;--card:#ffffff;--card2:#f6f8fb;--line:#e1e6ee;--text:#121826;--muted:#5f6b7d;--acc:#3563e9;--acc2:#6d4aff;--up:#16a34a;--down:#e11d48;--warn:#d97706;--shadow:0 8px 24px rgba(18,24,38,.08)}
+*{box-sizing:border-box}html,body{margin:0}body{font-family:var(--font);background:radial-gradient(1200px 600px at 100% -10%,color-mix(in srgb,var(--acc) 14%,transparent),transparent),var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.5}
+a{color:var(--acc)}button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1400px;margin:0 auto;padding:16px clamp(12px,3vw,28px) 48px}
+header.top{position:sticky;top:0;z-index:20;backdrop-filter:blur(12px);background:color-mix(in srgb,var(--bg) 80%,transparent);border-bottom:1px solid var(--line)}
+.top-in{max-width:1400px;margin:0 auto;padding:10px clamp(12px,3vw,28px);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;font-size:17px}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--acc),var(--acc2));display:grid;place-items:center;color:#fff;font-weight:900}
+.brand small{display:block;font-weight:500;color:var(--muted);font-size:11px}
+.pills{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:var(--card2);font-size:12px;color:var(--muted);white-space:nowrap}
+.pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.pill.on{color:var(--up);border-color:color-mix(in srgb,var(--up) 40%,var(--line))}.pill.on::before{background:var(--up)}
+.pill.off{color:var(--down);border-color:color-mix(in srgb,var(--down) 40%,var(--line))}.pill.off::before{background:var(--down)}
+.pill.warn{color:var(--warn)}.pill.warn::before{background:var(--warn)}
+.actions{display:flex;gap:8px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:10px;padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--text);font-size:13px}
+.btn:hover{border-color:var(--acc)}.btn.primary{background:linear-gradient(135deg,var(--acc),var(--acc2));border:0;color:#fff;font-weight:700}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.sub{color:var(--muted);font-size:12px}
+.grid{display:grid;gap:var(--gap)}
+.kpis{grid-template-columns:repeat(6,minmax(0,1fr));margin-top:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:16px;min-width:0}
+.kpi .label{color:var(--muted);font-size:12px;display:flex;justify-content:space-between;gap:6px}.kpi .val{font-size:clamp(20px,2.2vw,26px);font-weight:800;margin:6px 0 2px;font-variant-numeric:tabular-nums;direction:ltr;text-align:right}
+.kpi.hero{background:linear-gradient(135deg,color-mix(in srgb,var(--acc) 22%,var(--card)),var(--card))}
+.up{color:var(--up)}.down{color:var(--down)}.flat{color:var(--muted)}
+.meter{height:8px;border-radius:99px;background:var(--bg2);overflow:hidden;margin-top:10px}.meter i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--up),var(--warn),var(--down));transition:width .6s}
+.row2{grid-template-columns:2fr 1fr;margin-top:var(--gap)}
+.row3{grid-template-columns:repeat(3,minmax(0,1fr));margin-top:var(--gap)}
+.full{margin-top:var(--gap)}
+.card h2{margin:0;font-size:15px;font-weight:800}.head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.seg{display:inline-flex;background:var(--bg2);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}.seg button{border:0;background:transparent;padding:5px 10px;border-radius:8px;cursor:pointer;color:var(--muted);font-size:12px}.seg button.active{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+#chart{width:100%;height:240px;position:relative}#chart svg{width:100%;height:100%;display:block}
+.chart-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
+.tip{position:absolute;pointer-events:none;background:var(--card2);border:1px solid var(--line);padding:4px 8px;border-radius:8px;font-size:12px;display:none;white-space:nowrap;direction:ltr}
+table{width:100%;border-collapse:collapse}th,td{padding:10px 8px;text-align:right;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600;font-size:12px;white-space:nowrap}td small{display:block;color:var(--muted);font-size:11px}
+.num{direction:ltr;text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:13px}
+.tbl{overflow-x:auto}
+.sym{display:flex;align-items:center;gap:8px;font-weight:700}.coin{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:#fff;font-size:12px;font-weight:800;flex:none}
+.tag{display:inline-block;padding:1px 8px;border-radius:6px;font-size:11px;background:var(--bg2);color:var(--muted);border:1px solid var(--line)}
+.tag.long{color:var(--up)}.tag.short{color:var(--down)}.tag.fut{color:var(--acc2)}
+.empty{padding:24px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px}
+.acct{display:grid;gap:10px}.acct-row{display:flex;justify-content:space-between;gap:8px}.acct-row b{direction:ltr}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}.chips span{font-size:11px;padding:2px 7px;border-radius:6px;background:var(--bg2);direction:ltr}.chips.bad span{color:var(--down);text-decoration:line-through}
+.mkts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.mkt{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px}.mkt.sig{border-color:color-mix(in srgb,var(--up) 50%,var(--line))}.mkt.stale{opacity:.6}
+.mkt-h{display:flex;align-items:center;gap:8px}.mkt-h .t{flex:1;min-width:0}.mkt-h small{display:block;color:var(--muted);font-size:11px}
+.mkt-p{font-size:18px;font-weight:800;direction:ltr;text-align:right;margin:8px 0}.mkt-g{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:11px;color:var(--muted)}.mkt-g b{display:block;color:var(--text);font-size:12px;direction:ltr;text-align:right}
+.bar{height:4px;background:var(--bg2);border-radius:9px;margin-top:8px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+.why{font-size:11px;color:var(--muted);margin-top:6px}
+.list{display:grid;gap:8px;max-height:460px;overflow:auto;padding-inline-end:4px}
+.dec{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card2);border-inline-start:3px solid var(--acc)}.dec.fut{border-inline-start-color:var(--acc2)}
+.dec-top{display:flex;justify-content:space-between;gap:6px;font-weight:700}.dec .meta{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--muted);font-size:11px;margin-top:4px}.dec .reason{font-size:12px;margin-top:6px}.dec .api{font-size:11px;color:var(--warn);margin-top:4px}
+.st{font-size:11px;padding:1px 8px;border-radius:6px;background:var(--bg2)}.st.ok{color:var(--up)}.st.bad{color:var(--down)}
+.news-item{padding:8px 0;border-bottom:1px solid var(--line)}.news-item small{color:var(--acc);font-weight:700;margin-inline-end:6px}
+.ev{font-family:var(--mono);font-size:12px;padding:4px 0;border-bottom:1px dashed var(--line);display:flex;gap:8px}.ev b{color:var(--acc)}
+form{display:grid;gap:10px}label.f{display:grid;gap:4px;font-size:12px;color:var(--muted)}input[type=number],input[type=password],input[type=text]{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%;direction:ltr;text-align:right}input:focus{outline:2px solid color-mix(in srgb,var(--acc) 50%,transparent);border-color:var(--acc)}
+.f3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.msg{font-size:12px;min-height:18px}.msg.ok{color:var(--up)}.msg.err{color:var(--down)}
+details.card>summary{cursor:pointer;font-weight:800;list-style:none;display:flex;justify-content:space-between}details.card>summary::after{content:"▾";color:var(--muted)}details[open].card>summary{margin-bottom:12px}
+.consent{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--bg2);display:grid;gap:8px;font-size:12px}.consent label{display:flex;gap:8px;align-items:flex-start}
+.params{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;font-size:12px}.params div{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:3px 0}.params b{direction:ltr}
+.toast{position:fixed;bottom:18px;inset-inline-start:50%;transform:translateX(50%);background:var(--card2);border:1px solid var(--line);padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:50}
+.tabs{display:none}
+.flash-up{animation:fu 1s}.flash-down{animation:fd 1s}@keyframes fu{from{background:color-mix(in srgb,var(--up) 25%,transparent)}}@keyframes fd{from{background:color-mix(in srgb,var(--down) 25%,transparent)}}
+@media (max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:980px){.row2,.row3{grid-template-columns:1fr}}
+@media (max-width:640px){.kpis{grid-template-columns:repeat(2,1fr)}.kpi.hero{grid-column:span 2}.f3{grid-template-columns:1fr}.params{grid-template-columns:1fr}
+ .top-in{gap:8px}.pills{order:3;flex-basis:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px}.actions .btn span{display:none}
+ table.resp thead{display:none}table.resp tr{display:block;border:1px solid var(--line);border-radius:12px;margin-bottom:8px;padding:6px 10px;background:var(--card2)}table.resp td{display:flex;justify-content:space-between;gap:10px;border:0;padding:5px 0;text-align:left}table.resp td::before{content:attr(data-l);color:var(--muted);font-size:12px;text-align:right}table.resp td small{text-align:left}
+ #chart{height:190px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="shell">
+<header class="top"><div class="top-in">
+  <div class="brand"><div class="logo">S</div><div>SobhiTrader<small id="last-update">جارٍ التحميل…</small></div></div>
+  <div class="pills" aria-live="polite">
+    <span class="pill" id="connection-pill">جارٍ الاتصال</span>
+    <span class="pill" id="mode-pill">—</span>
+    <span class="pill" id="risk-pill">حد الخسارة اليومي</span>
+    <span class="pill" id="news-pill">الأخبار</span>
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="scan-btn" type="button" title="تشغيل فحص فوري للسوق">⟳ <span>افحص السوق الآن</span></button>
+    <button class="btn" id="theme-btn" type="button" title="تبديل الوضع الفاتح/الداكن" aria-label="تبديل السمة">◐</button>
+  </div>
+</div></header>
 
-  <header class="top">
-    <div class="brand">
-      <div class="logo">صبحي <i>تريدر</i></div>
-      <span class="nav-item">لوحة التحكم</span>
-    </div>
-    <div class="top-actions">
-      <span class="pill" id="connection-pill">جارٍ الاتصال</span>
-      <span class="pill" id="mode-pill">—</span>
-      <span class="pill" id="risk-pill">حد الخسارة اليومي: —</span>
-      <span class="pill" id="last-update">آخر تحديث: —</span>
-      <button class="strategy-open" id="strategy-open" type="button">الاستراتيجية المتبعة</button>
-      <a class="btn-scan" href="/check">افحص السوق الآن</a>
-    </div>
-  </header>
-
-  <section class="news-ticker" aria-label="شريط الأخبار">
-    <div class="ticker-label"><span class="ticker-dot" id="news-ticker-dot"></span><b>الأخبار</b><small id="news-ticker-status">جارٍ تحميل الأخبار</small></div>
-    <div class="ticker-viewport"><div class="ticker-track" id="news-track" aria-live="polite"><span class="ticker-item">جارٍ تحميل العناوين من البوت…</span></div></div>
+<main class="wrap">
+  <section class="grid kpis" aria-label="نظرة عامة">
+    <div class="card kpi hero"><div class="label"><span>قيمة محفظة Spot</span><span id="wallet-status-tag" class="tag">—</span></div><div class="val" id="wallet-value">—</div><div class="sub" id="wallet-sub">—</div></div>
+    <div class="card kpi"><div class="label">الربح المحقق</div><div class="val" id="realized-pl">—</div><div class="sub" id="realized-sub">—</div></div>
+    <div class="card kpi"><div class="label">الربح غير المحقق</div><div class="val" id="unrealized-pl">—</div><div class="sub" id="unrealized-sub">—</div></div>
+    <div class="card kpi"><div class="label">الصفقات المفتوحة</div><div class="val" id="open-total">—</div><div class="sub" id="open-sub">—</div></div>
+    <div class="card kpi"><div class="label">نسبة الفوز</div><div class="val" id="win-rate">—</div><div class="sub" id="win-sub">—</div></div>
+    <div class="card kpi"><div class="label"><span>التعرّض</span><span id="exposure-note" class="sub"></span></div><div class="val" id="exposure-pct">—</div><div class="meter" id="exposure-meter" role="meter" aria-valuemin="0" aria-valuemax="100"><i id="meter-fill"></i></div><div class="sub" id="trades-sub" style="margin-top:6px">—</div></div>
   </section>
 
-  <div class="grid">
-    <!-- left column -->
-    <main>
-      <div class="overview-top">
-        <div class="wallet-top">
-        <div class="wallet-row">
-          <div>
-            <div class="wallet-label">قيمة المحفظة · نقد + مراكز</div>
-            <div class="sub wallet-market-status" id="wallet-market-status">بانتظار تحديث الأسعار</div>
-            <div class="wallet-value">
-              <h1 id="wallet-value">—</h1>
-              <span class="change flat" id="change" dir="ltr"></span>
-            </div>
-          </div>
-          <div class="ranges" id="ranges" role="group" aria-label="المدى الزمني للرسم">
-            <button class="range" data-r="1h">ساعة</button>
-            <button class="range" data-r="8h">8 ساعات</button>
-            <button class="range" data-r="1d">يوم</button>
-            <button class="range" data-r="1w">أسبوع</button>
-            <button class="range" data-r="1m">شهر</button>
-            <button class="range" data-r="all">الكل</button>
-          </div>
-        </div>
+  <section class="grid row2">
+    <div class="card"><div class="head"><div><h2>منحنى المحفظة</h2><span class="sub" id="change">—</span></div>
+      <div class="seg" id="ranges"><button data-r="1h">ساعة</button><button data-r="8h">8س</button><button data-r="1d">يوم</button><button data-r="1w">أسبوع</button><button data-r="1m">شهر</button><button data-r="all">الكل</button></div></div>
+      <div id="chart"><div class="chart-empty" id="chart-empty">لا توجد بيانات كافية بعد</div><div class="tip" id="tip"></div></div>
+    </div>
+    <div class="card"><div class="head"><h2>الحسابات</h2></div>
+      <div class="acct">
+        <div><div class="acct-row"><b style="direction:rtl">Binance Spot</b><span class="tag" id="spot-state">—</span></div>
+          <div class="acct-row sub"><span>الرصيد</span><b id="spot-balance">—</b></div><div class="acct-row sub"><span>المتاح</span><b id="spot-free">—</b></div>
+          <div class="acct-row sub"><span>الصفقات</span><b id="spot-open">—</b></div><div class="acct-row sub"><span>المحقق</span><b id="spot-pnl">—</b></div></div>
+        <hr style="border:0;border-top:1px solid var(--line);width:100%">
+        <div><div class="acct-row"><b style="direction:rtl">Binance Futures Demo</b><span class="tag" id="futures-state">—</span></div>
+          <div class="acct-row sub"><span>الرصيد</span><b id="futures-balance">—</b></div><div class="acct-row sub"><span>المتاح</span><b id="futures-free">—</b></div>
+          <div class="acct-row sub"><span>الصفقات</span><b id="futures-open">—</b></div><div class="acct-row sub"><span>المحقق</span><b id="futures-pnl">—</b></div>
+          <div class="chips" id="futures-symbols"></div><div class="chips bad" id="futures-unavail"></div></div>
+        <div class="consent">
+          <b>اتفاقية TradFi Perps (Demo)</b>
+          <span class="sub">بعض عقود Futures تتطلب توقيع اتفاقية Binance. راجع <a href="https://www.binance.com/en/terms" target="_blank" rel="noopener">شروط Binance</a> أولًا. لا يرسل هذا أي أمر تداول.</span>
+          <label><input id="tradfi-consent-check" type="checkbox"><span>قرأت الشروط وأوافق على إرسال طلب توقيع الاتفاقية لحساب Demo.</span></label>
+          <button id="tradfi-sign-button" class="btn" type="button" disabled>توقيع الاتفاقية عبر API</button>
+          <small id="tradfi-agreement-status" class="sub">يتحقق البوت من حالة الحساب…</small>
         </div>
       </div>
+    </div>
+  </section>
 
-      <div class="stats">
-        <div class="stat">
-          <small>الربح المحقق · Spot</small>
-          <b id="realized-pl">—</b>
-          <span class="sub" id="realized-sub">—</span>
+  <section class="card full"><div class="head"><h2>الصفقات المفتوحة</h2><span class="tag" id="open-count">0</span></div><div class="tbl" id="positions"></div></section>
+
+  <section class="card full"><div class="head"><h2>الأسواق والاستراتيجيات</h2>
+    <div class="seg" id="mkt-filter"><button data-f="all" class="active">الكل</button><button data-f="spot">Spot</button><button data-f="fut">Futures</button><button data-f="sig">إشارات</button></div></div>
+    <div class="chips" id="strategy-summary" style="margin:-4px 0 12px"></div>
+    <div class="mkts" id="markets"></div></section>
+
+  <section class="grid row2">
+    <div class="card"><div class="head"><h2>آخر الصفقات المغلقة</h2><span class="sub" id="trades-count"></span></div><div class="tbl" id="trade-history"></div></div>
+    <div class="card"><div class="head"><h2>سجل القرارات</h2><span class="sub" id="decision-count"></span></div><div class="list" id="decision-log"></div></div>
+  </section>
+
+  <section class="card full"><div class="head"><h2>تقرير الأداء حسب الاستراتيجية</h2><span class="sub" id="performance-period"></span></div><div id="performance-report-content"></div></section>
+
+  <section class="grid row3">
+    <div class="card"><div class="head"><h2>الأخبار وفلتر المخاطر</h2><span class="tag" id="news-state">—</span></div><div class="sub" id="news-reason"></div><div id="news-list" class="list" style="max-height:300px"></div></div>
+    <div class="card"><div class="head"><h2>معاملات الاستراتيجية</h2></div><div class="params" id="params"></div></div>
+    <div class="card"><div class="head"><h2>سجل الأحداث</h2></div><div class="list" id="events" style="max-height:300px"></div></div>
+  </section>
+
+  <section class="grid row2">
+    <div class="card"><div class="head"><h2>إعدادات التداول</h2><span class="sub">تُطبّق فورًا وتُحفظ</span></div>
+      <form id="settings-form">
+        <div class="f3">
+          <label class="f">حجم الصفقة (USDT)<input type="number" name="trade_amount_usdt" min="0.01" max="100000" step="0.01" required></label>
+          <label class="f">أقصى صفقات Spot<input type="number" name="spot_max_concurrent_trades" min="1" max="20" step="1" required></label>
+          <label class="f">أقصى صفقات Futures<input type="number" name="futures_max_concurrent_trades" min="1" max="20" step="1" required></label>
         </div>
-        <div class="stat">
-          <small>الربح غير المحقق</small>
-          <b id="unrealized-pl">—</b>
-          <span class="sub" id="unrealized-sub">—</span>
-        </div>
-        <div class="stat">
-          <small>نسبة النجاح</small>
-          <b id="win-rate">—</b>
-          <span class="sub" id="win-sub">—</span>
-        </div>
-        <div class="stat">
-          <small>الصفقات المغلقة</small>
-          <b id="trades-total">—</b>
-          <span class="sub" id="trades-sub">—</span>
-        </div>
-      </div>
-
-      <div class="performance-band"><div class="chart-card">
-        <div id="chart" dir="ltr"></div>
-        <div class="chart-empty" id="chart-empty">بانتظار بيانات المحفظة من البوت.</div>
-        <div class="tip" id="tip" dir="ltr"></div>
-      </div><section class="latest-decision-card" aria-label="آخر قرار من البوت"><h3>قرار البوت الأخير</h3><div id="latest-decision"><div class="empty">بانتظار أول قرار من البوت.</div></div></section></div>
-
-      <section class="accounts" id="accounts" aria-label="ملخص المنصات">
-        <article class="account-card">
-          <div class="account-top">
-            <div class="account-name"><span class="account-icon">S</span> Binance Spot</div>
-            <span class="account-state online" id="spot-state">متصل</span>
-          </div>
-          <div class="account-balance" id="spot-balance">—</div>
-          <div class="account-metrics">
-            <div><small>الرصيد المتاح</small><b id="spot-free">—</b></div>
-            <div><small>صفقات مفتوحة · حد Spot</small><b id="spot-open">— / 6</b></div>
-            <div><small>الربح المحقق</small><b id="spot-pnl">—</b></div>
-          </div>
-        </article>
-        <article class="account-card">
-          <div class="account-top">
-            <div class="account-name"><span class="account-icon">F</span> Binance Futures Demo</div>
-            <span class="account-state" id="futures-state">جارٍ التحقق</span>
-          </div>
-          <div class="account-balance" id="futures-balance">—</div>
-          <div class="account-metrics">
-            <div><small>الرصيد المتاح</small><b id="futures-free">—</b></div>
-            <div><small>مراكز مفتوحة · حد Futures</small><b id="futures-open">— / 6</b></div>
-            <div><small>الربح المحقق</small><b id="futures-pnl">—</b></div>
-          </div>
-          <div class="account-symbols" id="futures-symbols"></div>
-          <div class="tradfi-consent">
-            <b>اتفاقية TradFi Perps</b>
-            <p>هذا الطلب يوقّع الاتفاقية عبر API لحساب Futures Demo فقط؛ لا يفتح صفقة ولا يفعّل تداول TradFi تلقائيًا.</p>
-            <div><a href="https://www.binance.com/en-KZ/support/faq/detail/fe7dcdf24f1943d98b368f5f9f744398" target="_blank" rel="noopener noreferrer">معلومات TradFi Perps</a> · <a href="https://www.binance.com/en-KZ/terms" target="_blank" rel="noopener noreferrer">شروط الاستخدام</a> · <a href="https://www.binance.com/en-KZ/about-legal/exchange-rules" target="_blank" rel="noopener noreferrer">قواعد التداول</a> · <a href="https://www.binance.com/en-KZ/about-legal/clearing-rules" target="_blank" rel="noopener noreferrer">قواعد التسوية</a></div>
-            <label><input id="tradfi-consent-check" type="checkbox"><span>قرأت الشروط المعمول بها وأوافق على إرسال طلب توقيع الاتفاقية لحساب Demo.</span></label>
-            <button id="tradfi-sign-button" class="tradfi-sign-button" type="button" disabled>توقيع الاتفاقية عبر API</button>
-            <small id="tradfi-agreement-status" class="tradfi-status">يتحقق البوت من حالة الحساب…</small>
-          </div>
-        </article>
-      </section>
-
-      <section class="open-positions-section" aria-label="الصفقات المفتوحة">
-        <div class="tx-head-row">
-          <h3 class="open-positions-title">الصفقات المفتوحة</h3>
-          <div class="positions-meta"><span id="open-count">0 مفتوحة</span><span class="positions-live"><i aria-hidden="true"></i> تحديث تلقائي</span></div>
-        </div>
-        <div class="txs" id="tx-cards"><div class="empty">لا توجد صفقات مفتوحة حاليًا.</div></div>
-      </section>
-
-
-
-
-
-<section class="performance-report" aria-label="تقرير أداء الاستراتيجيات">
-        <div class="performance-report-head"><div><h3>أداء الاستراتيجيات والأزواج</h3><small>آخر 30 يومًا · عينة صغيرة تعني أن النتيجة أولية وليست أساسًا كافيًا لتغيير القواعد</small></div><b id="performance-period">آخر 30 يومًا</b></div>
-        <div id="performance-report-content"><div class="empty">جارٍ تحميل تقرير الأداء…</div></div>
-      </section>
-
-            <section class="futures-market-section" aria-label="عقود Futures Demo">
-        <div class="market-group-head"><h3>مراقبة عقود Futures Demo</h3><small>أسعار وإشارات الحساب التجريبي</small></div>
-        <div class="market-cards" id="futures-markets"><div class="empty">جارٍ تحميل العقود…</div></div>
-      </section>
-
-
-
-      <div class="section-title-row">
-        <h2 class="section-title">الأسواق والإشارات</h2>
-        </div>
-      <div class="markets" id="markets"><div class="empty">جارٍ تحميل أسعار العملات من البوت…</div></div>
-      <section class="decision-section" aria-label="سجل قرارات البوت">
-        <div class="tx-head-row"><h3>سجل قرارات البوت</h3><small id="decision-count">آخر القرارات</small></div>
-        <div class="decision-list" id="decision-log"><div class="empty">بانتظار قرارات السوق من البوت…</div></div>
-      </section>
-      <dialog class="strategy-dialog" id="strategy-dialog" aria-labelledby="strategy-dialog-title">
-        <div class="strategy-dialog-head">
-          <div><small>اختيار آلي حسب بيانات كل زوج</small><h2 id="strategy-dialog-title">الاستراتيجية المتبعة الآن</h2></div>
-          <button class="strategy-close" id="strategy-close" type="button" aria-label="إغلاق">×</button>
-        </div>
-        <p class="strategy-intro">يختار البوت بين الاستراتيجيات الفنية والهجينة بحسب بيانات كل سوق. الأخبار سياق مساعد فقط ولا تنشئ إشارة وحدها. التحوّط يعمل في Futures Demo مقابل تعرض Spot مطابق، وبحد أقصى يضبطه إعداد نسبة التحوط.</p>
-        <div id="strategy-current"><div class="empty">جارٍ تحميل الاستراتيجيات الحالية…</div></div>
-        <div class="strategy-rules">
-          <h3>قواعد الاختيار</h3>
-          <div><b>تتبّع الاتجاه</b><span>يومي أو 4 ساعات: يقارن سعر الإغلاق بمتوسطَي آخر 20 و50 شمعة، ويتحقق من اتجاههما والزخم.</span></div>
-          <div><b>الاختراق</b><span>ساعة أو 15 دقيقة: يبحث عن إغلاق خارج أعلى أو أدنى نطاق آخر 20 شمعة مع تداول نشط، ثم يتأكد من اتجاه 4 ساعات.</span></div>
-          <div><b>الارتداد</b><span>15 أو 5 دقائق: يبحث عن رجوع السعر من نطاق بولينجر العلوي أو السفلي عندما يكون السوق جانبيًا.</span></div>
-          <div><b>هجين الزخم الكلي</b><span>يشترط توافق الاتجاه اليومي و4 ساعات، ثم يبحث عن دخول مع اتجاه الساعة؛ الأخبار السلبية الشديدة قد تمنع الشراء.</span></div>
-          <div><b>خوارزمي مع سياق الأخبار</b><span>اختراق خوارزمي مؤكد على 4 ساعات؛ الأخبار تدعم التقييم أو تمنعه عند الشدة، لكنها لا تنشئ صفقة وحدها ولا تتضمن حكمًا بشريًا.</span></div>
-          <div><b>نطاق حجم التداول</b><span>يقدّر منطقة القيمة ونقطة التحكم من حجم شموع الساعة، ثم يبحث عن ارتداد 15 دقيقة داخل نطاق 4 ساعات.</span></div>
-          <div><b>اختراق تقلب مع تحوّط</b><span>يفتح بيعًا في Futures Demo فقط بعد كسر هابط واتساع التقلب. عقود العملات المشتركة مخصصة للتحوّط فقط، ولا تتجاوز النسبة حد الإعداد مقابل مركز Spot مطابق؛ يعيد البوت الموازنة ويغلق التحوّط عند زواله.</span></div>
-          <small><b>معاني المؤشرات:</b> EMA هو المتوسط المتحرك الأسي لسعر الإغلاق؛ EMA20 وEMA50 يحسبان متوسط آخر 20 أو 50 شمعة. RSI يقيس قوة الحركة، وMACD يوضح اتجاه الزخم، وATR يقيس تقلب السعر ويُستخدم لحساب الوقف والهدف. نطاقات بولينجر تقيس ابتعاد السعر عن متوسطه.</small>
-          <small>هذه قراءة لقواعد الكود الحالية وليست توقعًا أو ضمانًا للربح.</small>
-        </div>
-      </dialog>
-
-
-
-
-    </main>
-
-    <!-- right column -->
-    <aside>
-      <section class="risk">
-        <div class="risk-head">
-          <h2>تعرّض<br>Spot</h2>
-          <div class="risk-note">رصيد Spot المتاح<br><b id="free-usdt" style="color:var(--text);font-weight:600">—</b></div>
-        </div>
-        <div class="meter" id="exposure-meter" role="img" aria-label="تعرّض المحفظة">
-          <div class="meter-fill" id="meter-fill" style="width:0%"></div>
-        </div>
-        <div class="meter-legend"><span>منخفض</span><span>مرتفع</span></div>
-        <p class="risk-text"><b><bdi id="exposure-pct">0%</bdi></b> من المحفظة في صفقات مفتوحة. <span id="exposure-note">بانتظار بيانات البوت</span>.</p>
-      </section>
-
-
-<section class="history-section">
-        <div class="tx-head-row"><h3>سجل الصفقات</h3></div>
-        <div class="tx-history" id="trade-history"><div class="empty">جارٍ تحميل سجل الصفقات…</div></div>
-      </section>
-
-
-
-    </aside>
-  </div>
-</div>
+        <div style="display:flex;gap:10px;align-items:center"><button class="btn primary" type="submit">حفظ الإعدادات</button><span class="msg" id="settings-msg"></span></div>
+      </form>
+    </div>
+    <details class="card"><summary>مفاتيح API (Demo)</summary>
+      <form id="cred-spot" data-url="/api/platforms/binance/credentials" autocomplete="off">
+        <b>Binance Spot</b>
+        <label class="f">API Key<input type="text" name="api_key" minlength="8" maxlength="256" required></label>
+        <label class="f">Secret Key<input type="password" name="secret_key" minlength="8" maxlength="256" required></label>
+        <div style="display:flex;gap:10px;align-items:center"><button class="btn" type="submit">حفظ مفاتيح Spot</button><span class="msg"></span></div>
+      </form>
+      <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+      <form id="cred-fut" data-url="/api/platforms/binance-futures/credentials" autocomplete="off">
+        <b>Binance Futures Demo</b>
+        <label class="f">API Key<input type="text" name="api_key" minlength="8" maxlength="256" required></label>
+        <label class="f">Secret Key<input type="password" name="secret_key" minlength="8" maxlength="256" required></label>
+        <div style="display:flex;gap:10px;align-items:center"><button class="btn" type="submit">حفظ مفاتيح Futures</button><span class="msg"></span></div>
+      </form>
+    </details>
+  </section>
+</main>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
-(function () {
-  var busy = false;
-  var labels = { BTC: '₿', ETH: 'Ξ', BNB: 'B', SOL: '◎', XRP: 'X', ADA: '₳', DOGE: 'Ð', LINK: 'L', AVAX: 'A', DOT: '●', LTC: 'Ł', BCH: '₿', TRX: 'T', NEAR: 'N', PAXG: 'Au', XAU: 'Au', CL: 'CL', BZ: 'BZ', MU: 'M', NVDA: 'N', SPCX: '✦', AAPL: 'A', TSLA: 'T', SNDK: 'S', META: '∞', AMD: 'A', MSFT: '▦', BE: 'BE', AMZN: 'a' };
-  var colors = { BTC: '#f7931a', ETH: '#627eea', BNB: '#f3ba2f', SOL: '#9945ff', XRP: '#346aa9', ADA: '#3468d4', DOGE: '#c2a633', LINK: '#2a5ada', AVAX: '#e84142', DOT: '#e6007a', LTC: '#345d9d', BCH: '#8dc351', TRX: '#ff0013', NEAR: '#111827', PAXG: '#c6a85b', XAU: '#c6a85b', CL: '#5589a8', BZ: '#477c9f', MU: '#1684d8', NVDA: '#76b900', SPCX: '#7c5ce7', AAPL: '#8b96a8', TSLA: '#e82127', SNDK: '#ee7b28', META: '#0866ff', AMD: '#ed1c24', MSFT: '#00a4ef', BE: '#4dbd74', AMZN: '#ff9900' };
-  function el(id) { return document.getElementById(id); }
-  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]; }); }
-  function num(v, digits) { var n = Number(v); return Number.isFinite(n) ? n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }) : '—'; }
-  function usd(v, digits) { return '$' + num(v, digits == null ? 2 : digits); }
-  function pnlClass(v) { return Number(v) > 0 ? 'up' : Number(v) < 0 ? 'down' : 'flat'; }
-  function coin(symbol) { var base = String(symbol || '').split('/')[0]; return { base: base, glyph: labels[base] || base.slice(0, 1), color: colors[base] || '#748094' }; }
-  function setPill(node, text, state) { if (!node) return; node.textContent = text; node.className = 'pill ' + (state || ''); }
-  function timeframeLabel(value) {
-    var labels = { '1d':'يومي', '4h':'4 ساعات', '1h':'ساعة واحدة', '15m':'15 دقيقة', '5m':'5 دقائق', 'demo-test':'اختبار تجريبي', 'auto':'تلقائي' };
-    return labels[String(value || '')] || String(value || '—');
-  }
-  function localTime(value) {
-    if (!value) return '—';
-    var d = new Date(value);
-    return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString('ar-SA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  }
-  function renderMarkets(markets) {
-    var host = el('markets');
-    var futuresHost = el('futures-markets');
-    if (!Array.isArray(markets)) markets = [];
-    function card(m) {
-      var c = coin(m.symbol), age = m.age_seconds, stale = m.ready && age != null && age > 150;
-      var strength = m.signal && m.signal_strength != null ? 'التقييم الفني ' + esc(m.signal_strength) + '/100 · ' : '';
-      var status = !m.ready ? 'بانتظار البيانات' : (stale ? 'بيانات قديمة' : (m.in_position ? 'لديك مركز' : (m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'مراقبة')));
-      var statusClass = stale ? 'pill-off' : (m.ready && (m.signal || m.in_position) ? 'pill-on' : '');
-      return '<article class="mkt' + (stale ? ' stale' : '') + '"><div class="mkt-head">' +
-        '<span class="coin" style="background:' + esc(c.color) + '">' + esc(c.glyph) + '</span>' +
-        '<div class="mkt-title"><b dir="ltr">' + esc(m.symbol) + '</b><small>' + esc(m.strategy_label || (m.market_type === 'Futures Demo' ? 'Futures Demo' : 'Binance Spot')) + ' · ' + (m.ready ? esc(timeframeLabel(m.timeframe)) : 'بانتظار الفحص') + '</small></div>' +
-        '<span class="pill ' + statusClass + '">' + status + '</span></div>' +
-        '<div class="mkt-price" dir="ltr">' + (m.ready && m.price != null ? usd(m.price, m.price < 1 ? 5 : 2) : '—') + '</div>' +
-        '<div class="mkt-grid"><div><small title="مؤشر قوة الحركة: يوضح إن كان السعر يتحرك بقوة صعودًا أو هبوطًا">RSI</small><b dir="ltr">' + (m.ready ? num(m.rsi, 1) : '—') + '</b></div>' +
-        '<div><small title="المتوسط المتحرك الأسي لسعر الإغلاق خلال 50 شمعة">EMA50</small><b dir="ltr">' + (m.ready ? num(m.ema, 2) : '—') + '</b></div>' +
-        '<div><small title="مؤشر اتجاه الزخم: يوضح تغير قوة الحركة">MACD</small><b dir="ltr" class="' + (Number(m.hist) >= 0 ? 'up' : 'down') + '">' + (m.ready ? num(m.hist, 4) : '—') + '</b></div></div>' +
-        '<div class="freshness">' + strength + (m.ready ? (stale ? 'آخر بيانات سوق منذ ' + Math.floor(age / 60) + ' دقيقة · قديمة' : 'آخر فحص ' + esc(m.time || 'الآن')) : esc(m.reason || 'سيظهر السعر بعد أول فحص')) + '</div></article>';
-    }
-    var spot = markets.filter(function(m){ return m.market_type !== 'Futures Demo'; });
-    var futures = markets.filter(function(m){ return m.market_type === 'Futures Demo'; });
-    function group(title, items, badge) {
-      if (!items.length) return '<div class="empty">لا توجد أسواق متاحة حاليًا.</div>';
-      return '<section class="market-group"><div class="market-group-head"><h3>' + title + '</h3><small>' + badge + ' · ' + items.length + '</small></div><div class="market-cards">' + items.map(card).join('') + '</div></section>';
-    }
-    host.innerHTML = group('عملات Spot', spot, 'Binance Spot');
-    futuresHost.innerHTML = futures.length ? futures.map(card).join('') : '<div class="empty">لا توجد عقود Futures Demo متاحة حاليًا.</div>';
-  }
-  var previousPositionSnapshot = Object.create(null);
-  function renderPositions(positions) {
-    var host = el('tx-cards'); positions = Array.isArray(positions) ? positions : [];
-    el('open-count').textContent = positions.length + ' مفتوحة';
-    if (!positions.length) { previousPositionSnapshot = Object.create(null); host.innerHTML = '<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>'; return; }
-    var nextPositionSnapshot = Object.create(null);
-    var rows = positions.map(function (p) {
-      var c=coin(p.symbol), cls=pnlClass(p.pnl_usdt), fut=p.market_type==='Futures Demo';
-      var venue=fut?'Futures Demo':(p.simulated?'محاكاة':'Binance Spot');
-      var side=fut?(p.side==='short'?'بيع / شورت':'شراء / لونغ'):'شراء';
-      var key=String(p.market_type||'Spot')+'|'+String(p.symbol||'')+'|'+String(p.side||'long');
-      var pnl=Number(p.pnl_usdt)||0, price=Number(p.price)||0, prev=previousPositionSnapshot[key], motion='position-enter';
-      if(prev){var pd=pnl-prev.pnl,qd=price-prev.price;motion=Math.abs(pd)>0.000001||Math.abs(qd)>0.00000001?(pd>0.000001?'position-tick-up':(pd< -0.000001?'position-tick-down':'position-tick')):'';}
-      nextPositionSnapshot[key]={pnl:pnl,price:price};
-      return '<div class="position-table-row '+(fut?'futures-position':'spot-position')+' '+motion+'"><span class="position-pair"><span class="coin" style="background:'+esc(c.color)+'">'+esc(c.glyph)+'</span><span dir="ltr">'+esc(p.symbol)+'<small class="position-venue">'+esc(venue)+'</small></span></span><span>'+side+'</span><span class="position-numbers">'+usd(p.entry,2)+'<small class="position-venue">سعر الدخول</small></span><span class="position-numbers">'+usd(p.price,2)+'<small class="position-venue">السعر الحالي · الوقف '+usd(p.stop,2)+'</small><small class="position-venue">'+esc(p.protection_status || 'حالة الوقف غير معروفة')+'</small></span><b class="position-value '+cls+'">'+usd(p.pnl_usdt,2)+'<small class="position-venue">'+num(p.pnl_pct,2)+'% · الهدف '+usd(p.target,2)+'</small></b></div>';
-    }).join('');
-    host.innerHTML='<div class="positions-table"><div class="positions-table-head"><span>السوق والزوج</span><span>الاتجاه</span><span>الدخول</span><span>السعر الحالي</span><span>الربح / الخسارة</span></div>'+rows+'</div>';
-    previousPositionSnapshot=nextPositionSnapshot;
-  }
-  function renderAccounts(d) {
-    var wallet = d.wallet || {}, stats = d.stats || {}, future = d.futures || {}, settings = d.settings || {};
-    var positions = Array.isArray(d.positions) ? d.positions : [];
-    var spotPositions = positions.filter(function(p){ return p.market_type !== 'Futures Demo'; });
-    var symbols = Array.isArray(future.symbols) ? future.symbols : [];
-    var unavailableSymbols = Array.isArray(future.unavailable_symbols) ? future.unavailable_symbols : [];
-    el('spot-balance').textContent = usd(wallet.total, 2);
-    el('spot-free').textContent = usd(wallet.free, 2);
-    var spotTradeSlots = spotPositions.reduce(function(total, p) {
-      var entries = Math.max(1, Number(p.entries) || 1);
-      return total + entries + (p.add_pending ? 1 : 0);
-    }, 0);
-    el('spot-open').textContent = spotTradeSlots + ' / ' + (settings.spot_max_concurrent_trades || 6);
-    el('spot-pnl').textContent = usd(stats.realized_total, 2);
-    el('spot-pnl').className = pnlClass(stats.realized_total);
-    var connected = !!future.connected;
-    window.__sobhitraderFuturesState = future;
-    document.dispatchEvent(new Event('tradfi-state'));
-    var state = el('futures-state');
-    state.textContent = connected ? (future.trading_enabled ? 'متصل · التنفيذ مفعّل' : 'متصل · محاكاة') : 'بانتظار مفاتيح Futures Demo';
-    state.className = 'account-state' + (connected ? ' online' : '');
-    el('futures-balance').textContent = connected ? usd(future.balance, 2) : '—';
-    el('futures-free').textContent = connected ? usd(future.free_balance, 2) : '—';
-    el('futures-open').textContent = (future.open_positions || 0) + ' / ' + (settings.futures_max_concurrent_trades || 6);
-    el('futures-pnl').textContent = usd(future.realized_pnl, 2);
-    el('futures-pnl').className = pnlClass(future.realized_pnl);
-    el('futures-symbols').innerHTML = (symbols.length ? symbols.map(function(s){ return '<span>' + esc(s) + '</span>'; }).join('') : '<small>لا توجد عقود متاحة</small>') +
-      (unavailableSymbols.length ? '<div class="account-symbols-unavailable"><small>غير متاح حاليًا في Demo</small>' +
-        unavailableSymbols.map(function(s){ return '<span title="غير متاح في Binance Futures Demo">' + esc(s) + '</span>'; }).join('') + '</div>' : '');
-  }
-  function renderHistory(trades) {
-    var host = el('trade-history');
-    if (!trades || !trades.length) { host.innerHTML = '<div class="empty">لا توجد صفقات مغلقة مسجلة بعد.</div>'; return; }
-    host.innerHTML = '<div class="history-row history-head"><span>العملة</span><span>النتيجة</span><span>التغير</span><span>الوقت</span></div>' + trades.map(function (t) {
-      var known = t.pnl_known !== false;
-      var cls = known ? pnlClass(t.pnl_usdt) : 'flat';
-      var label = t.market_type === 'Futures Demo' ? (t.side === 'short' ? ' · شورت' : ' · لونغ') : '';
-      var quality = {actual:'رسوم فعلية', estimated:'رسوم مقدرة', simulated:'محاكاة', net_actual_costs:'صافي وتكاليف مسجلة', net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality] || (known ? 'صافي مسجل' : 'سجل قديم · الصافي غير مؤكد');
-      var change = known && t.pnl_pct != null ? num(t.pnl_pct, 2) + '%' : '—';
-      var costDetail = t.gross_pnl_usdt == null ? 'تفصيل العمولة غير متوفر' :
-        'الإجمالي ' + usd(t.gross_pnl_usdt, 2) + ' · رسوم ' + usd(t.fees_usdt || 0, 3) +
-        (t.funding_usdt == null ? '' : ' · تمويل ' + usd(t.funding_usdt, 3));
-      return '<div class="history-row"><span dir="ltr">' + esc(t.symbol) + '<small dir="rtl">' + label + ' · ' + esc(quality) + '</small></span><b class="' + cls + '" dir="ltr">' + (known ? usd(t.pnl_usdt, 2) : '—') + '<small dir="rtl">' + esc(costDetail) + '</small></b><span class="' + cls + '" dir="ltr">' + change + '</span><small>' + esc(t.time || '—') + '</small></div>';
-    }).join('');
-  }
-  function renderDecisions(items) {
-    var host = el('decision-log'), count = el('decision-count'), latest = el('latest-decision');
-    items = Array.isArray(items) ? items : [];
-    count.textContent = items.length ? items.length + ' قرار محفوظ' : 'لا توجد قرارات بعد';
-    if (!items.length) { var empty = '<div class="empty">تظهر هنا أسباب الدخول أو التجاهل وأي نتيجة من Binance.</div>'; host.innerHTML = empty; if (latest) latest.innerHTML = '<div class="empty">لم يسجل البوت قرارًا بعد.</div>'; return; }
-    var rendered = items.map(function (d) {
-      var futures = String(d.market || '').toLowerCase().indexOf('futures') >= 0;
-      var side = d.signal === 'short' ? 'بيع / شورت' : (d.signal === 'long' ? 'شراء / لونغ' : 'لا توجد إشارة');
-      var status = d.order_status || 'لم يُرسل';
-      var statusLabel = ({'closed':'مكتمل','filled':'مكتمل','open':'مفتوح','canceled':'ملغى','rejected':'مرفوض','expired':'منتهي','simulated':'محاكاة','جارٍ الإرسال':'جارٍ الإرسال','غير مؤكد':'غير مؤكد','لم يُرسل':'لم يُرسل'})[status] || status;
-      var statusClass = ['closed','filled','simulated'].indexOf(status) >= 0 ? 'ok' : (['rejected','canceled','expired','غير مؤكد'].indexOf(status) >= 0 ? 'bad' : '');
-      var details = '<div class="decision-meta"><span>' + esc(futures ? 'Futures Demo' : 'Spot') + '</span><span>' + esc(side) + '</span><span>' + esc(d.strategy || '—') + ' · ' + esc(timeframeLabel(d.timeframe)) + '</span></div>' +
-        '<div class="decision-meta"><span>السعر ' + (d.price == null ? '—' : usd(d.price, Number(d.price) < 1 ? 5 : 2)) + '</span><span>وقت السعر ' + esc(localTime(d.price_updated_at)) + '</span><span>' + esc(localTime(d.created_at)) + ' قرار</span></div>' +
-        '<div class="decision-reason">' + esc(d.outcome || '—') + ': ' + esc(d.reason || '—') + '</div>' +
-        (d.order_id || d.order_status ? '<div class="decision-meta decision-order"><span>الأمر: ' + esc(statusLabel) + '</span>' + (d.order_id ? '<span dir="ltr">ID ' + esc(d.order_id) + '</span>' : '') + '</div>' : '') +
-        (d.api_message_ar || d.api_message ? '<div class="decision-api">توضيح الخطأ: ' + esc(d.api_message_ar || d.api_message) + '</div>' : '');
-      return '<article class="decision-row ' + (futures ? 'futures' : 'spot') + '"><div class="decision-top"><span class="decision-symbol" dir="ltr">' + esc(d.symbol) + '</span><span class="decision-pill ' + statusClass + '">' + esc(statusLabel) + '</span></div>' + details + '</article>';
-    });
-    host.innerHTML = rendered.join('');
-    if (latest) latest.innerHTML = rendered[0];
-  }
-  function renderPerformanceReport(report) {
-    var host = el('performance-report-content');
-    var rows = report && Array.isArray(report.groups) ? report.groups : [];
-    var period = el('performance-period');
-    if (period) period.textContent = report && report.days ? 'آخر ' + report.days + ' يومًا' : 'آخر 30 يومًا';
-    if (!rows.length) {
-      var oldCount = Number(report && report.unverified_spot_trades) || 0;
-      host.innerHTML = '<div class="empty">لا توجد نتائج موثقة خلال الفترة المحددة.' + (oldCount ? ' · تم استبعاد ' + oldCount + ' سجلات قديمة غير مؤكدة.' : '') + '</div>';
-      return;
-    }
-    var body = rows.map(function (r) {
-      var sample = Number(r.sample_size) || 0;
-      var cls = pnlClass(r.pnl_per_trade);
-      var strategyLabels = {trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',forced_test:'اختبار Futures',test:'اختبار Spot'};
-      var strategy = strategyLabels[r.strategy] || r.strategy || 'غير مسجل';
-      var gross = r.gross_pnl_total == null ? '—' : usd(r.gross_pnl_total, 2);
-      var fees = r.fees_total == null ? '—' : usd(r.fees_total, 3);
-      var funding = r.funding_total == null ? '—' : usd(r.funding_total, 3);
-      return '<tr><td>' + esc(r.market) + '</td><td class="pair-name">' + esc(r.symbol) + '</td>' +
-        '<td>' + esc(strategy) + '<small class="sub-label">' + esc(timeframeLabel(r.timeframe)) + '</small></td>' +
-        '<td><span class="performance-sample ' + (sample < Number(report.minimum_sample || 30) ? 'low' : '') + '">' + sample + ' صفقة · ' + esc(r.sample_label || 'عينة أولية') + '</span></td>' +
-        '<td>' + num(r.win_rate,1) + '%<small class="sub-label">' + (r.wins || 0) + ' رابحة · ' + (r.losses || 0) + ' خاسرة</small><small class="sub-label">متوسط الربح ' + usd(r.avg_win,2) + ' · الخسارة ' + usd(r.avg_loss,2) + '</small></td>' +
-        '<td class="' + cls + '">' + usd(r.pnl_per_trade,2) + '<small class="sub-label">متوسط النتيجة للصفقة</small></td>' +
-        '<td>' + gross + '</td><td>' + fees + '</td><td>' + funding + '</td>' +
-        '<td class="' + pnlClass(r.pnl_total) + '">' + usd(r.pnl_total,2) + '<small class="sub-label">' + esc(r.cost_basis || '') + '</small></td></tr>';
-    }).join('');
-    var oldCount = Number(report && report.unverified_spot_trades) || 0;
-    var note = oldCount ? '<div class="sub-label">استُبعد ' + oldCount + ' سجلًا قديمًا أو غير مكتمل من نتائج صافي الأرباح.</div>' : '';
-    host.innerHTML = note + '<div class="performance-table-wrap"><table class="performance-table"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>حجم العينة</th><th>نسبة الفوز</th><th>متوسط النتيجة</th><th>قبل الرسوم</th><th>العمولات</th><th>التمويل</th><th>الصافي</th></tr></thead><tbody>' + body + '</tbody></table></div>';
-  }
+(function(){
+'use strict';
+var colors={BTC:'#f7931a',ETH:'#627eea',BNB:'#f3ba2f',SOL:'#9945ff',XRP:'#23292f',ADA:'#0033ad',DOGE:'#c2a633',AVAX:'#e84142',LINK:'#2a5ada',DOT:'#e6007a',TRX:'#ef0027',TON:'#0098ea'};
+function el(id){return document.getElementById(id);}
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});}
+function num(v,d){var n=Number(v);return Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';}
+function usd(v,d){var n=Number(v);if(!Number.isFinite(n))return '—';return (n<0?'-$':'$')+num(Math.abs(n),d==null?2:d);}
+function px(v){var n=Number(v);return usd(n,Math.abs(n)<1?5:2);}
+function cls(v){return Number(v)>0?'up':Number(v)<0?'down':'flat';}
+function coin(s){var b=String(s||'').split('/')[0];return '<span class="coin" style="background:'+esc(colors[b]||'#64748b')+'">'+esc(b.slice(0,1))+'</span>';}
+function tf(v){return({'1d':'يومي','4h':'4 ساعات','1h':'ساعة','15m':'15 دقيقة','5m':'5 دقائق','demo-test':'اختبار تجريبي','auto':'تلقائي'})[String(v||'')]||String(v||'—');}
+function lt(v){if(!v)return '—';var d=new Date(v);return isNaN(d.getTime())?String(v):d.toLocaleTimeString('ar-SA',{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+function pill(n,t,s){n.textContent=t;n.className='pill '+(s||'');}
+function set(id,t,c){var n=el(id);n.textContent=t;if(c!=null)n.className=c;}
+function toast(t){var n=el('toast');n.textContent=t;n.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(function(){n.style.display='none';},3500);}
+var isFut=function(x){return x.market_type==='Futures Demo';};
+var stratLabels={trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',forced_test:'اختبار Futures',test:'اختبار Spot',wait:'انتظار'};
 
-  function renderNews(n) {
-    n = n || {};
-    var track = el('news-track'), status = el('news-ticker-status'), dot = el('news-ticker-dot');
-    var headlines = Array.isArray(n.headlines) ? n.headlines.slice(0, 8) : [];
-    var state = !n.enabled ? 'الأخبار موقوفة' : (n.blocked ? 'حظر بسبب خبر قوي' : (n.checked_at ? 'آخر فحص ' + String(n.checked_at) : 'بانتظار أول فحص'));
-    status.textContent = state;
-    dot.classList.toggle('paused', !!n.blocked || !n.enabled);
-    var signature = JSON.stringify([n.enabled, n.blocked, n.checked_at, n.error, n.reason,
-      headlines.map(function (h) { return [h.source, h.title_ar, h.title]; })]);
-    if (track.dataset.signature === signature) return;
-    track.dataset.signature = signature;
-    track.classList.remove('is-moving');
-    track.style.removeProperty('--ticker-duration');
-    var items = headlines.map(function (h) {
-      var title = h.title_ar || h.title || 'خبر جديد';
-      return '<span class="ticker-item"><span class="ticker-source">' + esc(h.source || 'خبر') + '</span><span dir="auto">' + esc(title) + '</span></span>';
-    }).join('');
-    if (!items) {
-      var fallback = n.error ? 'تعذّر تحديث الأخبار: ' + n.error : (n.reason || 'لا توجد عناوين حديثة في آخر فحص');
-      track.innerHTML = '<span class="ticker-item"><span class="ticker-source">الأخبار</span><span dir="auto">' + esc(fallback) + '</span></span>';
-      return;
-    }
-    var sequence = '<span class="ticker-sequence">' + items + '</span>';
-    track.innerHTML = sequence + (headlines.length > 1 ? '<span class="ticker-sequence" aria-hidden="true">' + items + '</span>' : '');
-    if (headlines.length > 1) {
-      requestAnimationFrame(function () {
-        if (track.dataset.signature !== signature) return;
-        var sequenceWidth = track.scrollWidth / 2;
-        var seconds = Math.max(22, Math.min(90, sequenceWidth / 42));
-        track.style.setProperty('--ticker-duration', seconds + 's');
-        track.classList.add('is-moving');
-      });
-    }
-  }
-  function renderStrategyDialog(markets) {
-    var host = el('strategy-current');
-    markets = Array.isArray(markets) ? markets : [];
-    var groups = Object.create(null), waiting = [];
-    markets.forEach(function (m) {
-      if (!m || !m.ready) return;
-      var key = String(m.strategy || 'wait') + '|' + String(m.timeframe || '—') + '|' + String(m.market_type || 'Spot');
-      if (m.strategy && m.strategy !== 'wait') {
-        if (!groups[key]) groups[key] = { label:m.strategy_label || m.strategy, timeframe:m.timeframe || '—', venue:m.market_type || 'Spot', items:[] };
-        groups[key].items.push(m);
-      } else waiting.push(m);
-    });
-    var cards = Object.keys(groups).map(function (key) {
-      var group = groups[key];
-      return '<article class="strategy-group"><div class="strategy-group-head"><b>' + esc(group.label) + ' · ' + esc(timeframeLabel(group.timeframe)) + '</b><small>' + esc(group.venue) + ' · ' + group.items.length + ' أزواج</small></div>' +
-        group.items.map(function (m) {
-          var signal = m.signal ? (m.direction === 'short' ? 'إشارة بيع' : 'إشارة شراء') : 'لا توجد إشارة دخول الآن';
-          return '<div class="strategy-market-row"><b dir="ltr">' + esc(m.symbol) + '</b><span>' + esc(signal) + (m.signal_strength ? ' · ' + esc(m.signal_strength) + '/100' : '') + '</span><small>' + esc(m.reason || 'لا يوجد سبب إضافي') + '</small></div>';
-        }).join('') + '</article>';
-    }).join('');
-    var waitingHtml = waiting.length ? '<article class="strategy-group"><div class="strategy-group-head"><b>انتظار</b><small>' + waiting.length + ' أزواج لا تحقق شروط الدخول حاليًا</small></div>' +
-      waiting.slice(0, 12).map(function (m) { return '<div class="strategy-market-row"><b dir="ltr">' + esc(m.symbol) + '</b><span>مراقبة · ' + esc(m.market_type || 'Spot') + '</span><small>' + esc(m.reason || 'بانتظار اكتمال الشروط') + '</small></div>'; }).join('') +
-      (waiting.length > 12 ? '<small>ويجري فحص ' + (waiting.length - 12) + ' أزواج أخرى.</small>' : '') + '</article>' : '';
-    host.innerHTML = cards + waitingHtml || '<div class="empty">بانتظار أول فحص للأسواق.</div>';
-  }
-  function render(d) {
-    var stats = d.stats || {}, wallet = d.wallet || {}, scanner = d.scanner || {};
-    var scanDate = scanner.last_completed_at ? new Date(scanner.last_completed_at) : null;
-    var scanAge = scanDate && !Number.isNaN(scanDate.getTime()) ? (Date.now() - scanDate.getTime()) / 1000 : null;
-    var scanRunning = scanner.status === 'running';
-    var scanError = scanner.status === 'error';
-    var stale = !scanRunning && (scanAge == null || scanAge > 150 || scanError);
-    var scanLabel = scanRunning ? 'فحص السوق جارٍ' : (scanError ? 'تعذّر إكمال الفحص' :
-      (scanAge == null ? 'بانتظار أول فحص' : (stale ? 'البيانات قديمة' : 'البوت متصل')));
-    setPill(el('connection-pill'), scanLabel, scanRunning ? 'pill-on' : (stale ? 'pill-off' : 'pill-on'));
-    setPill(el('mode-pill'), (String(d.env || 'demo').toUpperCase()) + (d.trading_enabled ? ' · تنفيذ مفعّل' : ' · محاكاة'), d.env === 'live' ? 'pill-off' : '');
-    var risk = d.daily_risk || {}, riskMarkets = Object.keys(risk);
-    var blockedMarkets = riskMarkets.filter(function (k) { return risk[k] && risk[k].blocked; });
-    var availableMarkets = riskMarkets.filter(function (k) { return !!risk[k]; });
-    var riskLabel = blockedMarkets.length ? 'الدخول موقوف: حد الخسارة' :
-      (availableMarkets.length ? 'حد الخسارة اليومي: ضمن الحد' : 'حد الخسارة اليومي: بانتظار التحقق');
-    setPill(el('risk-pill'), riskLabel, blockedMarkets.length ? 'pill-off' : 'pill-on');
-    el('risk-pill').title = riskMarkets.map(function (k) {
-      var r = risk[k];
-      return r ? k.toUpperCase() + ': ' + (r.loss_pct == null ? r.reason : num(r.loss_pct, 2) + '% من حد ' + num(r.limit_pct, 1) + '%') : k.toUpperCase() + ': بانتظار التحقق';
-    }).join(' · ');
-    el('last-update').textContent = 'تحديث اللوحة: ' + localTime(d.as_of) +
-      (scanRunning ? ' · الفحص يعمل' : (scanAge == null ? ' · لم يكتمل فحص بعد' :
-      (scanError ? ' · آخر فحص تعثّر' : (stale ? ' · آخر فحص منذ ' + Math.floor(scanAge / 60) + ' د' : ' · السوق محدث'))));
-    var balanceMissing = d.balance_status === 'unavailable' || d.balance_status === 'waiting';
-    el('wallet-value').textContent = balanceMissing ? '—' : usd(wallet.total, 2);
-    el('free-usdt').textContent = balanceMissing ? '—' : usd(wallet.free, 2);
-    if (d.balance_status === 'stale') el('free-usdt').title = 'تعذّر جلب رصيد حديث؛ المعروض آخر رصيد ناجح قبل ' + Math.floor((d.balance_age_seconds || 0) / 60) + ' دقيقة';
-    else if (balanceMissing) el('free-usdt').title = 'لا توجد قراءة ناجحة للرصيد حتى الآن';
-    else el('free-usdt').removeAttribute('title');
-    var walletStatus = el('wallet-market-status');
-    if (walletStatus) {
-      if (balanceMissing) walletStatus.textContent = 'تعذّر جلب قيمة موثوقة';
-      else if (d.balance_status === 'stale') walletStatus.textContent = 'بيانات الرصيد قديمة';
-      else if (wallet.price_status === 'stale') walletStatus.textContent = 'تعذّر تحديث سعر مركز';
-      else walletStatus.textContent = usd(wallet.cash, 2) + ' نقدًا · ' + usd(wallet.positions_value, 2) + ' قيمة المراكز';
-    }
-    el('realized-pl').textContent = usd(stats.realized_total, 2);
-    el('realized-pl').className = pnlClass(stats.realized_total);
-    el('realized-sub').textContent = 'اليوم ' + usd(stats.realized_today, 2) + (stats.estimated_spot_trades ? ' · رسوم مقدرة في ' + stats.estimated_spot_trades + ' صفقة' : '') + (stats.unverified_spot_trades ? ' · ' + stats.unverified_spot_trades + ' سجل قديم مستبعد' : '');
-    el('unrealized-pl').textContent = usd(stats.unrealized, 2);
-    el('unrealized-pl').className = pnlClass(stats.unrealized);
-    el('unrealized-sub').textContent = (d.positions || []).length + ' صفقات مفتوحة';
-    el('win-rate').textContent = num(stats.win_rate, 1) + '%';
-    el('win-sub').textContent = (stats.wins || 0) + ' رابحة · ' + (stats.losses || 0) + ' خاسرة';
-    el('trades-total').textContent = String(stats.total || 0);
-    el('trades-sub').textContent = 'أفضل ' + num(stats.best, 2) + '% · أسوأ ' + num(stats.worst, 2) + '%';
-    var exposure = Math.max(0, Math.min(100, Number(stats.exposure) || 0));
-    el('meter-fill').style.width = exposure + '%';
-    el('exposure-pct').textContent = num(exposure, 1) + '%';
-    el('exposure-note').textContent = exposure > 70 ? 'تعرّض مرتفع' : (exposure > 30 ? 'تعرّض متوسط' : 'تعرّض منخفض');
-    el('exposure-meter').setAttribute('aria-label', num(exposure, 1) + '% من المحفظة في صفقات مفتوحة');
-    renderAccounts(d);
-    renderMarkets(d.markets || []);
-    renderStrategyDialog(d.markets || []);
-    renderPositions(d.positions || []);
-    renderHistory(d.trades || []);
-    renderDecisions(d.decisions || []);
-    renderPerformanceReport(d.performance_report || {});
-    renderNews(d.news || {});
-  }
-  function showOffline() {
-    setPill(el('connection-pill'), 'تعذّر الاتصال ببيانات البوت', 'pill-off');
-    el('last-update').textContent = 'تعذّر تحديث اللوحة — تحقق من اتصال البوت';
-  }
-  function poll() {
-    if (busy) return;
-    busy = true;
-    fetch('/api/state?_=' + Date.now(), { cache: 'no-store', headers: { 'Accept': 'application/json' } })
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(render).catch(showOffline).finally(function () { busy = false; });
-  }
-  var strategyDialog = el('strategy-dialog');
-  el('strategy-open').addEventListener('click', function () { if (strategyDialog && !strategyDialog.open) strategyDialog.showModal(); });
-  el('strategy-close').addEventListener('click', function () { if (strategyDialog && strategyDialog.open) strategyDialog.close(); });
-  if (strategyDialog) strategyDialog.addEventListener('click', function (event) {
-    if (event.target === strategyDialog) strategyDialog.close();
-  });
-  poll();
-  window.setInterval(poll, 5000);
-  window.addEventListener('online', poll);
-})();
-</script>
+/* theme */
+el('theme-btn').addEventListener('click',function(){var r=document.documentElement,t=r.dataset.theme==='dark'?'light':'dark';r.dataset.theme=t;try{localStorage.setItem('theme',t);}catch(e){}drawChart();});
 
-<script>
-(function () {
-  var chartEl = document.getElementById('chart');
-  var emptyEl = document.getElementById('chart-empty');
-  var tipEl = document.getElementById('tip');
-  var changeEl = document.getElementById('change');
-  var buttons = document.querySelectorAll('.range');
-  var range = '1d';
-  try { range = localStorage.getItem('range') || '1d'; } catch (e) {}
-  var data = [];
+/* scan */
+el('scan-btn').addEventListener('click',function(){var b=this;b.disabled=true;fetch('/check',{cache:'no-store',credentials:'same-origin'}).then(function(r){if(!r.ok)throw 0;toast('بدأ فحص السوق في الخلفية');setTimeout(poll,2500);}).catch(function(){toast('تعذّر بدء الفحص');}).finally(function(){setTimeout(function(){b.disabled=false;},4000);});});
 
-  function money(v) {
-    return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-  function signed(v) { return (v >= 0 ? '+' : '-') + money(Math.abs(v)); }
-  function hash(i) { var x = Math.sin(i * 12.9898) * 43758.5453; return x - Math.floor(x); }
-  function fmtTime(ts, withDate) {
-    var d = new Date(ts * 1000);
-    var t = d.toLocaleTimeString('ar-u-nu-latn', { hour: 'numeric', minute: '2-digit' });
-    if (!withDate) return t;
-    return d.toLocaleDateString('ar-u-nu-latn-ca-gregory', { month: 'short', day: 'numeric' }) + ' ' + t;
-  }
+/* markets filter */
+var mktFilter='all',lastMarkets=[];
+el('mkt-filter').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;mktFilter=b.dataset.f;[].forEach.call(this.children,function(c){c.classList.toggle('active',c===b);});renderMarkets(lastMarkets);});
 
-  function setActive() {
-    buttons.forEach(function (b) { b.classList.toggle('active', b.getAttribute('data-r') === range); });
-  }
+function renderMarkets(ms){
+  lastMarkets=ms=Array.isArray(ms)?ms:[];
+  var counts={};ms.forEach(function(m){if(m.ready&&m.strategy&&m.strategy!=='wait'){var k=m.strategy_label||stratLabels[m.strategy]||m.strategy;counts[k]=(counts[k]||0)+1;}});
+  el('strategy-summary').innerHTML=Object.keys(counts).map(function(k){return '<span style="direction:rtl">'+esc(k)+' · '+counts[k]+'</span>';}).join('')||'<span style="direction:rtl">لا توجد استراتيجية نشطة — كل الأسواق في وضع المراقبة</span>';
+  var list=ms.filter(function(m){return mktFilter==='all'||(mktFilter==='fut'?isFut(m):mktFilter==='spot'?!isFut(m):(m.signal||m.in_position));});
+  if(!list.length){el('markets').innerHTML='<div class="empty">لا توجد أسواق مطابقة.</div>';return;}
+  el('markets').innerHTML=list.map(function(m){
+    var stale=m.ready&&m.age_seconds!=null&&m.age_seconds>150;
+    var st=!m.ready?'بانتظار البيانات':stale?'بيانات قديمة':m.in_position?'لديك مركز':m.signal?(m.direction==='short'?'إشارة بيع':'إشارة شراء'):'مراقبة';
+    var sc=stale?'off':(m.ready&&(m.signal||m.in_position)?'on':'');
+    var s=Math.max(0,Math.min(100,Number(m.signal_strength)||0));
+    return '<article class="mkt'+(m.signal?' sig':'')+(stale?' stale':'')+'"><div class="mkt-h">'+coin(m.symbol)+'<div class="t"><b dir="ltr">'+esc(m.symbol)+'</b><small>'+(isFut(m)?'Futures Demo':'Spot')+' · '+esc(m.strategy_label||'انتظار')+' · '+(m.ready?esc(tf(m.timeframe)):'—')+'</small></div><span class="pill '+sc+'">'+st+'</span></div>'+
+      '<div class="mkt-p">'+(m.ready&&m.price!=null?px(m.price):'—')+'</div>'+
+      '<div class="mkt-g"><div>RSI<b>'+(m.ready?num(m.rsi,1):'—')+'</b></div><div>EMA50<b>'+(m.ready?num(m.ema,2):'—')+'</b></div><div>MACD<b class="'+(Number(m.hist)>=0?'up':'down')+'">'+(m.ready?num(m.hist,4):'—')+'</b></div></div>'+
+      '<div class="bar" title="قوة الإشارة '+s+'/100"><i style="width:'+s+'%"></i></div>'+
+      '<div class="why">'+(m.ready?(stale?'آخر بيانات منذ '+Math.floor(m.age_seconds/60)+' د · ':'')+esc(m.reason||('آخر فحص '+(m.time||'الآن'))):esc(m.reason||'سيظهر السعر بعد أول فحص'))+'</div></article>';
+  }).join('');
+}
 
-  function updateChange() {
-    if (data.length < 2) { changeEl.textContent = ''; return; }
-    var first = data[0].v, last = data[data.length - 1].v;
-    var pct = first ? (last - first) / first * 100 : 0;
-    changeEl.className = 'change ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat');
-    changeEl.textContent = (pct >= 0 ? '▲ ' : '▼ ') + Math.abs(pct).toFixed(2) + '%';
-  }
+var prevPos={};
+function renderPositions(ps){
+  ps=Array.isArray(ps)?ps:[];el('open-count').textContent=ps.length+' مفتوحة';
+  if(!ps.length){prevPos={};el('positions').innerHTML='<div class="empty">لا توجد صفقات مفتوحة حاليًا.</div>';return;}
+  var next={};
+  el('positions').innerHTML='<table class="resp"><thead><tr><th>الزوج</th><th>السوق</th><th>الاتجاه</th><th>الدخول</th><th>الحالي</th><th>الوقف / الهدف</th><th>الكمية / التكلفة</th><th>الربح / الخسارة</th><th>الحماية</th></tr></thead><tbody>'+ps.map(function(p){
+    var f=isFut(p),k=(p.market_type||'Spot')+'|'+p.symbol+'|'+(p.side||'long'),pn=Number(p.pnl_usdt)||0,pr=prevPos[k],fl='';
+    if(pr!=null&&Math.abs(pn-pr)>1e-6)fl=pn>pr?'flash-up':'flash-down';next[k]=pn;
+    var side=f?(p.side==='short'?'<span class="tag short">شورت</span>':'<span class="tag long">لونغ</span>'):'<span class="tag long">شراء</span>';
+    return '<tr class="'+fl+'"><td data-l="الزوج"><span class="sym">'+coin(p.symbol)+'<span dir="ltr">'+esc(p.symbol)+'</span></span></td>'+
+      '<td data-l="السوق"><span class="tag '+(f?'fut':'')+'">'+(f?'Futures Demo':(p.simulated?'محاكاة':'Spot'))+'</span><small>'+esc(stratLabels[p.strategy]||p.strategy||'')+' · '+esc(tf(p.timeframe))+(p.entries>1?' · '+p.entries+' دخول':'')+'</small></td>'+
+      '<td data-l="الاتجاه">'+side+'</td><td data-l="الدخول" class="num">'+px(p.entry)+'</td><td data-l="الحالي" class="num">'+px(p.price)+'</td>'+
+      '<td data-l="الوقف / الهدف" class="num"><span class="down">'+px(p.stop)+'</span><small class="up">'+px(p.target)+'</small></td>'+
+      '<td data-l="الكمية / التكلفة" class="num">'+num(p.amount,6)+'<small>'+usd(p.cost,2)+'</small></td>'+
+      '<td data-l="الربح / الخسارة" class="num '+cls(p.pnl_usdt)+'"><b>'+usd(p.pnl_usdt,2)+'</b><small class="'+cls(p.pnl_usdt)+'">'+num(p.pnl_pct,2)+'%</small></td>'+
+      '<td data-l="الحماية"><small style="color:var(--text)">'+esc(p.protection_status||'غير معروفة')+'</small><small>'+esc(p.time||'')+'</small></td></tr>';
+  }).join('')+'</tbody></table>';
+  prevPos=next;
+}
 
-  function draw() {
-    updateChange();
-    chartEl.innerHTML = '';
-    tipEl.style.display = 'none';
-    if (data.length < 2) { emptyEl.style.display = 'flex'; return; }
-    emptyEl.style.display = 'none';
+function renderHistory(ts){
+  ts=Array.isArray(ts)?ts:[];el('trades-count').textContent=ts.length?ts.length+' صفقة':'';
+  if(!ts.length){el('trade-history').innerHTML='<div class="empty">لا توجد صفقات مغلقة مسجلة بعد.</div>';return;}
+  el('trade-history').innerHTML='<table class="resp"><thead><tr><th>الزوج</th><th>الدخول ← الخروج</th><th>الصافي</th><th>التغير</th><th>الوقت</th></tr></thead><tbody>'+ts.slice(0,40).map(function(t){
+    var known=t.pnl_known!==false,c=known?cls(t.pnl_usdt):'flat',f=isFut(t);
+    var q={actual:'رسوم فعلية',estimated:'رسوم مقدرة',simulated:'محاكاة',net_actual_costs:'صافي وتكاليف مسجلة',net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality]||(known?'صافي مسجل':'سجل قديم · غير مؤكد');
+    var cost=t.gross_pnl_usdt==null?'':'إجمالي '+usd(t.gross_pnl_usdt,2)+' · رسوم '+usd(t.fees_usdt||0,3)+(t.funding_usdt==null?'':' · تمويل '+usd(t.funding_usdt,3));
+    return '<tr><td data-l="الزوج"><span class="sym">'+coin(t.symbol)+'<span><span dir="ltr">'+esc(t.symbol)+'</span><small>'+(f?(t.side==='short'?'Futures · شورت':'Futures · لونغ'):'Spot')+' · '+esc(q)+'</small></span></span></td>'+
+      '<td data-l="الدخول ← الخروج" class="num">'+px(t.entry)+'<small>'+px(t.exit)+'</small></td>'+
+      '<td data-l="الصافي" class="num '+c+'"><b>'+(known?usd(t.pnl_usdt,2):'—')+'</b><small>'+esc(cost)+'</small></td>'+
+      '<td data-l="التغير" class="num '+c+'">'+(known&&t.pnl_pct!=null?num(t.pnl_pct,2)+'%':'—')+'</td><td data-l="الوقت"><small>'+esc(t.time||'—')+'</small></td></tr>';
+  }).join('')+'</tbody></table>';
+}
 
-    var w = chartEl.clientWidth, h = chartEl.clientHeight;
-    var padTop = 38, padBottom = 30;
-    var plotH = h - padTop - padBottom;
-    var vals = data.map(function (p) { return p.v; });
-    var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-    if (max - min < 1e-9) { var m = max * 0.002 || 1; min -= m; max += m; }
-    var span = max - min;
-    min -= span * 0.12; max += span * 0.12; span = max - min;
+function renderDecisions(ds){
+  ds=Array.isArray(ds)?ds:[];el('decision-count').textContent=ds.length?ds.length+' قرار':'لا توجد قرارات';
+  if(!ds.length){el('decision-log').innerHTML='<div class="empty">تظهر هنا أسباب الدخول أو التجاهل وأي نتيجة من Binance.</div>';return;}
+  el('decision-log').innerHTML=ds.map(function(d){
+    var f=String(d.market||'').toLowerCase().indexOf('futures')>=0,s=d.order_status||'لم يُرسل';
+    var sl=({closed:'مكتمل',filled:'مكتمل',open:'مفتوح',canceled:'ملغى',rejected:'مرفوض',expired:'منتهي',simulated:'محاكاة'})[s]||s;
+    var sc=['closed','filled','simulated'].indexOf(s)>=0?'ok':(['rejected','canceled','expired','غير مؤكد'].indexOf(s)>=0?'bad':'');
+    var side=d.signal==='short'?'بيع / شورت':d.signal==='long'?'شراء / لونغ':'لا إشارة';
+    return '<article class="dec'+(f?' fut':'')+'"><div class="dec-top"><span dir="ltr">'+esc(d.symbol)+'</span><span class="st '+sc+'">'+esc(sl)+'</span></div>'+
+      '<div class="meta"><span>'+(f?'Futures Demo':'Spot')+'</span><span>'+esc(side)+'</span><span>'+esc(d.strategy||'—')+' · '+esc(tf(d.timeframe))+'</span><span>السعر '+(d.price==null?'—':px(d.price))+'</span><span>'+esc(lt(d.created_at))+'</span>'+(d.order_id?'<span dir="ltr">ID '+esc(d.order_id)+'</span>':'')+'</div>'+
+      '<div class="reason"><b>'+esc(d.outcome||'—')+':</b> '+esc(d.reason||'—')+'</div>'+
+      (d.api_message_ar||d.api_message?'<div class="api">'+esc(d.api_message_ar||d.api_message)+'</div>':'')+'</article>';
+  }).join('');
+}
 
-    var n = data.length;
-    var xs = data.map(function (_, i) { return i / (n - 1) * w; });
-    var ys = data.map(function (p) { return padTop + (1 - (p.v - min) / span) * plotH; });
+function renderPerf(r){
+  r=r||{};var rows=Array.isArray(r.groups)?r.groups:[],old=Number(r.unverified_spot_trades)||0;
+  el('performance-period').textContent='آخر '+(r.days||30)+' يومًا';
+  if(!rows.length){el('performance-report-content').innerHTML='<div class="empty">لا توجد نتائج موثقة خلال الفترة.'+(old?' · استُبعد '+old+' سجل قديم.':'')+'</div>';return;}
+  el('performance-report-content').innerHTML=(old?'<div class="sub">استُبعد '+old+' سجلًا قديمًا أو غير مكتمل.</div>':'')+'<div class="tbl"><table class="resp"><thead><tr><th>السوق</th><th>الزوج</th><th>الاستراتيجية</th><th>العينة</th><th>نسبة الفوز</th><th>متوسط الصفقة</th><th>قبل الرسوم</th><th>العمولات</th><th>التمويل</th><th>الصافي</th></tr></thead><tbody>'+rows.map(function(x){
+    var n=Number(x.sample_size)||0;
+    return '<tr><td data-l="السوق">'+esc(x.market)+'</td><td data-l="الزوج" dir="ltr">'+esc(x.symbol)+'</td><td data-l="الاستراتيجية">'+esc(stratLabels[x.strategy]||x.strategy||'غير مسجل')+'<small>'+esc(tf(x.timeframe))+'</small></td>'+
+      '<td data-l="العينة"><span class="tag" style="'+(n<Number(r.minimum_sample||30)?'color:var(--warn)':'')+'">'+n+' · '+esc(x.sample_label||'عينة أولية')+'</span></td>'+
+      '<td data-l="نسبة الفوز" class="num">'+num(x.win_rate,1)+'%<small>'+(x.wins||0)+' / '+(x.losses||0)+'</small></td>'+
+      '<td data-l="متوسط الصفقة" class="num '+cls(x.pnl_per_trade)+'">'+usd(x.pnl_per_trade,2)+'<small>ربح '+usd(x.avg_win,2)+' · خسارة '+usd(x.avg_loss,2)+'</small></td>'+
+      '<td data-l="قبل الرسوم" class="num">'+(x.gross_pnl_total==null?'—':usd(x.gross_pnl_total,2))+'</td><td data-l="العمولات" class="num">'+(x.fees_total==null?'—':usd(x.fees_total,3))+'</td><td data-l="التمويل" class="num">'+(x.funding_total==null?'—':usd(x.funding_total,3))+'</td>'+
+      '<td data-l="الصافي" class="num '+cls(x.pnl_total)+'"><b>'+usd(x.pnl_total,2)+'</b><small>'+esc(x.cost_basis||'')+'</small></td></tr>';
+  }).join('')+'</tbody></table></div>';
+}
 
-    // interpolate y at any x
-    function yAt(x) {
-      var f = x / w * (n - 1), i = Math.min(Math.floor(f), n - 2), t = f - i;
-      return ys[i] + (ys[i + 1] - ys[i]) * t;
-    }
+function renderNews(n){
+  n=n||{};var st=!n.enabled?'موقوف':n.blocked?'حظر'+(n.blocked_until?' حتى '+n.blocked_until:''):'يعمل';
+  set('news-state',st,'tag'+(n.blocked?' short':''));
+  pill(el('news-pill'),'الأخبار: '+(!n.enabled?'الفلتر موقوف':n.blocked?'الدخول محظور':(n.sentiment||'محايد')),!n.enabled?'':n.blocked?'off':'on');
+  el('news-reason').innerHTML=(n.error?'<span class="down">تعذّر التحديث: '+esc(n.error)+'</span><br>':'')+esc(n.reason||'')+(n.checked_at?' · آخر فحص '+esc(n.checked_at):'')+(n.model?' · '+esc(n.model):'');
+  var h=Array.isArray(n.headlines)?n.headlines.slice(0,12):[];
+  el('news-list').innerHTML=h.length?h.map(function(x){return '<div class="news-item"><small>'+esc(x.source||'خبر')+'</small><span dir="auto">'+esc(x.title_ar||x.title)+'</span></div>';}).join(''):'<div class="empty">لا توجد عناوين حديثة.</div>';
+}
+function renderParams(p,d){
+  p=p||{};var rows=[['حجم الصفقة',usd(d.trade_amount,2)],['الإطار الزمني',tf(p.timeframe)],['الاستراتيجيات',(p.strategies||[]).map(function(s){return stratLabels[s]||s;}).join('، ')],['EMA',p.ema_period],['أقصى RSI للدخول',p.rsi_max],['شرط MACD',p.require_macd?'مطلوب':'غير مطلوب'],['هامش MACD',p.macd_tolerance_pct!=null?p.macd_tolerance_pct+'%':'—'],['هدف الربح',usd(p.tp_usdt,2)],['وقف الخسارة',p.sl!=null?p.sl+'%':'—'],['الوقف المتحرك',p.trail!=null?p.trail+'%':'—'],['حد شدة الخبر',p.news_severity],['إيقاف الأخبار',p.news_pause_h!=null?p.news_pause_h+' س':'—'],['Telegram',d.telegram?'متصل':'غير مضبوط']];
+  el('params').innerHTML=rows.map(function(r){return '<div><span>'+esc(r[0])+'</span><b>'+esc(r[1]==null?'—':r[1])+'</b></div>';}).join('');
+}
+function renderEvents(ev){ev=Array.isArray(ev)?ev:[];el('events').innerHTML=ev.length?ev.slice(0,60).map(function(e){return '<div class="ev"><span class="sub">'+esc(e.t)+'</span><b>'+esc(e.tag)+'</b><span dir="auto">'+esc(e.text)+'</span></div>';}).join(''):'<div class="empty">لا أحداث بعد.</div>';}
 
-    var targetCount = Math.max(12, Math.min(160, Math.floor(w / 7)));
-    var bucketSize = Math.max(1, Math.ceil(n / targetCount));
-    var candles = '';
-    var count = Math.ceil(n / bucketSize);
-    var candleWidth = Math.max(2, Math.min(9, (w / count) * 0.58));
-    function yValue(v) { return padTop + (1 - (v - min) / span) * plotH; }
-    for (var start = 0; start < n; start += bucketSize) {
-      var end = Math.min(n, start + bucketSize);
-      var open = data[start].v, close = data[end - 1].v;
-      var high = -Infinity, low = Infinity;
-      for (var q = start; q < end; q++) {
-        high = Math.max(high, data[q].v);
-        low = Math.min(low, data[q].v);
-      }
-      var centerX = ((start + end - 1) / 2) / (n - 1) * w;
-      var yOpen = yValue(open), yClose = yValue(close);
-      var yHigh = yValue(high), yLow = yValue(low);
-      var color = close >= open ? '#d4f53c' : '#ff6b5e';
-      var bodyY = Math.min(yOpen, yClose);
-      var bodyH = Math.max(2, Math.abs(yClose - yOpen));
-      candles += '<line x1="' + centerX.toFixed(1) + '" x2="' + centerX.toFixed(1) + '" y1="' + yHigh.toFixed(1) + '" y2="' + yLow.toFixed(1) + '" stroke="' + color + '" stroke-width="1.2"/>' +
-        '<rect x="' + (centerX - candleWidth / 2).toFixed(1) + '" y="' + bodyY.toFixed(1) + '" width="' + candleWidth.toFixed(1) + '" height="' + bodyH.toFixed(1) + '" rx="1" fill="' + color + '"/>';
-    }
-    var guides = '';
-    for (var g = 0; g < 3; g++) {
-      var gy = padTop + (plotH * g / 2);
-      guides += '<line x1="0" x2="' + w + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '" stroke="#282828" stroke-width="1"/>';
-    }
+var settingsDirty=false;
+function fillSettings(d){if(settingsDirty)return;var f=el('settings-form'),s=d.settings||{};f.trade_amount_usdt.value=d.trade_amount!=null?d.trade_amount:'';f.spot_max_concurrent_trades.value=s.spot_max_concurrent_trades||6;f.futures_max_concurrent_trades.value=s.futures_max_concurrent_trades||6;}
 
-    var withDate = range === '1w' || range === '1m' || range === 'all';
-    var labels = '';
-    var cnt = w < 520 ? 3 : 6;
-    for (var j = 0; j < cnt; j++) {
-      var idx = Math.round(j / (cnt - 1) * (n - 1));
-      var anchor = j === 0 ? 'start' : (j === cnt - 1 ? 'end' : 'middle');
-      var lx = j === 0 ? 16 : (j === cnt - 1 ? w - 16 : xs[idx]);
-      labels += '<text x="' + lx + '" y="' + (h - 16) + '" fill="#8c8c8c" font-size="13" text-anchor="' + anchor + '">' +
-        fmtTime(data[idx].t, withDate) + '</text>';
-    }
+function render(d){
+  var st=d.stats||{},w=d.wallet||{},sc=d.scanner||{},s=d.settings||{},fu=d.futures||{};
+  var sd=sc.last_completed_at?new Date(sc.last_completed_at):null,age=sd&&!isNaN(sd.getTime())?(Date.now()-sd.getTime())/1000:null;
+  var run=sc.status==='running',err=sc.status==='error',stale=!run&&(age==null||age>150||err);
+  pill(el('connection-pill'),run?'فحص السوق جارٍ':err?'تعذّر إكمال الفحص':age==null?'بانتظار أول فحص':stale?'البيانات قديمة':'البوت متصل',run?'on':stale?'off':'on');
+  pill(el('mode-pill'),String(d.env||'demo').toUpperCase()+(d.trading_enabled?' · التنفيذ مفعّل':' · التداول موقوف/محاكاة'),d.trading_enabled?(d.env==='live'?'off':'on'):'warn');
+  var risk=d.daily_risk||{},ks=Object.keys(risk),bl=ks.filter(function(k){return risk[k]&&risk[k].blocked;}),av=ks.filter(function(k){return !!risk[k];});
+  pill(el('risk-pill'),bl.length?'الدخول موقوف: حد الخسارة':av.length?'حد الخسارة: ضمن الحد':'حد الخسارة: بانتظار التحقق',bl.length?'off':av.length?'on':'');
+  el('risk-pill').title=ks.map(function(k){var r=risk[k];return k.toUpperCase()+': '+(r?(r.loss_pct==null?r.reason:num(r.loss_pct,2)+'% من '+num(r.limit_pct,1)+'%'):'بانتظار');}).join(' · ');
+  el('last-update').textContent='تحديث '+lt(d.as_of)+(run?' · الفحص يعمل':age==null?'':' · آخر فحص قبل '+Math.max(0,Math.floor(age/60))+' د');
+  var miss=d.balance_status==='unavailable'||d.balance_status==='waiting';
+  set('wallet-value',miss?'—':usd(w.total,2));
+  set('wallet-status-tag',miss?'غير متاح':d.balance_status==='stale'?'قديم':w.price_status==='stale'?'سعر قديم':'محدّث','tag'+(miss||d.balance_status==='stale'?' short':' long'));
+  el('wallet-sub').textContent=miss?'تعذّر جلب قيمة موثوقة':'متاح '+usd(w.free,2)+' · نقد '+usd(w.cash,2)+' · مراكز '+usd(w.positions_value,2);
+  set('realized-pl',usd(st.realized_total,2),'val '+cls(st.realized_total));
+  el('realized-sub').textContent='اليوم '+usd(st.realized_today,2)+(st.unverified_spot_trades?' · '+st.unverified_spot_trades+' سجل مستبعد':'');
+  set('unrealized-pl',usd(st.unrealized,2),'val '+cls(st.unrealized));
+  var ps=d.positions||[];el('unrealized-sub').textContent='على '+ps.length+' مركز مفتوح';
+  set('open-total',String(s.active_trades!=null?s.active_trades:ps.length));
+  el('open-sub').textContent='Spot '+(s.spot_active_trades||0)+'/'+(s.spot_max_concurrent_trades||6)+' · Futures '+(s.futures_active_trades||0)+'/'+(s.futures_max_concurrent_trades||6);
+  set('win-rate',num(st.win_rate,1)+'%');el('win-sub').textContent=(st.wins||0)+' رابحة · '+(st.losses||0)+' خاسرة · '+(st.total||0)+' صفقة';
+  var ex=Math.max(0,Math.min(100,Number(st.exposure)||0));el('meter-fill').style.width=ex+'%';el('exposure-meter').setAttribute('aria-valuenow',ex.toFixed(1));
+  set('exposure-pct',num(ex,1)+'%');el('exposure-note').textContent=ex>70?'مرتفع':ex>30?'متوسط':'منخفض';
+  el('trades-sub').textContent='أفضل '+num(st.best,2)+'% · أسوأ '+num(st.worst,2)+'%';
+  /* accounts */
+  var sp=(d.platforms||[]).filter(function(p){return p.id==='binance';})[0]||{};
+  set('spot-state',sp.connected?(d.trading_enabled?'متصل · تنفيذ':'متصل · موقوف'):'بدون مفاتيح','tag'+(sp.connected?' long':' short'));
+  set('spot-balance',usd(w.total,2));set('spot-free',usd(w.free,2));set('spot-open',(s.spot_active_trades||0)+' / '+(s.spot_max_concurrent_trades||6));set('spot-pnl',usd(st.realized_total,2),cls(st.realized_total));
+  var c=!!fu.connected;window.__sobhitraderFuturesState=fu;document.dispatchEvent(new Event('tradfi-state'));
+  set('futures-state',c?(fu.trading_enabled?'متصل · تنفيذ':'متصل · محاكاة'):'بانتظار المفاتيح','tag'+(c?' long':' short'));
+  set('futures-balance',c?usd(fu.balance,2):'—');set('futures-free',c?usd(fu.free_balance,2):'—');set('futures-open',(fu.open_positions||0)+' / '+(s.futures_max_concurrent_trades||6));set('futures-pnl',usd(fu.realized_pnl,2),cls(fu.realized_pnl));
+  el('futures-symbols').innerHTML=(fu.symbols||[]).map(function(x){return '<span>'+esc(x)+'</span>';}).join('');
+  el('futures-unavail').innerHTML=(fu.unavailable_symbols||[]).map(function(x){return '<span title="غير متاح في Demo">'+esc(x)+'</span>';}).join('');
+  renderPositions(ps);renderMarkets(d.markets);renderHistory(d.trades);renderDecisions(d.decisions);renderPerf(d.performance_report);renderNews(d.news);renderParams(d.params,d);renderEvents(d.events);fillSettings(d);
+}
+var busy=false;
+function poll(){if(busy||document.hidden)return;busy=true;fetch('/api/state?_='+Date.now(),{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}).then(render).catch(function(){pill(el('connection-pill'),'تعذّر الاتصال ببيانات البوت','off');el('last-update').textContent='تعذّر التحديث — تحقق من اتصال البوت';}).finally(function(){busy=false;});}
 
-    chartEl.innerHTML =
-      '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" role="img" aria-label="قيمة المحفظة عبر الزمن">' +
-      guides + candles +
-      '<g id="hover" style="display:none">' +
-      '<line id="hv" y1="0" y2="' + (h - padBottom) + '" stroke="#fff" stroke-width="1.5" opacity=".85"/>' +
-      '<circle id="hc" r="7" fill="#050505" stroke="#d4f53c" stroke-width="3.5"/></g>' +
-      labels + '</svg>';
+/* forms */
+function errText(data,r){var d=data&&data.detail;if(Array.isArray(d))return d.map(function(x){return x.msg;}).join('، ');if(d&&typeof d==='object')return [d.message,d.reason].filter(Boolean).join(' — ');return d||('HTTP '+r.status);}
+function postJSON(url,body){return fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return {};}).then(function(j){if(!r.ok)throw new Error(errText(j,r));return j;});});}
+var sf=el('settings-form');sf.addEventListener('input',function(){settingsDirty=true;});
+sf.addEventListener('submit',function(e){e.preventDefault();var m=el('settings-msg');m.className='msg';m.textContent='جارٍ الحفظ…';
+  postJSON('/api/settings',{trade_amount_usdt:Number(sf.trade_amount_usdt.value),spot_max_concurrent_trades:parseInt(sf.spot_max_concurrent_trades.value,10),futures_max_concurrent_trades:parseInt(sf.futures_max_concurrent_trades.value,10)})
+  .then(function(){m.className='msg ok';m.textContent='تم الحفظ ✓';settingsDirty=false;poll();}).catch(function(x){m.className='msg err';m.textContent=x.message;});});
+['cred-spot','cred-fut'].forEach(function(id){var f=el(id);f.addEventListener('submit',function(e){e.preventDefault();var m=f.querySelector('.msg');
+  if(!confirm('سيتم استبدال مفاتيح API الحالية بعد التحقق منها مع Binance Demo. متابعة؟'))return;m.className='msg';m.textContent='جارٍ التحقق…';
+  postJSON(f.dataset.url,{api_key:f.api_key.value.trim(),secret_key:f.secret_key.value.trim()}).then(function(){m.className='msg ok';m.textContent='تم حفظ المفاتيح ✓';f.reset();poll();}).catch(function(x){m.className='msg err';m.textContent=x.message;});});});
 
-    var svg = chartEl.querySelector('svg');
-    var hover = svg.querySelector('#hover'), hv = svg.querySelector('#hv'), hc = svg.querySelector('#hc');
+/* tradfi */
+var consent=el('tradfi-consent-check'),tb=el('tradfi-sign-button'),ts=el('tradfi-agreement-status');
+function syncT(){var fu=window.__sobhitraderFuturesState||{};if(fu.tradfi_agreement_signed){consent.checked=false;consent.disabled=true;tb.disabled=true;tb.textContent='تم توقيع الاتفاقية';ts.textContent='أكد Binance توقيع الاتفاقية لهذا المفتاح التجريبي.';}
+  else{consent.disabled=!fu.connected;tb.disabled=!fu.connected||!consent.checked;tb.textContent='توقيع الاتفاقية عبر API';if(!fu.connected)ts.textContent='اربط Binance Futures Demo أولًا.';else if(!ts.dataset.pending&&!ts.dataset.error)ts.textContent='لم يُسجّل توقيع الاتفاقية لهذا المفتاح.';}}
+consent.addEventListener('change',function(){ts.dataset.pending='';ts.dataset.error='';syncT();});document.addEventListener('tradfi-state',syncT);
+tb.addEventListener('click',function(){if(!consent.checked||tb.disabled)return;if(!confirm('أؤكد أنني راجعت شروط Binance وأوافق على إرسال طلب توقيع اتفاقية TradFi Perps إلى حساب Futures Demo. لن يُرسل هذا الطلب أي أمر تداول. هل تريد المتابعة؟'))return;
+  tb.disabled=true;ts.dataset.pending='true';ts.textContent='جارٍ إرسال الطلب إلى Binance Demo…';
+  postJSON('/api/platforms/binance-futures/tradfi-agreement',{accepted:true}).then(function(j){if(!j.ok)throw new Error('تعذر إتمام الطلب.');ts.textContent='قبل Binance طلب التوقيع. لم تُرسل أي صفقة.';consent.checked=false;consent.disabled=true;tb.textContent='تم توقيع الاتفاقية';})
+  .catch(function(x){ts.textContent=x.message||'تعذر الاتصال بـ Binance Demo.';ts.dataset.pending='';ts.dataset.error='true';consent.disabled=false;tb.disabled=!consent.checked;});});
 
-    function show(clientX) {
-      var rect = svg.getBoundingClientRect();
-      var x = (clientX - rect.left) / rect.width * w;
-      var i = Math.max(0, Math.min(n - 1, Math.round(x / w * (n - 1))));
-      hover.style.display = '';
-      hv.setAttribute('x1', xs[i]); hv.setAttribute('x2', xs[i]);
-      hc.setAttribute('cx', xs[i]); hc.setAttribute('cy', ys[i]);
-      var delta = data[i].v - data[0].v;
-      tipEl.style.display = 'block';
-      var tx = Math.max(70, Math.min(w - 70, xs[i]));
-      tipEl.style.left = (tx / w * rect.width) + 'px';
-      tipEl.innerHTML = '<span class="' + (delta >= 0 ? 'up' : 'down') + '">' + signed(delta) + '</span>' +
-        '<small><bdi>' + money(data[i].v) + '</bdi><br>' + fmtTime(data[i].t, true) + '</small>';
-    }
-    function hide() { hover.style.display = 'none'; tipEl.style.display = 'none'; }
-    svg.addEventListener('pointermove', function (e) { show(e.clientX); });
-    svg.addEventListener('pointerdown', function (e) { show(e.clientX); });
-    svg.addEventListener('pointerleave', hide);
-  }
+/* equity chart (inline SVG, no libraries) */
+var range='1d',series=[];try{range=localStorage.getItem('range')||'1d';}catch(e){}
+function setActive(){[].forEach.call(el('ranges').children,function(b){b.classList.toggle('active',b.dataset.r===range);});}
+el('ranges').addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;range=b.dataset.r;try{localStorage.setItem('range',range);}catch(x){}setActive();loadEq();});
+function pt(p){var t=p.t!=null?p.t:(p.ts!=null?p.ts:p[0]),v=p.v!=null?p.v:(p.value!=null?p.value:p[1]);if(typeof t==='number'&&t<1e12)t*=1000;return {t:new Date(t).getTime(),v:Number(v)};}
+function loadEq(){fetch('/api/equity?range='+encodeURIComponent(range)+'&_='+Date.now(),{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){var a=Array.isArray(j)?j:(j.points||j.data||[]);series=a.map(pt).filter(function(p){return isFinite(p.t)&&isFinite(p.v);});drawChart();}).catch(function(){series=[];drawChart();});}
+function drawChart(){var box=el('chart'),old=box.querySelector('svg');if(old)old.remove();var ch=el('change');
+  if(series.length<2){el('chart-empty').style.display='grid';ch.textContent='—';return;}el('chart-empty').style.display='none';
+  var W=box.clientWidth,H=box.clientHeight,P=8,min=Infinity,max=-Infinity;series.forEach(function(p){min=Math.min(min,p.v);max=Math.max(max,p.v);});if(max===min){max+=1;min-=1;}
+  var t0=series[0].t,t1=series[series.length-1].t||t0+1;function X(t){return W-P-(t-t0)/(t1-t0||1)*(W-2*P);}function Y(v){return H-P-(v-min)/(max-min)*(H-2*P);}
+  var first=series[0].v,last=series[series.length-1].v,diff=last-first,up=diff>=0,col=getComputedStyle(document.documentElement).getPropertyValue(up?'--up':'--down').trim();
+  ch.innerHTML='<span class="'+(up?'up':'down')+'" dir="ltr">'+(up?'+':'-')+usd(Math.abs(diff),2)+' ('+num(first?diff/first*100:0,2)+'%)</span>';
+  var d=series.map(function(p,i){return (i?'L':'M')+X(p.t).toFixed(1)+' '+Y(p.v).toFixed(1);}).join(' ');
+  var ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.innerHTML='<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="'+col+'" stop-opacity=".35"/><stop offset="1" stop-color="'+col+'" stop-opacity="0"/></linearGradient></defs><path d="'+d+' L'+X(t1)+' '+(H-P)+' L'+X(t0)+' '+(H-P)+' Z" fill="url(#g)"/><path d="'+d+'" fill="none" stroke="'+col+'" stroke-width="2"/><circle id="dot" r="4" fill="'+col+'" style="display:none"/>';
+  box.insertBefore(svg,box.firstChild);var tip=el('tip'),dot=svg.querySelector('#dot');
+  svg.addEventListener('mousemove',function(e){var r=svg.getBoundingClientRect(),x=e.clientX-r.left,best=series[0],bd=1e9;series.forEach(function(p){var dd=Math.abs(X(p.t)-x);if(dd<bd){bd=dd;best=p;}});dot.setAttribute('cx',X(best.t));dot.setAttribute('cy',Y(best.v));dot.style.display='';tip.style.display='block';tip.textContent=usd(best.v,2)+' · '+new Date(best.t).toLocaleString('ar-SA',{hour:'2-digit',minute:'2-digit',day:'numeric',month:'short'});tip.style.left=Math.min(W-140,Math.max(0,X(best.t)-60))+'px';tip.style.top=Math.max(0,Y(best.v)-34)+'px';});
+  svg.addEventListener('mouseleave',function(){tip.style.display='none';dot.style.display='none';});}
+var rt;window.addEventListener('resize',function(){clearTimeout(rt);rt=setTimeout(drawChart,120);});
 
-  function load() {
-    fetch('/api/equity?range=' + encodeURIComponent(range) + '&_=' + Date.now(), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { data = Array.isArray(d) ? d : []; draw(); })
-      .catch(function () { data = []; draw(); });
-  }
-
-  buttons.forEach(function (b) {
-    b.addEventListener('click', function () {
-      range = b.getAttribute('data-r');
-      try { localStorage.setItem('range', range); } catch (e) {}
-      setActive(); load();
-    });
-  });
-
-  var resizeTimer;
-  window.addEventListener('resize', function () {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(draw, 120);
-  });
-
-  setActive();
-  load();
-})();
-</script>
-
-<script>
-(function () {
-  var consent = document.getElementById('tradfi-consent-check');
-  var button = document.getElementById('tradfi-sign-button');
-  var status = document.getElementById('tradfi-agreement-status');
-  if (!consent || !button || !status) return;
-  function syncTradfiConsent() {
-    var futures = window.__sobhitraderFuturesState || {};
-    var signed = !!futures.tradfi_agreement_signed;
-    var connected = !!futures.connected;
-    if (signed) {
-      consent.checked = false;
-      consent.disabled = true;
-      button.disabled = true;
-      button.textContent = 'تم توقيع الاتفاقية';
-      status.textContent = 'أكد Binance توقيع الاتفاقية لهذا المفتاح التجريبي.';
-    } else {
-      consent.disabled = !connected;
-      button.disabled = !connected || !consent.checked;
-      button.textContent = 'توقيع الاتفاقية عبر API';
-      if (!connected) status.textContent = 'اربط Binance Futures Demo أولًا.';
-      else if (!status.dataset.pending && !status.dataset.error) status.textContent = 'لم يُسجّل توقيع الاتفاقية لهذا المفتاح.';
-    }
-  }
-  consent.addEventListener('change', function () {
-    status.dataset.pending = '';
-    status.dataset.error = '';
-    syncTradfiConsent();
-  });
-  document.addEventListener('tradfi-state', syncTradfiConsent);
-  button.addEventListener('click', async function () {
-    if (!consent.checked || button.disabled) return;
-    var confirmed = window.confirm('أؤكد أنني راجعت شروط Binance وأوافق على إرسال طلب توقيع اتفاقية TradFi Perps إلى حساب Futures Demo. لن يُرسل هذا الطلب أي أمر تداول. هل تريد المتابعة؟');
-    if (!confirmed) return;
-    button.disabled = true;
-    status.dataset.pending = 'true';
-    status.textContent = 'جارٍ إرسال طلب الاتفاقية إلى Binance Demo…';
-    try {
-      var response = await fetch('/api/platforms/binance-futures/tradfi-agreement', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ accepted: true })
-      });
-      var data = await response.json().catch(function () { return {}; });
-      if (!response.ok || !data.ok) {
-        var detail = data.detail || {};
-        var message = typeof detail === 'string' ? detail :
-          [detail.message, detail.reason].filter(Boolean).join(' — ');
-        throw new Error(message || 'تعذر إتمام الطلب عبر Binance Demo.');
-      }
-      status.textContent = 'قبل Binance طلب التوقيع على حساب Demo. لم تُرسل أي صفقة.';
-      consent.checked = false;
-      consent.disabled = true;
-      button.textContent = 'تم توقيع الاتفاقية';
-    } catch (error) {
-      status.textContent = error.message || 'تعذر الاتصال بـ Binance Demo.';
-      status.dataset.pending = '';
-      status.dataset.error = 'true';
-      consent.disabled = false;
-      button.disabled = !consent.checked;
-    }
-  });
-  syncTradfiConsent();
+setActive();poll();loadEq();
+setInterval(poll,5000);setInterval(loadEq,60000);
+document.addEventListener('visibilitychange',function(){if(!document.hidden){poll();}});window.addEventListener('online',poll);
 })();
 </script>
 </body>
