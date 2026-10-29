@@ -28,6 +28,10 @@ TARGET_IDS = ["CLUSDT","BZUSDT","XAUUSDT","MUUSDT","NVDAUSDT","SPCXUSDT","AAPLUS
 TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
 
 
+# Float residue (e.g. 1.39e-17 after partial closes) is treated as a closed position.
+DUST_CONTRACTS = 1e-9
+
+
 class BinanceFuturesDemo:
     def __init__(self, api_key, secret_key, db_path, on_event=None, on_decision=None,
                  spot_exposure_provider=None, portfolio_risk_provider=None):
@@ -316,10 +320,11 @@ class BinanceFuturesDemo:
                         pos["funding_cursor_ms"] = int(opened.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
                     except (TypeError, ValueError):
                         pos["funding_cursor_ms"] = int(time.time() * 1000) - 120000
-                if float(pos.get("contracts") or 0.0) <= 0:
+                if abs(float(pos.get("contracts") or 0.0)) <= DUST_CONTRACTS:
                     # A zero-quantity row is an already-closed position; keeping it
                     # showed phantom PnL and failed reconciliation (protection_degraded).
-                    self._archive_zero_position(conn, pos)
+                    with self._connect() as archive_conn:
+                        self._archive_zero_position(archive_conn, pos)
                     continue
                 positions[row[0]] = pos
             return positions
