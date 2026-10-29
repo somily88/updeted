@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>صبحي تريدر · لوحة التحكم</title>
+<style>
+@font-face{font-family:Cairo;src:url(/fonts/Cairo.ttf) format("truetype");font-weight:200 1000;font-display:block}
+:root{--bg:#F9FAFB;--card:#fff;--ink:#1F2228;--mute:#8A9099;--line:#EEF0F3;--g1:#FF8A4C;--g2:#F2385A;--grad:linear-gradient(135deg,#FF9A4D 0%,#FF5E3A 50%,#F2385A 100%);--green:#10B981;--red:#EF4444;--r:22px;--sh:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06)}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Cairo,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;display:inline-block}
+header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:16px;padding:14px 28px;background:rgba(249,250,251,.8);backdrop-filter:blur(14px)}
+.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;white-space:nowrap}
+.logo i{width:36px;height:36px;border-radius:12px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 16px rgba(242,56,90,.3)}
+nav{flex:1;display:flex;justify-content:center;min-width:0}
+.navin{position:relative;display:flex;gap:4px;background:#fff;padding:5px;border-radius:999px;box-shadow:var(--sh);overflow-x:auto;scrollbar-width:none}
+.navin::-webkit-scrollbar{display:none}
+.pill{position:absolute;top:5px;bottom:5px;border-radius:999px;background:var(--ink);z-index:0}
+.navin button{position:relative;z-index:1;border:0;background:none;font:600 14px Cairo;color:var(--mute);padding:8px 18px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .25s}
+.navin button.on{color:#fff}
+.tools{display:flex;gap:10px;align-items:center}
+.ic{width:40px;height:40px;border-radius:50%;background:#fff;box-shadow:var(--sh);display:grid;place-items:center;position:relative}
+.ic .dot{position:absolute;top:9px;left:10px;width:8px;height:8px;border-radius:50%;background:var(--g2);border:2px solid #fff}
+.av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2B2F36,#555B66);color:#fff;display:grid;place-items:center;font-weight:700}
+main{max-width:1240px;margin:0 auto;padding:12px 28px 40px}
+.view{display:none}.view.show{display:block}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;grid-auto-flow:dense}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:22px;transition:transform .3s cubic-bezier(.3,1.4,.5,1),box-shadow .3s;min-width:0}
+.card:hover,.card.lift{transform:translateY(-5px);box-shadow:0 2px 4px rgba(16,24,40,.04),0 18px 40px rgba(16,24,40,.12)}
+.c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
+.r2{grid-row:span 2}
+.ttl{font-size:14px;color:var(--mute);font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.big{font-size:30px;font-weight:800;letter-spacing:-.5px}
+.up{color:var(--green);font-weight:700}.dn{color:var(--red);font-weight:700}
+.chip{font-size:12px;padding:3px 10px;border-radius:999px;background:#F3F4F6;color:#6B7280;font-weight:700;white-space:nowrap;display:inline-block}
+.g{background:#E7F8F1;color:#0E9F6E}.rd{background:#FDECEC;color:#DC3B3B}.y{background:#FEF5DC;color:#B7791F}.gr{background:#F1F2F4;color:#7A808A}.dk{background:var(--ink);color:#fff}
+.gradcard{background:var(--grad);color:#fff}.gradcard .ttl{color:rgba(255,255,255,.85)}
+.cta{display:flex;flex-direction:column;justify-content:space-between;min-height:190px;position:relative;overflow:hidden}
+.cta:after{content:"";position:absolute;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.12);left:-60px;bottom:-90px}
+.cta h3{font-size:24px;margin:0;font-weight:800;line-height:1.35}
+.arrow{width:52px;height:52px;border-radius:50%;background:#fff;display:grid;place-items:center;border:0;cursor:pointer;z-index:1;box-shadow:0 6px 18px rgba(0,0,0,.15)}
+.gauge{display:flex;flex-direction:column;align-items:center;text-align:center}
+.gauge svg{width:100%;max-width:330px}
+.stat .row{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:6px}
+.spark{width:110px;height:42px}
+.map{display:grid;grid-template-columns:repeat(9,1fr);gap:8px;margin-top:12px}
+.map div{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:700;color:#fff;direction:ltr;overflow:hidden}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:12px}
+.bars{display:flex;align-items:flex-end;gap:10px;height:170px;margin-top:14px;direction:ltr}
+.bars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
+.bars .b i{width:100%;max-width:30px;border-radius:10px 10px 6px 6px;background:linear-gradient(180deg,#FF9A4D,#F2385A)}
+.bars .b i.neg{background:#E5E7EB}
+.bars small{font-size:11px;color:var(--mute)}
+.wide{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:18px}
+.list{display:flex;flex-direction:column;gap:2px;max-height:250px;overflow:hidden}
+.li{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:flex-start}
+.li:last-child{border:0}.li .t{color:var(--mute);min-width:62px;font-weight:600}
+.li .x{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dark{background:var(--ink);color:#fff;border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:14px}
+.dark .kv{display:flex;justify-content:space-between;font-size:14px;color:#B9BEC7}.dark .kv b{color:#fff}
+.wbtn{align-self:flex-start;background:#fff;color:var(--ink);border:0;border-radius:999px;padding:11px 24px;font:700 14px Cairo;cursor:pointer;margin-top:auto}
+.live{display:inline-flex;align-items:center;gap:6px}.live:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(16,185,129,.2)}
+h1{font-size:38px;font-weight:800;margin:14px 0 4px;letter-spacing:-.5px}.sub{color:var(--mute);margin:0 0 22px}
+.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:18px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{color:var(--mute);font-weight:600;text-align:right;padding:12px 10px;font-size:13px;white-space:nowrap}
+td{padding:14px 10px;border-top:1px solid var(--line);vertical-align:middle}
+td.sym{font-weight:700;direction:ltr;text-align:right}
+.tblwrap{overflow-x:auto}
+.more{display:block;margin:18px auto 0;background:#fff;border:1px solid #E5E7EB;border-radius:999px;padding:10px 28px;font:700 14px Cairo;cursor:pointer;color:var(--ink)}
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.fp{border:0;background:#F3F4F6;color:#555;border-radius:999px;padding:8px 16px;font:700 13px Cairo;cursor:pointer}
+.fp.on{background:var(--ink);color:#fff}
+.search{margin-inline-start:auto;border:1px solid #E5E7EB;border-radius:999px;padding:9px 16px;font:500 14px Cairo;min-width:220px;background:#fff;outline:none}
+.reason{color:var(--mute);font-size:12.5px;max-width:330px}
+.form{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.fld label{display:block;font-size:13px;color:var(--mute);font-weight:600;margin-bottom:6px}
+.fld input{width:100%;border:1px solid #E5E7EB;border-radius:14px;padding:12px 14px;font:600 15px Cairo;background:#FBFBFC;outline:none}
+.fld input:focus{border-color:var(--g1);box-shadow:0 0 0 4px rgba(255,138,76,.15)}
+.gbtn{background:var(--grad);color:#fff;border:0;border-radius:999px;padding:12px 28px;font:700 14px Cairo;cursor:pointer;box-shadow:0 8px 20px rgba(242,56,90,.25)}
+.kvs{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kvs div{background:#F7F8FA;border-radius:14px;padding:12px}.kvs small{display:block;color:var(--mute);font-size:12px}.kvs b{font-size:15px}
+.hl{padding:14px 0;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center}.hl:first-child{border:0}
+.cursor{position:fixed;z-index:99;width:22px;height:22px;pointer-events:none;display:none;left:0;top:0}
+@media(max-width:900px){.c3,.c4,.c5,.c6,.c7,.c8{grid-column:span 6}.wide{grid-template-columns:1fr}.form,.kvs{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){header{flex-wrap:wrap;padding:12px 16px}nav{order:3;flex-basis:100%;justify-content:flex-start}.navin{max-width:100%}main{padding:8px 16px 30px}.grid{grid-template-columns:1fr}.grid>*{grid-column:1/-1!important;grid-row:auto!important}.sum{grid-template-columns:1fr}.form,.kvs{grid-template-columns:1fr}h1{font-size:30px}.search{min-width:0;width:100%}.big{font-size:26px}.logo{flex:1}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header>
+ <div class="logo"><i><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3-1-3 0-7 1-9.5z"/></svg></i>صبحي تريدر</div>
+ <nav><div class="navin" id="nav"><span class="pill" id="pill"></span>
+  <button data-v="home" class="on">الرئيسية</button><button data-v="dec">القرارات</button><button data-v="trades">الصفقات</button><button data-v="fut">Futures</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
+ <div class="tools"><div class="ic"><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="m13 13 4 4"/></svg></div><div class="ic"><span class="dot"></span><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><path d="M4 13V8a5 5 0 0 1 10 0v5l1.5 2h-13zM7 17a2 2 0 0 0 4 0"/></svg></div><div class="av">ص</div></div>
+</header>
+<main>
+ <section class="view show" id="v-home"><div class="grid" id="homeGrid"></div></section>
+ <section class="view" id="v-dec"></section>
+ <section class="view" id="v-trades"></section>
+ <section class="view" id="v-fut"></section>
+ <section class="view" id="v-news"></section>
+ <section class="view" id="v-set"></section>
+</main>
+<svg class="cursor" id="cur" viewBox="0 0 24 24"><path d="M4 2l16 9-7 2-3 7z" fill="#1F2228" stroke="#fff" stroke-width="1.5"/></svg>
+<script>
+/* ===== data layer: live endpoints (same-origin, Basic auth session) ===== */
+function errText(j,r){const d=j&&j.detail;if(typeof d==='string')return d;if(d&&d.message)return d.message+(d.reason?' — '+d.reason:'');if(Array.isArray(d))return 'بيانات غير صالحة';return 'HTTP '+r.status;}
+function getJSON(url){return fetch(url,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});}
+const API={
+ state:()=>getJSON('/api/state?_='+Date.now()),
+ equity:(range='1d')=>getJSON('/api/equity?range='+encodeURIComponent(range)+'&_='+Date.now()),
+ post:(url,body)=>fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body)}).then(r=>r.json().catch(()=>({})).then(j=>{if(!r.ok)throw new Error(errText(j,r));return j;})),
+ scanNow:()=>fetch('/check',{cache:'no-store',credentials:'same-origin'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);toast('بدأ فحص السوق في الخلفية');setTimeout(refresh,2500);}).catch(()=>toast('تعذّر بدء الفحص'))
+};
+function act(p,ok){return p.then(j=>{toast(ok);refresh();return j;}).catch(e=>{toast('خطأ: '+e.message);});}
+function refresh(){return API.state().then(d=>{S=d;renderAll();}).catch(()=>{});}
+/* ===== motion: spring easing via linear(), every animation registered so frames can be seeked ===== */
+const RM=matchMedia('(prefers-reduced-motion:reduce)').matches;
+function springEase(st=170,dm=18,n=60){let x=0,v=0,pts=[],dt=1/n*1.1;for(let i=0;i<=n;i++){pts.push(+(x).toFixed(4));const f=-st*(x-1)-dm*v;v+=f*dt/ (1);x+=v*dt;}pts[n]=1;return 'linear('+pts.join(',')+')';}
+const SPRING=springEase(),SPRING2=springEase(260,22);
+let NOW=0;const ANIMS=[];
+function A(el,kf,o){if(RM)return null;const a=el.animate(kf,Object.assign({fill:'both'},o));ANIMS.push({a,s:NOW});return a;}
+/* ===== helpers ===== */
+const $=s=>document.querySelector(s);
+const f2=(n,d=2)=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const sg=n=>(n>=0?'+':'')+f2(n);
+const N=h=>`<span class="num">${h}</span>`;
+const tm=iso=>{if(!iso)return'—';const d=new Date(iso);return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Riyadh'})};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m){const t=document.createElement('div');t.textContent=m;t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1F2228;color:#fff;padding:12px 22px;border-radius:999px;font:600 14px Cairo;z-index:100';document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
+function spark(vals,color='#10B981'){if(!vals||vals.length<2)vals=[0,0];const mn=Math.min(...vals),mx=Math.max(...vals),r=mx-mn||1,w=110,h=42;
+ const p=vals.map((v,i)=>[i/(vals.length-1)*w,h-4-(v-mn)/r*(h-8)]);const d='M'+p.map(q=>q.map(z=>z.toFixed(1)).join(',')).join('L');const id='s'+Math.random().toString(36).slice(2,7);
+ return `<svg class="spark" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".25"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path d="${d}L${w},${h}L0,${h}Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;}
+function outcomeCls(o,st){const s=(o||'')+' '+(st||'');if(/نُفّذ|نفذ|منفّذ|منفذ|تم التنفيذ|filled|executed|مُرسل/i.test(s)&&!/لم يُرسل/.test(s))return'g';if(/مرفوض|رفض|reject|فشل/i.test(s))return'rd';if(/تجميد|مجمد|تسوية|reconcile|frozen|معلّق/i.test(s))return'y';return'gr';}
+function sigPill(s){return s==='long'?'<span class="chip g">Long ▲</span>':s==='short'?'<span class="chip rd">Short ▼</span>':'<span class="chip gr">لا إشارة</span>';}
+const isFut=s=>/:USDT/.test(s||'');const sym=s=>(s||'').replace(':USDT','');
+/* ===== render ===== */
+let S,EQ;
+function homeHTML(){
+ const w=S.wallet,fu=S.futures,st=S.stats,dr=S.daily_risk;const total=(w.total||0)+(fu.balance||0);const base=(dr.spot.baseline||0)+(dr.futures.baseline||0);
+ const dPct=base?(dr.spot.equity+dr.futures.equity-base)/base*100:0;const dUsd=dr.spot.equity+dr.futures.equity-base;
+ const exp=Math.min(100,Math.max(0,st.exposure||0));const lossUsed=Math.max(dr.spot.loss_pct||0,dr.futures.loss_pct||0)/(dr.spot.limit_pct||9);const L=Math.PI*120,frac=Math.min(.99,Math.max(.04,1-lossUsed));
+ const ang=Math.PI*(1-frac),cx=150+120*Math.cos(ang),cy=150-120*Math.sin(ang);
+ const ev=EQ.map(p=>p.v);const fcum=[];let c=0;S.trades.filter(t=>isFut(t.symbol)).slice().reverse().forEach(t=>{c+=t.pnl_usdt||0;fcum.push(c)});
+ const wr=[];let wn=0,tt=0;S.trades.slice().reverse().forEach(t=>{tt++;if(t.status==='WIN')wn++;wr.push(wn/tt*100)});
+ const fwr=fu.closed?fu.wins/fu.closed*100:0;
+ // hourly equity change bars
+ const bk={};EQ.forEach(p=>{const h=new Date(p.t*1000).toLocaleTimeString('en-GB',{hour:'2-digit',timeZone:'Asia/Riyadh'});(bk[h]=bk[h]||[]).push(p.v)});
+ const bars=Object.entries(bk).map(([h,v])=>[h,v[v.length-1]-v[0]]).slice(-10);const bm=Math.max(...bars.map(b=>Math.abs(b[1])),.01);
+ const mk=S.markets.slice().sort((a,b)=>(b.signal_strength||0)-(a.signal_strength||0)).slice(0,27);
+ const dot=m=>{const s=m.signal_strength||0;const a=.15+s/100*.85;return `<div title="${esc(m.symbol)} · ${f2(s,1)}" style="background:rgba(255,94,58,${a.toFixed(2)});${m.in_position?'box-shadow:0 0 0 3px #fff,0 0 0 5px #F2385A;':''}">${esc(m.symbol.split('/')[0].slice(0,4))}</div>`};
+ const decs=S.decisions.slice(0,5);
+ return `
+ <div class="card c5 r2 gauge"><div class="ttl" style="width:100%"><span>إجمالي المحفظة (Spot + Futures)</span><span class="chip">${S.env==='demo'?'تجريبي':'حقيقي'}</span></div>
+  <svg viewBox="0 0 300 175"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#FF9A4D"/><stop offset="1" stop-color="#F2385A"/></linearGradient></defs>
+  <path d="M30 150A120 120 0 0 1 270 150" fill="none" stroke="#F1F2F4" stroke-width="20" stroke-linecap="round"/>
+  <path class="arc" d="M30 150A120 120 0 0 1 270 150" fill="none" stroke="url(#gg)" stroke-width="20" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${L*(1-frac)}"/>
+  <circle class="gdot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="#F2385A" stroke="#fff" stroke-width="4"/></svg>
+  <div style="margin-top:-78px" class="big">${N('$'+f2(total))}</div>
+  <div class="${dPct>=0?'up':'dn'}">${N(sg(dPct)+'%')} اليوم · ${N(sg(dUsd)+'$')}</div>
+  <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:center"><span class="chip">ميزانية المخاطر المتبقية ${N(f2(frac*100,0)+'%')}</span><span class="chip">التعرض ${N(f2(exp,1)+'%')}</span><span class="chip">صفقات نشطة ${N(S.settings.active_trades)}</span><span class="chip">غير محقق ${N(sg(st.unrealized))}</span></div>
+ </div>
+ <div class="card c4 stat"><div class="ttl">رصيد Spot <span class="chip">${S.balance_status==='fresh'?'محدّث':'قديم'}</span></div><div class="row"><div><div class="big">${N(f2(w.total))}</div><div class="${dr.spot.equity>=dr.spot.baseline?'up':'dn'}">${N(sg((dr.spot.equity-dr.spot.baseline)/dr.spot.baseline*100)+'%')}</div></div>${spark(ev,dr.spot.equity>=dr.spot.baseline?'#10B981':'#EF4444')}</div></div>
+ <div class="card c3 gradcard cta"><div class="ttl">إجراء سريع</div><h3>فحص السوق<br>الآن</h3><button class="arrow" onclick="API.scanNow()" aria-label="فحص"><svg width="20" height="20" fill="none" stroke="#F2385A" stroke-width="2.5" stroke-linecap="round"><path d="M15 10H5m4-4-4 4 4 4"/></svg></button></div>
+ <div class="card c4 stat"><div class="ttl">رصيد Futures <span class="chip">${fu.open_positions} مراكز</span></div><div class="row"><div><div class="big">${N(f2(fu.balance))}</div><div class="${fu.realized_pnl>=0?'up':'dn'}">${N(sg(fu.realized_pnl)+'$')} محقق</div></div>${spark(fcum)}</div></div>
+ <div class="card c3 stat"><div class="ttl">نسبة الفوز</div><div class="big">${N(f2(st.win_rate,0)+'%')}</div><div class="row"><small style="color:var(--mute)">Spot ${N(st.wins+'/'+st.total)} · Futures ${N(fu.wins+'/'+fu.closed)}</small>${spark(wr)}</div></div>
+ <div class="card c7"><div class="ttl">خريطة الأسواق <span class="chip">${S.markets.length} رمز · حسب قوة الإشارة</span></div><div class="map">${mk.map(dot).join('')}</div>
+  <div class="legend"><span>● ضعيفة</span><span style="color:#F2385A">● قوية</span><span>◎ مركز مفتوح</span></div></div>
+ <div class="card c5"><div class="ttl">تغيّر المحفظة بالساعة <span class="chip">USDT</span></div><div class="bars">${bars.map(([h,v])=>`<div class="b"><i class="${v<0?'neg':''}" style="height:${Math.max(4,Math.abs(v)/bm*130)}px"></i><small>${h}</small></div>`).join('')}</div></div>
+ <div class="card c12"><div class="ttl">آخر القرارات <a href="#" onclick="go('dec');return false" class="chip dk" style="text-decoration:none">عرض الكل</a></div>
+  <div class="tblwrap"><table><tbody>${decs.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td class="sym">${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td class="reason">${esc(d.reason)}</td></tr>`).join('')}</tbody></table></div></div>
+ <div class="card c12"><div class="wide"><div><div class="ttl">سجل الفحص</div><div class="list">${S.events.slice(0,7).map(e=>`<div class="li"><span class="t">${N(e.t)}</span><span class="chip">${esc(e.tag)}</span><span class="x" title="${esc(e.text)}">${esc(e.text)}</span></div>`).join('')}</div></div>
+  <div class="dark"><div style="font-size:18px;font-weight:800">حالة البوت</div>
+   <div class="kv"><span>التداول</span><b class="live">${entriesOn()?'يعمل':'متوقف'}${S.trading_enabled?'':' · محاكاة'}</b></div>
+   <div class="kv"><span>الفاحص</span><b>${S.scanner.status==='idle'?'خامل':S.scanner.status==='running'?'يفحص الآن':esc(S.scanner.status)}</b></div>
+   <div class="kv"><span>آخر فحص</span><b>${N(tm(S.scanner.last_completed_at))}</b></div>
+   <div class="kv"><span>مدة الفحص</span><b>${N(f2(S.scanner.duration_seconds,1)+'s')}</b></div>
+   <div class="kv"><span>Telegram</span><b>${S.telegram?'متصل':'غير متصل'}</b></div>
+   <button class="wbtn" id="tradeBtn" onclick="toggleTrading()">${entriesOn()?'إيقاف التداول':'تشغيل التداول'}</button></div></div></div>`;}
+function summary(cards){return `<div class="sum">${cards.map((c,i)=>`<div class="card ${i==0?'gradcard':''}"><div class="ttl">${c[0]}</div><div class="big">${N(c[1])}</div><div style="margin-top:4px;${i==0?'':'color:var(--mute)'}">${c[2]}</div></div>`).join('')}</div>`;}
+function tradeRows(pos,trs){
+ return pos.map(p=>`<tr><td class="sym">${esc(sym(p.symbol))}</td><td>${isFut(p.symbol)?'Futures':'Spot'}</td><td>${N(f2(p.entry,4))}</td><td>${N(f2(p.price,4))}</td><td class="${p.pnl_usdt>=0?'up':'dn'}">${N(sg(p.pnl_usdt))}</td><td><span class="chip y">مفتوح</span></td><td><span class="chip ${/نشط/.test(p.protection_status)?'g':'y'}">${esc(p.protection_status||'—')}</span></td><td style="color:var(--mute)">${N(esc((p.time||'').slice(5,16)))}</td></tr>`).join('')+
+ trs.map(t=>`<tr><td class="sym">${esc(sym(t.symbol))} ${t.side?`<span class="chip">${t.side}</span>`:''}</td><td>${esc(t.market_type||'Spot')}</td><td>${N(f2(t.entry,4))}</td><td>${N(f2(t.exit,4))}</td><td class="${t.pnl_usdt>=0?'up':'dn'}">${N(sg(t.pnl_usdt))}</td><td><span class="chip ${t.status==='WIN'?'g':'rd'}">${t.status==='WIN'?'رابح':'خاسر'}</span></td><td style="color:var(--mute)">رسوم ${N(f2((t.fees_usdt||0)+(t.funding_usdt||0)))}</td><td style="color:var(--mute)">${N(esc((t.time||'').slice(5,16)))}</td></tr>`).join('');}
+const TH='<thead><tr><th>الرمز</th><th>السوق</th><th>الدخول</th><th>السعر/الخروج</th><th>الربح $</th><th>الحالة</th><th>الحماية / الرسوم</th><th>الوقت</th></tr></thead>';
+function tradesHTML(){const fees=S.trades.reduce((a,t)=>a+(t.fees_usdt||0)+(t.funding_usdt||0),0);
+ return `<h1>الصفقات</h1><p class="sub">المراكز المفتوحة والصفقات المغلقة في Spot و Futures</p>`+summary([['الربح المحقق','$'+f2((S.stats.realized_total||0)+(S.futures.realized_pnl||0)),'Spot '+sg(S.stats.realized_total)+' · Futures '+sg(S.futures.realized_pnl)],['قيمة المراكز المفتوحة','$'+f2(S.wallet.positions_value),S.positions.length+' مركز مفتوح'],['الرسوم والتمويل','$'+f2(fees),'آخر '+S.trades.length+' صفقات مغلقة']])+
+ `<div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(S.positions,S.trades.slice(0,Math.max(0,LIM.trades-S.positions.length)))}</tbody></table></div>${moreBtn('trades',S.positions.length+S.trades.length,15)}</div>`;}
+function futHTML(){const fu=S.futures;const pos=S.positions.filter(p=>isFut(p.symbol)),trs=S.trades.filter(t=>isFut(t.symbol));
+ return `<h1>Futures</h1><p class="sub">${fu.environment==='demo'?'حساب تجريبي':'حساب حقيقي'} · ${fu.connected?'متصل':'غير متصل'} · ${fu.trading_enabled?'التداول مفعّل':'التداول متوقف'}</p>`+summary([['الرصيد','$'+f2(fu.balance),'متاح $'+f2(fu.free_balance)],['الربح المحقق','$'+f2(fu.realized_pnl),fu.wins+' رابح · '+fu.losses+' خاسر'],['المخاطر اليومية',f2(fu.daily_risk.loss_pct)+'%','الحد '+fu.daily_risk.limit_pct+'% · '+esc(fu.daily_risk.reason)]])+
+ `<div class="card" style="margin-bottom:18px"><div class="kvs"><div><small>الحماية</small><b>${fu.protection_degraded?'<span class="chip y">غير مكتملة</span>':'<span class="chip g">كاملة</span>'}</b></div><div><small>اتفاقية TradFi</small><b>${fu.tradfi_agreement_signed?'موقّعة':'غير موقّعة'}</b></div><div><small>الرموز</small><b>${N(fu.symbols.length)}</b></div><div><small>غير متاحة</small><b>${N(fu.unavailable_symbols.length)}</b></div></div></div>
+ <div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(pos,trs)}</tbody></table></div></div>`;}
+let DF='all',DQ='';
+function decHTML(){const today=new Date().toISOString().slice(0,10);const all=S.decisions;const td=all.filter(d=>(d.created_at||'').startsWith(today)).length||all.length;
+ const ex=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='g').length,rj=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='rd').length;
+ const fl=[['all','الكل'],['spot','Spot'],['fut','Futures'],['ex','منفّذ'],['rj','مرفوض']];
+ return `<h1>القرارات</h1><p class="sub">كل قرار اتخذه البوت في آخر فحص: الإشارة، النتيجة، والسبب</p>`+summary([['قرارات اليوم',td,'آخر فحص '+tm(S.scanner.last_completed_at)],['منفّذة',ex,'أوامر أُرسلت إلى Binance'],['مرفوضة',rj,'رفضتها ضوابط المخاطر']])+
+ `<div class="card"><div class="filters">${fl.map(([k,l])=>`<button class="fp ${DF==k?'on':''}" onclick="DF='${k}';renderDec()">${l}</button>`).join('')}<input class="search" id="dq" placeholder="ابحث برمز العملة… مثل BTC" value="${esc(DQ)}" oninput="DQ=this.value;renderDecRows()"></div>
+ <div class="tblwrap"><table><thead><tr><th>الوقت</th><th>السوق</th><th>الرمز</th><th>الإشارة</th><th>الاستراتيجية</th><th>الإطار</th><th>السعر</th><th>النتيجة</th><th>الأمر</th><th>السبب</th></tr></thead><tbody id="decRows"></tbody></table></div><div id="decMore"></div></div>`;}
+function renderDecRows(){const q=DQ.trim().toUpperCase();const rows=S.decisions.filter(d=>{const c=outcomeCls(d.outcome,d.order_status);
+ if(DF=='spot'&&/Futures/i.test(d.market))return false;if(DF=='fut'&&!/Futures/i.test(d.market))return false;if(DF=='ex'&&c!='g')return false;if(DF=='rj'&&c!='rd')return false;return !q||(d.symbol||'').toUpperCase().includes(q);});const total=rows.length;rows.splice(LIM.dec);$('#decMore').innerHTML=moreBtn('dec',total,25);
+ $('#decRows').innerHTML=rows.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td><span class="chip">${/Futures/i.test(d.market)?'Futures':'Spot'}</span></td><td class="sym">${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td>${esc(d.strategy)}</td><td>${N(esc(d.timeframe))}</td><td>${N(f2(d.price,4))}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td><span class="chip gr">${esc(d.order_status)}</span></td><td class="reason">${esc(d.reason)}${(d.api_message_ar||d.api_message)?`<br><small style="color:#DC3B3B">${esc(d.api_message_ar||d.api_message)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--mute)">لا توجد قرارات مطابقة</td></tr>';}
+function renderDec(){$('#v-dec').innerHTML=decHTML();renderDecRows();}
+function newsHTML(){const n=S.news;const sev=n.severity||0;
+ return `<h1>الأخبار</h1><p class="sub">فلتر الأخبار يوقف الدخول عند الأخبار الخطرة</p>`+summary([['الحالة',n.blocked?'إيقاف مؤقت':'مسموح',esc(n.reason)],['الخطورة',sev+' / 10','عتبة الإيقاف '+S.params.news_severity],['المصدر',esc(n.source||'—'),'آخر فحص '+esc(n.checked_at||'—')]])+
+ `<div class="card">${(n.headlines||[]).map(h=>`<div class="hl"><span class="chip">${esc(h.source)}</span><span dir="${h.title_ar?'rtl':'ltr'}" style="flex:1">${esc(h.title_ar||h.title)}</span></div>`).join('')}</div>`;}
+function setHTML(){const st=S.settings,p=S.params,fp=S.platforms||[];
+ return `<h1>الإعدادات</h1><p class="sub">تُطبّق فوراً حتى أثناء الفحص</p>
+ <div class="card" style="margin-bottom:18px"><div class="ttl">حجم الصفقات والحدود</div><form class="form" onsubmit="event.preventDefault();saveSettings(this)">
+  <div class="fld"><label>حجم الصفقة (USDT)</label><input name="trade_amount_usdt" type="number" min="1" step="1" value="${S.trade_amount}"></div>
+  <div class="fld"><label>أقصى صفقات Spot (نشطة ${st.spot_active_trades})</label><input name="spot_max_concurrent_trades" type="number" min="1" value="${st.spot_max_concurrent_trades}"></div>
+  <div class="fld"><label>أقصى صفقات Futures (نشطة ${st.futures_active_trades})</label><input name="futures_max_concurrent_trades" type="number" min="1" value="${st.futures_max_concurrent_trades}"></div>
+  <div><button class="gbtn">حفظ الإعدادات</button></div></form></div>
+ <div class="grid">${[['binance','Binance Spot','/api/platforms/binance/credentials'],['binance_futures','Binance Futures','/api/platforms/binance-futures/credentials']].map(([id,nm,url])=>{const pl=fp.find(x=>x.id==id)||{};return `<div class="card c6"><div class="ttl">${nm} <span class="chip ${pl.connected?'g':'rd'}">${pl.connected?'متصل':'غير متصل'} · ${pl.environment||''}</span></div>
+  <form class="form" style="grid-template-columns:1fr" onsubmit="event.preventDefault();saveCreds(this,'${url}')"><div class="fld"><label>API Key</label><input name="api_key" autocomplete="off" placeholder="••••••••"></div><div class="fld"><label>Secret Key</label><input name="secret_key" type="password" autocomplete="off" placeholder="••••••••"></div><div><button class="gbtn">تحديث المفاتيح</button>${id=='binance_futures'?` <button type="button" class="more" style="display:inline-block;margin:0 8px" onclick="signTradFi()">${S.futures.tradfi_agreement_signed?'اتفاقية TradFi موقّعة ✓':'توقيع اتفاقية TradFi'}</button>`:''}</div></form></div>`}).join('')}
+ <div class="card c12"><div class="ttl">معايير الاستراتيجية (للعرض)</div><div class="kvs">${[['الإطار الزمني',p.timeframe],['الوضع',p.strategy_mode],['الاستراتيجيات',p.strategies.join('، ')],['EMA',p.ema_period],['RSI الأقصى',p.rsi_max],['شرط MACD',p.require_macd?'نعم':'لا'],['الهدف (R)',p.tp_r_multiple],['وقف الخسارة %',p.sl],['التتبع %',p.trail],['خطورة الأخبار',p.news_severity],['إيقاف الأخبار (ساعة)',p.news_pause_h],['حد الخسارة اليومي %',S.daily_risk.spot.limit_pct]].map(([k,v])=>`<div><small>${k}</small><b>${N(esc(v))}</b></div>`).join('')}</div></div></div>`;}
+function saveSettings(f){act(API.post('/api/settings',{trade_amount_usdt:Number(f.trade_amount_usdt.value),spot_max_concurrent_trades:parseInt(f.spot_max_concurrent_trades.value,10),futures_max_concurrent_trades:parseInt(f.futures_max_concurrent_trades.value,10)}),'تم حفظ الإعدادات');}
+function saveCreds(f,url){const k=f.api_key.value.trim(),sk=f.secret_key.value.trim();if(!k||!sk){toast('أدخل المفتاحين');return;}
+ act(API.post(url,{api_key:k,secret_key:sk}),'تم حفظ المفاتيح مشفّرة').then(()=>{f.reset();});}
+function signTradFi(){if(S.futures.tradfi_agreement_signed){toast('الاتفاقية موقّعة مسبقاً');return;}
+ if(!confirm('هل قرأت شروط TradFi وتوافق على إرسال طلب توقيع الاتفاقية لحساب Demo؟'))return;
+ act(API.post('/api/platforms/binance-futures/tradfi-agreement',{accepted:true}),'قبل Binance طلب التوقيع. لم تُرسل أي صفقة.');}
+function entriesOn(){const e=S.entries_enabled;return !e||(e.spot||e.futures);}
+function toggleTrading(){const on=entriesOn();
+ const msg=on?'إيقاف التداول؟\nلن يفتح البوت صفقات جديدة في Spot و Futures.\nالمراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.':'تشغيل التداول؟\nسيعود البوت لفتح صفقات جديدة في Spot و Futures.';
+ if(!confirm(msg))return;const b=$('#tradeBtn');if(b)b.disabled=true;
+ act(API.post('/api/trading',{enabled:!on,market:'all'}),on?'تم إيقاف التداول':'تم تشغيل التداول');}
+/* ===== "عرض المزيد" row limits ===== */
+const LIM={trades:10,dec:25};
+function moreBtn(k,total,step){return total>LIM[k]?`<button class="more" onclick="LIM.${k}+=${step};${k==='dec'?'renderDecRows()':"$('#v-trades').innerHTML=tradesHTML()"}">عرض المزيد (${N(total-LIM[k])})</button>`:'';}
+/* ===== nav + transitions ===== */
+let cur='home';const nav=$('#nav'),pill=$('#pill');
+function pillTo(btn,animate){const r={left:btn.offsetLeft+'px',width:btn.offsetWidth+'px'};if(animate){const from={left:pill.style.left,width:pill.style.width};A(pill,[from,r],{duration:550,easing:SPRING});}pill.style.left=r.left;pill.style.width=r.width;}
+function enter(view){const cards=view.querySelectorAll('.card, h1, .sub');cards.forEach((c,i)=>A(c,[{opacity:0,transform:'scale(.92) translateY(14px)'},{opacity:1,transform:'none'}],{duration:700,delay:i*55,easing:SPRING}));}
+function go(v,t){if(v==cur)return;const btn=nav.querySelector(`[data-v="${v}"]`);nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b==btn));pillTo(btn,true);btn.scrollIntoView&&btn.scrollIntoView({inline:'nearest',block:'nearest'});
+ const old=$('#v-'+cur),nw=$('#v-'+v);cur=v;
+ const show=()=>{old.classList.remove('show');nw.classList.add('show');scrollTo(0,0);enter(nw);};
+ if(RM){show();return;}
+ A(old,[{opacity:1,transform:'none'},{opacity:0,transform:'scale(.95)'}],{duration:220,easing:'ease-in'});setTimeout(()=>{old.getAnimations().forEach(a=>a.cancel());show();},220);}
+nav.addEventListener('click',e=>{const b=e.target.closest('button');if(b)go(b.dataset.v);});
+function renderAll(){$('#homeGrid').innerHTML=homeHTML();if(document.activeElement&&document.activeElement.id==='dq')renderDecRows();else renderDec();$('#v-trades').innerHTML=tradesHTML();$('#v-fut').innerHTML=futHTML();$('#v-news').innerHTML=newsHTML();const vs=$('#v-set');if(!vs.contains(document.activeElement))vs.innerHTML=setHTML();}
+async function boot(){try{[S,EQ]=await Promise.all([API.state(),API.equity().catch(()=>[])]);}catch(e){document.body.insertAdjacentHTML('afterbegin','<div style="background:#FEE2E2;color:#991B1B;padding:12px;text-align:center;font-weight:700">تعذّر تحميل بيانات البوت — '+esc(e.message)+'</div>');return;}
+ EQ=Array.isArray(EQ)?EQ:(EQ.points||EQ.data||[]);renderAll();await document.fonts.ready;pillTo(nav.querySelector('.on'),false);
+ enter($('#v-home'));setInterval(()=>{if(!document.hidden)refresh();},15000);}
+boot();
+</script>
+</body></html>
