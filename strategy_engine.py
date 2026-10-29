@@ -187,6 +187,33 @@ def _load(exchange, symbol, timeframe, cache):
     return cache[timeframe]
 
 
+PREFETCH_TIMEFRAMES = ("1d", "4h", "1h", "15m", "5m")
+
+
+def prefetch_ohlcv(exchange, symbols, timeframes=PREFETCH_TIMEFRAMES, workers=5):
+    """Fetch candles for many symbols in parallel; returns {symbol: cache}.
+
+    Only read-only OHLCV requests run in the pool (ccxt enableRateLimit still
+    throttles them). Failed fetches are left out so evaluate_symbol retries lazily.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    caches = {symbol: {} for symbol in symbols}
+    jobs = [(symbol, tf) for symbol in symbols for tf in timeframes]
+
+    def fetch(job):
+        symbol, tf = job
+        try:
+            return job, retry_api_read(exchange.fetch_ohlcv, symbol, timeframe=tf, limit=90)
+        except Exception:
+            return job, None
+
+    with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+        for (symbol, tf), candles in pool.map(fetch, jobs):
+            if candles:
+                caches[symbol][tf] = candles[:-1]
+    return caches
+
+
 def _view(candles):
     if len(candles) < 55:
         return None
@@ -525,11 +552,11 @@ def _higher_timeframe_confirms(exchange, symbol, cache, direction):
 
 
 def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
-                    enable_hybrids=True, allowed_strategies=None):
+                    enable_hybrids=True, allowed_strategies=None, cache=None):
     """Evaluate established and hybrid strategies using closed candles only."""
     context = context or {}
     directions = ("long", "short") if allow_short else ("long",)
-    cache = {}
+    cache = dict(cache) if cache else {}
     candidates = []
 
     for timeframe in ("1h", "15m"):

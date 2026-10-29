@@ -44,6 +44,10 @@ if not 0.5 <= TP_R_MULTIPLE <= 10:
 SCAN_INTERVAL_MINUTES = max(1, int(os.getenv("SCAN_INTERVAL_MINUTES", "3")))
 # قيم حجم الصفقة القديمة الصغيرة التي تُرحَّل مرة واحدة إلى الحد الافتراضي الجديد
 LEGACY_TRADE_AMOUNTS = (100.0, 150.0)
+# أقصى نقص في رصيد Spot (٪) يُعتبر رسوماً مخصومة من العملة نفسها (مثل BNB) فيُعتمد الرصيد الفعلي تلقائياً
+SPOT_RECONCILE_ADOPT_PCT = float(os.getenv("SPOT_RECONCILE_ADOPT_PCT", "15"))
+# عدد خيوط جلب الشموع المتوازي أثناء الفحص
+SCAN_FETCH_WORKERS = max(1, min(8, int(os.getenv("SCAN_FETCH_WORKERS", "5"))))
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 

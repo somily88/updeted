@@ -72,3 +72,28 @@ def test_dust_position_is_archived_not_loaded(tmp_path):
     with engine._connect() as conn:
         reasons = [r[0] for r in conn.execute("SELECT exit_reason FROM futures_trades")]
     assert reasons == ["zero_qty_cleanup"]
+
+
+def _funding_engine(rate=None, error=False):
+    import futures_engine as fe
+
+    class Ex:
+        def fetch_funding_rate(self, symbol):
+            if error:
+                raise RuntimeError("down")
+            return {"fundingRate": rate, "interval": "8h"}
+    eng = fe.BinanceFuturesDemo.__new__(fe.BinanceFuturesDemo)
+    eng.exchange = Ex()
+    return eng
+
+
+def test_funding_filter_skips_costly_long():
+    # 0.1%/8h over 24h = 0.3% of 100 = 0.3 per unit vs 1.0 target -> 30% > 25%
+    ok, reason = _funding_engine(0.001)._funding_check("X/USDT:USDT", "long", 100.0, 1.0)
+    assert not ok and "التمويل" in reason
+
+
+def test_funding_filter_allows_receiving_side_and_fails_open():
+    assert _funding_engine(0.001)._funding_check("X/USDT:USDT", "short", 100.0, 1.0)[0]
+    assert _funding_engine(0.0001)._funding_check("X/USDT:USDT", "long", 100.0, 1.0)[0]
+    assert _funding_engine(error=True)._funding_check("X/USDT:USDT", "long", 100.0, 1.0)[0]

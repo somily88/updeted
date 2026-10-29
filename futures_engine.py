@@ -30,6 +30,9 @@ TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))
 
 # Float residue (e.g. 1.39e-17 after partial closes) is treated as a closed position.
 DUST_CONTRACTS = 1e-9
+# فلتر التمويل: تخطَّ الدخول إذا تجاوزت تكلفة التمويل المتوقعة هذه النسبة من الربح المستهدف
+FUNDING_MAX_COST_FRACTION = float(os.getenv("FUNDING_MAX_COST_FRACTION", "0.25"))
+FUNDING_EXPECTED_HOLD_HOURS = float(os.getenv("FUNDING_EXPECTED_HOLD_HOURS", "24"))
 
 
 class BinanceFuturesDemo:
@@ -244,6 +247,26 @@ class BinanceFuturesDemo:
                     symbol, type(exc).__name__))
                 pos["funding_warning_sent"] = True
             return False
+
+    def _funding_check(self, symbol, direction, price, target_distance):
+        """Return (allowed, reason). Fails open when the funding rate is unavailable."""
+        try:
+            info = self.exchange.fetch_funding_rate(symbol) or {}
+            rate = float(info.get("fundingRate") or 0.0)
+            interval = str(info.get("interval") or "8h").strip().lower()
+            hours = float(interval[:-1]) if interval.endswith("h") and interval[:-1] else 8.0
+        except Exception:
+            return True, ""
+        pays = (direction == "long" and rate > 0) or (direction == "short" and rate < 0)
+        if not pays or target_distance <= 0 or price <= 0:
+            return True, ""
+        periods = max(FUNDING_EXPECTED_HOLD_HOURS / max(hours, 0.5), 1.0)
+        cost_per_unit = abs(rate) * periods * price
+        fraction = cost_per_unit / target_distance
+        if fraction > FUNDING_MAX_COST_FRACTION:
+            return False, ("تكلفة التمويل المتوقعة ({:.4%} كل {:g} ساعات) تستهلك {:.0%} من الربح المستهدف"
+                           " (الحد {:.0%})؛ تخطي الدخول").format(rate, hours, fraction, FUNDING_MAX_COST_FRACTION)
+        return True, ""
 
     def _portfolio_risk_check(self, symbol, candidate_risk_usdt):
         if not callable(self.portfolio_risk_provider):
@@ -1164,6 +1187,14 @@ class BinanceFuturesDemo:
                 if not liquid:
                     self.on_event("GATE", "تخطي Futures {}: {}".format(symbol, liquidity_reason))
                     self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', liquidity_reason,
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                funding_atr = max(float(setup.get("atr") or 0), price * 0.0005)
+                funding_ok, funding_reason = self._funding_check(
+                    symbol, direction, price, funding_atr * STRATEGY_RISK[setup["strategy"]]["target_atr"])
+                if not funding_ok:
+                    self.on_event("GATE", "تخطي Futures {}: {}".format(symbol, funding_reason))
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', funding_reason,
                                      order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 # Fail closed if the account has an unmanaged position on this contract.
