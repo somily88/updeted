@@ -26,7 +26,8 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional,
-                             market_liquidity_check, retry_api_read, fetch_fresh_ticker)
+                             market_liquidity_check, retry_api_read, fetch_fresh_ticker,
+                             prefetch_ohlcv)
 from futures_engine import BinanceFuturesDemo
 from exchange_client import make_binance_exchange
 from risk_controls import (daily_loss_status, portfolio_risk_status,
@@ -898,6 +899,41 @@ def _fees_in(order, currency):
     return total
 
 
+def _third_asset_fees(order, symbol):
+    """Fees charged in a coin other than the pair's base/quote (e.g. BNB discount)."""
+    base, quote = [x.upper() for x in symbol.split('/')]
+    fees = (order or {}).get('fees') or ([order['fee']] if order and order.get('fee') else [])
+    out = {}
+    for f in fees:
+        currency = str((f or {}).get('currency') or '').upper()
+        cost = abs(float((f or {}).get('cost') or 0.0))
+        if cost > 0 and currency and currency not in (base, quote):
+            out[currency] = out.get(currency, 0.0) + cost
+    return out
+
+
+def _apply_fee_asset_erosion(fee_assets, traded_symbol=None):
+    """Reduce held Spot positions whose base asset paid another trade's fee."""
+    for currency, fee in (fee_assets or {}).items():
+        for symbol, pos in list(active_positions.items()):
+            if symbol == traded_symbol or pos.get('simulated') or symbol.split('/')[0].upper() != currency:
+                continue
+            amount = float(pos.get('amount') or 0.0)
+            if amount <= 0:
+                continue
+            new_amount = max(amount - fee, 0.0)
+            pos['amount'] = new_amount
+            pos['fees_usdt'] = float(pos.get('fees_usdt') or 0.0) + fee * float(pos.get('entry_price') or 0.0)
+            save_position(symbol, pos)
+            log_event('INFO', 'Spot {}: خُصمت عمولة {:.8g} {} من رصيد المركز ({:.8g} ← {:.8g})'.format(
+                symbol, fee, currency, amount, new_amount))
+            if pos.get('protective_order_id') and not pos.get('reconciliation_required'):
+                try:
+                    _ensure_spot_protective_stop(symbol, pos, pos.get('protective_stop_price') or pos.get('stop_price'))
+                except Exception as exc:
+                    log_event('ERR', 'تعذر تحديث وقف {} بعد خصم العمولة: {}'.format(symbol, type(exc).__name__))
+
+
 def _fees_quote_equivalent(order, symbol, price):
     """Return commission value in quote currency and whether the result is exact."""
     base, quote = symbol.split('/')
@@ -993,6 +1029,7 @@ def place_buy(symbol, ref_price, stop_distance=None):
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
+    _apply_fee_asset_erosion(_third_asset_fees(order, symbol), symbol)
     return {'price': avg, 'amount': filled - base_fee, 'cost': cost + fee_quote,
             'fee_usdt': fee_quote, 'fee_quality': fee_quality, 'notional_cap': TRADE_AMOUNT_USDT,
             'risk_sized_notional': amount_usdt, 'simulated': False,
@@ -1293,6 +1330,17 @@ def _reconcile_spot_position(symbol, pos):
         tracked = float(pos.get('amount') or 0.0)
         tolerance = _spot_inventory_tolerance(symbol, tracked)
         pending = bool(pos.get('partial_attempted') and not pos.get('partial_taken')) or bool(pos.get('exit_attempted'))
+        shortfall_pct = (tracked - inventory) / tracked * 100 if tracked > 0 else 0.0
+        if (inventory + tolerance < tracked and not pending and inventory > 0
+                and shortfall_pct <= SPOT_RECONCILE_ADOPT_PCT):
+            # Shortfall consistent with fees paid in this coin (e.g. BNB fee discount):
+            # adopt Binance's real balance, keep entry/stop, and re-protect the position.
+            pos['fees_usdt'] = float(pos.get('fees_usdt') or 0.0) + (tracked - inventory) * float(pos.get('entry_price') or 0.0)
+            pos['amount'] = inventory
+            pos['partial_attempted'] = bool(pos.get('partial_taken'))
+            log_event('INFO', 'Spot {}: اعتُمد رصيد Binance الفعلي {:.8g} {} بدل {:.8g} (نقص {:.2f}% يُرجّح أنه عمولات مخصومة من {}); الدخول والوقف دون تغيير'.format(
+                symbol, inventory, base, tracked, shortfall_pct, base))
+            tracked = inventory
         if inventory + tolerance < tracked:
             reason = ('يوجد أمر بيع جزئي أو إغلاق سابق غير محسوم' if pending else
                       'رصيد Binance من {} ({:.8g}) أقل من الكمية المحفوظة ({:.8g})'.format(base, inventory, tracked))
@@ -1382,6 +1430,7 @@ def place_sell(symbol, pos, amount_to_sell=None):
         raise RuntimeError('أمر بيع Spot غير مؤكد؛ لا تعِد الإرسال قبل المطابقة')
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
+    _apply_fee_asset_erosion(_third_asset_fees(order, symbol), symbol)
     # Credit proceeds only for the quantity Binance actually filled. Any residual
     # inventory remains in the position and is managed on the next scan.
     proceeds = cost - fee_quote
@@ -1655,8 +1704,7 @@ def check_and_close_positions():
                 sale = _poll_spot_protective_stop(symbol, pos)
                 if sale is not None:
                     pos['reconciliation_required'] = False
-            if (pos.get('reconciliation_required') and not pos.get('protective_order_id')
-                    and (pos.get('partial_attempted') or pos.get('exit_attempted'))):
+            if pos.get('reconciliation_required') and not pos.get('protective_order_id'):
                 _reconcile_spot_position(symbol, pos)
                 pos = active_positions.get(symbol, pos)
             if pos.get('reconciliation_required'):
@@ -1833,7 +1881,10 @@ def check_and_close_positions():
                     "\n🧪 محاكاة" if (not TRADING_ENABLED or pos.get('simulated')) else ""))
             del active_positions[symbol]
         except Exception as e:
-            monitor_ok = False
+            if (active_positions.get(symbol) or {}).get('reconciliation_required'):
+                spot_frozen_symbols.add(symbol)  # a frozen symbol only blocks itself
+            else:
+                monitor_ok = False
             record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')}, current_price, 'خطأ في متابعة المركز', 'تعذر تحديث السعر أو تنفيذ إدارة المركز', order_status='غير مؤكد' if sale is not None else 'لم يُرسل', api_message=e)
             log_event('ERR', 'متابعة Spot {}: {}'.format(symbol, type(e).__name__))
             print("Error in position monitoring ({}): {}".format(symbol, e))
@@ -1863,13 +1914,20 @@ def automated_market_scan():
                 'limit_pct': MAX_DAILY_LOSS_PCT,
                 'reason': 'تعذر التحقق من حد الخسارة اليومية؛ أُوقف فتح الصفقات ({})'.format(type(exc).__name__)})
 
+        try:
+            ohlcv_caches = prefetch_ohlcv(exchange, [s for s in SYMBOLS if s in SUPPORTED_SYMBOLS],
+                                          workers=SCAN_FETCH_WORKERS)
+        except Exception:
+            logger.debug("Suppressed error in %s", "prefetch_ohlcv", exc_info=True)
+            ohlcv_caches = {}
         for symbol in SYMBOLS:
             setup, current_price, price_updated_at = None, None, None
             try:
                 if symbol not in SUPPORTED_SYMBOLS:
                     record_decision('Spot', symbol, outcome='مرفوض', reason='الزوج غير مدعوم في الإعداد الحالي')
                     continue
-                setup = evaluate_symbol(exchange, symbol, context=strategy_news_context(), enable_hybrids=(BINANCE_ENV == 'demo'))
+                setup = evaluate_symbol(exchange, symbol, context=strategy_news_context(), enable_hybrids=(BINANCE_ENV == 'demo'),
+                                        cache=ohlcv_caches.get(symbol))
                 current_price = float(fetch_fresh_ticker(exchange, symbol)['last'])
                 price_updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 if not setup:

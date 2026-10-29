@@ -37,3 +37,20 @@ class StrategySelectorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_prefetch_ohlcv_parallel_fills_cache_and_skips_failures():
+    from strategy_engine import prefetch_ohlcv
+    import threading
+    calls, lock = [], threading.Lock()
+
+    class Ex:
+        def fetch_ohlcv(self, symbol, timeframe=None, limit=None):
+            with lock:
+                calls.append((symbol, timeframe))
+            if symbol == "BAD/USDT":
+                raise RuntimeError("x")
+            return [[1, 1, 1, 1, 1, 1], [2, 1, 1, 1, 1, 1]]
+    caches = prefetch_ohlcv(Ex(), ["A/USDT", "BAD/USDT"], timeframes=("1h", "4h"), workers=4)
+    assert caches["A/USDT"] == {"1h": [[1, 1, 1, 1, 1, 1]], "4h": [[1, 1, 1, 1, 1, 1]]}
+    assert caches["BAD/USDT"] == {}
