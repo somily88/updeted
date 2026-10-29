@@ -123,7 +123,8 @@ class BinanceFuturesDemo:
             for column, definition in (("fees_usdt", "REAL NOT NULL DEFAULT 0"),
                                        ("funding_usdt", "REAL NOT NULL DEFAULT 0"),
                                        ("gross_pnl_usdt", "REAL NOT NULL DEFAULT 0"),
-                                       ("cost_quality", "TEXT NOT NULL DEFAULT 'legacy_gross_before_fees'")):
+                                       ("cost_quality", "TEXT NOT NULL DEFAULT 'legacy_gross_before_fees'"),
+                                       ("exit_reason", "TEXT")):
                 if column not in trade_columns:
                     conn.execute("ALTER TABLE futures_trades ADD COLUMN {} {}".format(column, definition))
             conn.execute("""CREATE TABLE IF NOT EXISTS futures_funding (
@@ -315,10 +316,46 @@ class BinanceFuturesDemo:
                         pos["funding_cursor_ms"] = int(opened.replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
                     except (TypeError, ValueError):
                         pos["funding_cursor_ms"] = int(time.time() * 1000) - 120000
+                if float(pos.get("contracts") or 0.0) <= 0:
+                    # A zero-quantity row is an already-closed position; keeping it
+                    # showed phantom PnL and failed reconciliation (protection_degraded).
+                    self._archive_zero_position(conn, pos)
+                    continue
                 positions[row[0]] = pos
             return positions
         except sqlite3.OperationalError:
             return {}
+
+    @staticmethod
+    def _archive_zero_position(conn, pos):
+        pnl = float(pos.get("partial_pnl_usdt") or 0.0) + float(pos.get("funding_usdt") or 0.0)
+        basis = float(pos.get("initial_cost") or pos.get("cost") or 0.0)
+        conn.execute("""INSERT INTO futures_trades
+            (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
+             strategy, timeframe, side, fees_usdt, funding_usdt, gross_pnl_usdt, cost_quality, exit_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (pos["symbol"], pos["entry_price"], pos["entry_price"],
+             pnl / basis * 100.0 if basis else 0.0, pnl, "WIN" if pnl > 0 else "LOSS",
+             datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+             pos.get("strategy") or "unknown", pos.get("timeframe") or "", pos.get("side") or "long",
+             float(pos.get("fees_usdt") or 0.0), float(pos.get("funding_usdt") or 0.0),
+             pnl + float(pos.get("fees_usdt") or 0.0) - float(pos.get("funding_usdt") or 0.0),
+             "net_estimated_costs", "zero_qty_cleanup"))
+        conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (pos["symbol"],))
+
+    @staticmethod
+    def exit_reason_code(reason, partial_taken=False):
+        """Map the Arabic close label to TP/SL/breakeven/partial/TEST/manual."""
+        text = str(reason or "")
+        if "هدف" in text:
+            return "TP"
+        if "وقف" in text:
+            return "breakeven" if partial_taken else "SL"
+        if "اختبار" in text:
+            return "TEST"
+        if "جني" in text:
+            return "partial"
+        return "manual"
 
     def balance(self, ttl=10):
         now = time.time()
@@ -677,11 +714,13 @@ class BinanceFuturesDemo:
                 conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
                 conn.execute("""INSERT INTO futures_trades
                     (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
-                     strategy, timeframe, side, fees_usdt, funding_usdt, gross_pnl_usdt, cost_quality)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     strategy, timeframe, side, fees_usdt, funding_usdt, gross_pnl_usdt, cost_quality,
+                     exit_reason)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (symbol, pos["entry_price"], exit_price, pnl_pct, total_pnl, status, now,
                      pos["strategy"], pos["timeframe"], side, fees_usdt, funding_usdt,
-                     gross_total, cost_quality))
+                     gross_total, cost_quality,
+                     self.exit_reason_code(reason, pos.get("partial_taken"))))
             self.positions.pop(symbol, None)
             self.on_event("FUTURES", "إغلاق {} {} {} (صافي {:+.2f} USDT · رسوم {:.4f} · تمويل {:+.4f})".format(
                 symbol, "Short" if side == "short" else "Long", reason, total_pnl,

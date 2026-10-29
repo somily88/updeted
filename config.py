@@ -35,7 +35,15 @@ REQUIRE_MACD = os.getenv("REQUIRE_MACD", "true").strip().lower() == "true"
 MACD_HIST_TOLERANCE_PCT = float(os.getenv("MACD_HIST_TOLERANCE_PCT", "0.10"))
 if not 0.0 <= MACD_HIST_TOLERANCE_PCT <= 0.50:
     raise ValueError("MACD_HIST_TOLERANCE_PCT must be between 0 and 0.50")
-TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))  # هدف الربح الإجمالي لكل صفقة، قبل الرسوم
+TAKE_PROFIT_USDT = float(os.getenv("TAKE_PROFIT_USDT", "2"))  # قديم: لم يعد يُستخدم كهدف (للتوافق فقط)
+# هدف الربح كمضاعف لمسافة وقف الخسارة (R). 2 = الهدف ضعف المخاطرة
+TP_R_MULTIPLE = float(os.getenv("TP_R_MULTIPLE", "2"))
+if not 0.5 <= TP_R_MULTIPLE <= 10:
+    raise ValueError("TP_R_MULTIPLE must be between 0.5 and 10")
+# فاصل فحص السوق بالدقائق (الفحص يستغرق ~60 ثانية، فدقيقة واحدة تسبب تخطي نصف الفحوص)
+SCAN_INTERVAL_MINUTES = max(1, int(os.getenv("SCAN_INTERVAL_MINUTES", "3")))
+# قيم حجم الصفقة القديمة الصغيرة التي تُرحَّل مرة واحدة إلى الحد الافتراضي الجديد
+LEGACY_TRADE_AMOUNTS = (100.0, 150.0)
 INITIAL_SL_PCT = 0.5       # وقف الخسارة الأولي %
 TRAILING_SL_PCT = 0.3      # وقف الخسارة المتحرك %
 
