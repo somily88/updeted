@@ -161,7 +161,8 @@ def init_db():
             trade_columns = {row[1] for row in cursor.execute('PRAGMA table_info(trades)').fetchall()}
             for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
                                        ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
-                                       ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL')]:
+                                       ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL'),
+                                       ('exit_reason', 'TEXT')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
     except Exception as e:
@@ -182,13 +183,18 @@ def load_runtime_settings():
         conn = open_db_connection(DB_NAME)
         values = dict(conn.execute('SELECT key, value FROM bot_settings').fetchall())
         stored_amount = float(values.get('trade_amount_usdt', TRADE_AMOUNT_USDT))
-        # One-time migration: the user requested changing the existing 100 USDT
-        # trade size to 1000 USDT. Preserve any other saved dashboard amount.
-        if abs(stored_amount - 100.0) < 1e-9 and abs(TRADE_AMOUNT_USDT - 1000.0) < 1e-9:
-            stored_amount = 1000.0
+        # One-time migration: old small defaults (100/150 USDT) silently capped every
+        # risk-sized order. Lift them once to the configured cap; the marker key keeps
+        # any value the user saves afterwards (even 150) untouched.
+        if ('trade_amount_migrated_v2' not in values
+                and any(abs(stored_amount - old) < 1e-9 for old in LEGACY_TRADE_AMOUNTS)
+                and TRADE_AMOUNT_USDT > stored_amount):
+            stored_amount = float(TRADE_AMOUNT_USDT)
             conn.execute('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
                          ('trade_amount_usdt', str(stored_amount)))
-            conn.commit()
+        conn.execute('INSERT OR IGNORE INTO bot_settings (key, value) VALUES (?, ?)',
+                     ('trade_amount_migrated_v2', '1'))
+        conn.commit()
         TRADE_AMOUNT_USDT = stored_amount
         for setting_key, env_name, global_name, current_value in [
             ('spot_max_concurrent_trades', 'MAX_SPOT_CONCURRENT_TRADES', 'spot', MAX_SPOT_CONCURRENT_TRADES),
@@ -229,6 +235,23 @@ def load_saved_binance_credentials(platform='binance'):
     return None
 
 
+def r_multiple_target(entry_price, stop_price, r_multiple=None):
+    """Long take-profit at entry + R x (entry - stop), replacing the old fixed USDT target."""
+    r_multiple = TP_R_MULTIPLE if r_multiple is None else float(r_multiple)
+    entry_price = float(entry_price)
+    risk = max(entry_price - float(stop_price), entry_price * 0.0005)
+    return entry_price + r_multiple * risk
+
+
+def spot_exit_reason(reason, partial_taken=False, trail_armed=False):
+    """Normalize a spot close reason to TP/SL/breakeven/trailing/TEST/manual."""
+    if reason == 'SL':
+        if trail_armed:
+            return 'trailing'
+        return 'breakeven' if partial_taken else 'SL'
+    return reason if reason in ('TP', 'TEST') else 'manual'
+
+
 def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
               strategy=None, timeframe=None):
     try:
@@ -246,16 +269,16 @@ def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
 
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
                               pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
-                              gross_pnl_usdt=None, fees_usdt=None):
+                              gross_pnl_usdt=None, fees_usdt=None, exit_reason=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
             (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
-             cost_quality, gross_pnl_usdt, fees_usdt)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             cost_quality, gross_pnl_usdt, fees_usdt, exit_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
-             pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt))
+             pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
 
 
@@ -625,7 +648,8 @@ async def lifespan(app: FastAPI):
             log_event('ERR', 'تعذر الاتصال بـ Binance Futures Demo')
     else:
         print('ℹ️ [FUTURES DEMO] بانتظار مفاتيح API الخاصة بـ Futures Demo')
-    scheduler.add_job(automated_market_scan, 'interval', minutes=1, max_instances=1, coalesce=True)
+    scheduler.add_job(automated_market_scan, 'interval', minutes=SCAN_INTERVAL_MINUTES,
+                      max_instances=1, coalesce=True, misfire_grace_time=60)
     if NEWS_FILTER:
         scheduler.add_job(check_news, 'interval', minutes=60, max_instances=1, coalesce=True,
                           next_run_time=datetime.datetime.now())
@@ -1616,9 +1640,9 @@ def check_and_close_positions():
                 save_position(symbol, pos)
 
             target = pos.get('target_price')
-            if not pos.get('partial_taken') and target is None:
-                target = entry_price + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12)
             initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
+            if not pos.get('partial_taken') and target is None:
+                target = r_multiple_target(entry_price, initial_stop)
             trailing_distance = float(pos.get('trailing_distance') or entry_price * TRAILING_SL_PCT / 100)
             trail_armed = (bool(pos.get('partial_taken'))
                            and highest_price >= entry_price * (1 + TRAILING_ACTIVATION_PCT / 100))
@@ -1753,10 +1777,12 @@ def check_and_close_positions():
             log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
             fees_total = float(pos.get('fees_usdt') or 0.0)
+            exit_reason = spot_exit_reason(reason, pos.get('partial_taken'), trail_armed)
             record_closed_spot_trade(symbol, entry_price, sale['price'], realized_pnl, status,
                                       total_pnl, pos.get('strategy'), pos.get('timeframe'),
                                       ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')),
-                                      gross_pnl_usdt=total_pnl + fees_total, fees_usdt=fees_total)
+                                      gross_pnl_usdt=total_pnl + fees_total, fees_usdt=fees_total,
+                                      exit_reason=exit_reason)
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -2265,7 +2291,8 @@ def api_state():
             'pnl_pct': pnl_usdt / float(pos.get('initial_cost') or pos['cost'] or 1.0) * 100,
             'stop': max(pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100),
                         high - pos.get('trailing_distance') if pos.get('trailing_distance') else high * (1 - TRAILING_SL_PCT / 100)),
-            'target': pos.get('target_price') or entry + TAKE_PROFIT_USDT / max(pos.get('amount') or 0, 1e-12),
+            'target': pos.get('target_price') or r_multiple_target(
+                entry, pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100)),
             'strategy': pos.get('strategy', 'trend'), 'timeframe': pos.get('timeframe', '1h'),
             'simulated': bool(pos.get('simulated')), 'time': pos.get('time', ''),
             'protection_status': ('مطابقة مطلوبة' if pos.get('reconciliation_required') else
@@ -2417,7 +2444,7 @@ def api_state():
             'timeframe': 'auto', 'strategy_mode': 'automatic',
             'strategies': ['trend', 'breakout', 'bounce'],
             'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
-            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp_usdt': TAKE_PROFIT_USDT, 'sl': INITIAL_SL_PCT,
+            'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp_usdt': None, 'tp_r_multiple': TP_R_MULTIPLE, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,
             'news_pause_h': NEWS_PAUSE_HOURS
         },
@@ -2448,20 +2475,24 @@ def api_state():
 
 @app.post("/api/settings", dependencies=[Depends(require_dashboard_auth)])
 def update_runtime_settings(payload: RuntimeSettings):
+    """Persist and apply sizing limits immediately.
+
+    Previously this required the scan lock and returned 409 whenever a scan was
+    running; with ~60s scans every minute almost every save was rejected. The
+    values are simple numbers read at order time, so settings_lock is enough.
+    """
     global TRADE_AMOUNT_USDT, MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES
-    if not scan_lock.acquire(blocking=False):
-        raise HTTPException(status_code=409, detail="Market scan in progress; retry shortly")
-    try:
+    with settings_lock:
         with get_db_connection(DB_NAME) as conn:
             conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)', [
                 ('trade_amount_usdt', str(payload.trade_amount_usdt)),
                 ('spot_max_concurrent_trades', str(payload.spot_max_concurrent_trades)),
-                ('futures_max_concurrent_trades', str(payload.futures_max_concurrent_trades))
+                ('futures_max_concurrent_trades', str(payload.futures_max_concurrent_trades)),
+                ('trade_amount_migrated_v2', '1')
             ])
-        with settings_lock:
-            TRADE_AMOUNT_USDT = float(payload.trade_amount_usdt)
-            MAX_SPOT_CONCURRENT_TRADES = int(payload.spot_max_concurrent_trades)
-            MAX_FUTURES_CONCURRENT_TRADES = int(payload.futures_max_concurrent_trades)
+        TRADE_AMOUNT_USDT = float(payload.trade_amount_usdt)
+        MAX_SPOT_CONCURRENT_TRADES = int(payload.spot_max_concurrent_trades)
+        MAX_FUTURES_CONCURRENT_TRADES = int(payload.futures_max_concurrent_trades)
         log_event("SETTINGS", "حد Spot {} · حد Futures {} · حجم الصفقة {} USDT".format(
             MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES, TRADE_AMOUNT_USDT))
         return {
@@ -2470,8 +2501,6 @@ def update_runtime_settings(payload: RuntimeSettings):
             'spot_max_concurrent_trades': MAX_SPOT_CONCURRENT_TRADES,
             'futures_max_concurrent_trades': MAX_FUTURES_CONCURRENT_TRADES,
         }
-    finally:
-        scan_lock.release()
 
 
 @app.post("/api/platforms/binance/credentials", dependencies=[Depends(require_dashboard_auth)])
