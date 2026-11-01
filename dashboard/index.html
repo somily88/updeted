@@ -93,7 +93,7 @@ td.sym{font-weight:700;direction:ltr;text-align:right}
 <header>
  <div class="logo"><i><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3-1-3 0-7 1-9.5z"/></svg></i>صبحي تريدر</div>
  <nav><div class="navin" id="nav"><span class="pill" id="pill"></span>
-  <button data-v="home" class="on">الرئيسية</button><button data-v="spot">Spot</button><button data-v="fut">Futures</button><button data-v="strat">الاستراتيجيات</button><button data-v="rl">التعلم المعزز</button><button data-v="dec">قرارات البوت</button><button data-v="trades">الصفقات</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
+  <button data-v="home" class="on">الرئيسية</button><button data-v="spot">Spot</button><button data-v="fut">Futures</button><button data-v="strat">الاستراتيجيات</button><button data-v="rl">التعلم المعزز</button><button data-v="dec">قرارات البوت</button><button data-v="neural">الخلية العصبية</button><button data-v="trades">الصفقات</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
  <div class="tools"><div class="ic"><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="m13 13 4 4"/></svg></div><div class="ic"><span class="dot"></span><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><path d="M4 13V8a5 5 0 0 1 10 0v5l1.5 2h-13zM7 17a2 2 0 0 0 4 0"/></svg></div><div class="av">ص</div></div>
 </header>
 <main>
@@ -104,6 +104,7 @@ td.sym{font-weight:700;direction:ltr;text-align:right}
  <section class="view" id="v-spot"></section>
  <section class="view" id="v-strat"></section>
 <section class="view" id="v-rl"></section>
+<section class="view" id="v-neural"></section>
  <section class="view" id="v-news"></section>
  <section class="view" id="v-set"></section>
 </main>
@@ -278,5 +279,120 @@ async function boot(){try{[S,EQ]=await Promise.all([API.state(),API.equity().cat
  EQ=Array.isArray(EQ)?EQ:(EQ.points||EQ.data||[]);renderAll();loadSS();loadRL();setInterval(()=>{if(!document.hidden){loadSS();loadRL();}},60000);await document.fonts.ready;pillTo(nav.querySelector('.on'),false);
  enter($('#v-home'));setInterval(()=>{if(!document.hidden)refresh();},15000);}
 boot();
+</script>
+<script>
+/* الخلية العصبية — Cyberpunk neural ops view (2.5D canvas, no deps) */
+(function(){
+const SEC=document.getElementById('v-neural');if(!SEC)return;
+SEC.innerHTML=`<style>
+#v-neural .nwrap{position:relative;border-radius:22px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,#140a2a 0%,#05040d 70%);border:1px solid rgba(0,240,255,.25);box-shadow:0 0 40px rgba(0,240,255,.12),inset 0 0 60px rgba(255,0,200,.08);height:min(72vh,680px);min-height:440px}
+#v-neural canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+#v-neural .scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px);mix-blend-mode:overlay}
+#v-neural .ttl{position:absolute;top:12px;right:16px;font-weight:800;letter-spacing:.5px;color:#7ff6ff;text-shadow:0 0 12px #00eaff,2px 0 #ff2bd6;font-size:18px;animation:nglitch 6s infinite}
+@keyframes nglitch{0%,93%,100%{transform:none;text-shadow:0 0 12px #00eaff,2px 0 #ff2bd6}94%{transform:translateX(-2px) skewX(8deg);text-shadow:-3px 0 #ff2bd6,3px 0 #00eaff}96%{transform:translateX(2px)}}
+#v-neural .hud{position:absolute;top:44px;left:12px;width:min(270px,44%);max-height:calc(100% - 56px);overflow:auto;background:rgba(6,10,24,.72);backdrop-filter:blur(8px);border:1px solid rgba(0,240,255,.3);border-radius:14px;padding:10px 12px;font-size:12px;color:#cfefff;box-shadow:0 0 18px rgba(0,240,255,.15)}
+#v-neural .hud b{color:#7ff6ff}#v-neural .hud .r{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
+#v-neural .hud h4{margin:8px 0 4px;color:#ff6be6;font-size:12px;letter-spacing:.5px}
+#v-neural .feed div{padding:3px 0;border-bottom:1px dashed rgba(127,246,255,.15);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#v-neural .ok{color:#39ff9f}#v-neural .no{color:#ff4d6d}#v-neural .wa{color:#ffd166}
+#v-neural .tip{position:absolute;pointer-events:none;background:rgba(5,8,20,.92);border:1px solid #00eaff;border-radius:10px;padding:8px 10px;font-size:12px;color:#e6fbff;box-shadow:0 0 16px rgba(0,234,255,.35);display:none;max-width:240px;z-index:3}
+#v-neural .lg{position:absolute;bottom:10px;right:14px;font-size:11px;color:#9adfff;opacity:.85}
+@media(max-width:640px){#v-neural .nwrap{height:78vh}#v-neural .hud{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:34%}#v-neural .lg{display:none}}
+</style>
+<h1>الخلية العصبية</h1><div class="sub">كيف يفكّر البوت: من الأسواق إلى الاستراتيجيات ثم الفلاتر والتعلّم المعزّز حتى القرار — ببيانات حيّة</div>
+<div class="card nwrap"><canvas id="ncv"></canvas><div class="scan"></div><div class="ttl">// NEURAL OPS · صبحي تريدر</div>
+<div class="hud" id="nhud">جارٍ التحميل…</div><div class="tip" id="ntip"></div>
+<div class="lg"><span class="ok">●</span> تنفيذ &nbsp; <span class="no">●</span> رفض &nbsp; <span class="wa">●</span> مراقبة</div></div>`;
+const cv=SEC.querySelector('#ncv'),ctx=cv.getContext('2d'),hud=SEC.querySelector('#nhud'),tip=SEC.querySelector('#ntip');
+const MOB=matchMedia('(max-width:640px)').matches||('ontouchstart' in window);
+const DPR=Math.min(window.devicePixelRatio||1,MOB?1.5:2);
+const g=(o,k,d)=>(o&&o[k]!=null)?o[k]:d;const arr=v=>Array.isArray(v)?v:[];
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const STRATS=[['trend','تتبّع الاتجاه'],['breakout','الاختراق'],['bounce','الارتداد'],['volume_profile_range','نطاق الحجم'],['donchian','دونشيان'],['macro_momentum_hybrid','الزخم الكلّي']];
+const FILTERS=[['adx','نظام ADX'],['mtf','تأكيد MTF'],['funding','التمويل'],['cost','التكلفة/الهدف'],['cluster','حدّ المجموعة'],['risk','سقوف المخاطرة'],['news','فلتر الأخبار']];
+let nodes=[],edges=[],pulses=[],parts=[],byId={},seen=new Set(),firstLoad=true,data={S:null,SS:null,RL:null};
+function base(sym){return String(sym||'').split('/')[0].replace(/[^A-Z0-9]/gi,'').toUpperCase();}
+const imgs={};function icon(n){if(!n||(typeof ICONS!=='undefined'&&!ICONS.has(n)))return null;if(imgs[n]!==undefined)return imgs[n];const im=new Image();imgs[n]=null;im.onload=()=>imgs[n]=im;im.onerror=()=>imgs[n]=false;im.src='/icons/'+n+'.svg';return null;}
+function stratKey(s){s=String(s||'').toLowerCase();for(const [k,l] of STRATS){if(s.includes(k)||String(s).includes(l))return k;}
+ if(/اتجاه/.test(s))return'trend';if(/اختراق/.test(s))return'breakout';if(/ارتداد/.test(s))return'bounce';if(/donch|دونش/.test(s))return'donchian';if(/volume|حجم/.test(s))return'volume_profile_range';if(/macro|زخم/.test(s))return'macro_momentum_hybrid';return null;}
+function filterKey(r){r=String(r||'');if(/adx|عرضي|نظام السوق|regime/i.test(r))return'adx';if(/mtf|فريم أكبر|الإطار الأعلى/i.test(r))return'mtf';if(/funding|تمويل/i.test(r))return'funding';if(/تكلفة|رسوم|cost|هدف/i.test(r))return'cost';if(/cluster|مجموعة|مرتبط/i.test(r))return'cluster';if(/خبر|news/i.test(r))return'news';if(/حد|مخاطر|risk|الأقصى|تحوّط|hedge/i.test(r))return'risk';return null;}
+function outcome(d){const o=String(g(d,'outcome',''))+' '+String(g(d,'order_status',''));if(d&&d.order_id||/نُفّذ|نفذ|تم التنفيذ|فتح|executed|filled|شراء ناجح/.test(o))return'ok';if(g(d,'signal','none')==='none'||/مراقبة|انتظار/.test(o))return'wa';return'no';}
+function build(){const S=data.S||{};const W=1,cols=[-1.05,-0.6,-0.15,0.3,0.68,1.02];nodes=[];edges=[];byId={};
+ const syms=[];const add=s=>{const b=base(s);if(b&&!syms.find(x=>x.b===b))syms.push({b,s});};
+ arr(S.positions).forEach(p=>add(p&&p.symbol));arr(S.markets).forEach(m=>add(m&&m.symbol));arr(g(S.futures,'symbols',[])).forEach(x=>add(typeof x==='string'?x:g(x,'symbol','')));
+ const ms=syms.slice(0,MOB?9:14);const N=(id,x,y,z,label,kind,extra)=>{const n=Object.assign({id,x,y,z,label,kind,act:0,r:kind==='dec'?16:kind==='in'?11:12},extra||{});nodes.push(n);byId[id]=n;return n;};
+ ms.forEach((m,i)=>N('m:'+m.b,cols[0],(i-(ms.length-1)/2)*(1.7/Math.max(ms.length,6)),Math.sin(i)*0.25,m.b,'in',{icon:m.b}));
+ N('m:NEWS',cols[0]-0.05,0.98,0,'الأخبار / LLM','in',{color:'#ff2bd6'});
+ const enabled=new Set(arr(g(S.params,'strategies',[])).map(x=>String(x).toLowerCase()));
+ STRATS.forEach(([k,l],i)=>N('s:'+k,cols[1],(i-2.5)*0.3,Math.cos(i)*0.3,l,'str',{key:k,on:enabled.size?enabled.has(k):i<3}));
+ FILTERS.forEach(([k,l],i)=>N('f:'+k,cols[2],(i-3)*0.26,Math.sin(i*1.3)*0.3,l,'fil',{key:k}));
+ const rl=data.RL||{};N('rl',cols[3],0,0,'التعلّم المعزّز','rl',{r:20});
+ N('d:ok',cols[4],-0.35,0,'تنفيذ','dec',{color:'#39ff9f'});N('d:no',cols[4],0.35,0,'رفض','dec',{color:'#ff4d6d'});N('d:wa',cols[4],0,0.3,'مراقبة','dec',{color:'#ffd166'});
+ N('o:spot',cols[5],-0.3,0,'أوامر Spot','out');N('o:fut',cols[5],0.3,0,'أوامر Futures','out');
+ const E=(a,b)=>{if(byId[a]&&byId[b])edges.push([byId[a],byId[b]]);};
+ ms.forEach((m,i)=>STRATS.forEach(([k],j)=>{if((i+j)%2===0||j<3)E('m:'+m.b,'s:'+k);}));STRATS.forEach(([k])=>E('m:NEWS','s:'+k));
+ STRATS.forEach(([k],i)=>FILTERS.forEach(([f],j)=>{if((i+j)%2===0)E('s:'+k,'f:'+f);}));FILTERS.forEach(([f])=>E('f:'+f,'rl'));
+ E('rl','d:ok');E('rl','d:no');E('rl','d:wa');E('d:ok','o:spot');E('d:ok','o:fut');}
+function fire(d){const b=base(d.symbol),sk=stratKey(d.strategy)||'trend',fk=filterKey(d.reason)||'risk',o=outcome(d);
+ const fut=/future|:USDT/i.test(String(d.market)+String(d.symbol));const path=['m:'+(byId['m:'+b]?b:'NEWS'),'s:'+sk,'f:'+fk,'rl','d:'+o];if(o==='ok')path.push(fut?'o:fut':'o:spot');
+ const col=o==='ok'?'#39ff9f':o==='no'?'#ff4d6d':'#ffd166';const ns=path.map(id=>byId[id]).filter(Boolean);if(ns.length<2)return;
+ pulses.push({ns,t:0,col,big:true,speed:MOB?.012:.01});}
+function ambient(){if(edges.length&&parts.length<(MOB?40:110)){const e=edges[Math.random()*edges.length|0];parts.push({a:e[0],b:e[1],t:0,s:.004+Math.random()*.01,col:Math.random()<.5?'#00eaff':'#ff2bd6'});}}
+let W=0,H=0,rot=0;function resize(){const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*DPR;cv.height=H*DPR;}
+function proj(n){const ca=Math.cos(rot),sa=Math.sin(rot);let x=n.x*ca-n.z*sa,z=n.x*sa+n.z*ca;const f=2.6/(2.6+z);const sx=MOB?W*0.37:Math.min(W*0.28,H*0.85),sy=MOB?H*0.3:H*0.38,cx=MOB?W*0.5:W*0.6,cy=MOB?H*0.4:H*0.52;return{X:cx-x*sx*f,Y:cy+n.y*sy*f,f};}
+function lerpP(a,b,t){const p=proj(a),q=proj(b);return{X:p.X+(q.X-p.X)*t,Y:p.Y+(q.Y-p.Y)*t};}
+function nodeCol(n){if(n.color)return n.color;if(n.kind==='str')return n.on?'#00eaff':'#2a4660';if(n.kind==='fil')return'#b26bff';if(n.kind==='rl')return'#ff2bd6';if(n.kind==='out')return'#39ff9f';return'#7ff6ff';}
+let hover=null,T=0;
+function draw(){T+=1;rot=Math.sin(T/900)*0.22;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
+ // grid floor
+ ctx.save();ctx.strokeStyle='rgba(0,234,255,.12)';ctx.lineWidth=1;const hy=H*0.62;for(let i=0;i<14;i++){const y=hy+Math.pow(i/14,2)*(H-hy)+((T*0.6)%((H-hy)/14))*(i/14);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+ for(let i=-12;i<=12;i++){ctx.beginPath();ctx.moveTo(W/2+i*20,hy);ctx.lineTo(W/2+i*W/10,H);ctx.stroke();}ctx.restore();
+ ctx.globalCompositeOperation='lighter';
+ edges.forEach(([a,b])=>{const p=proj(a),q=proj(b);const act=Math.max(a.act,b.act);ctx.strokeStyle=act>.05?`rgba(255,43,214,${.12+act*.5})`:'rgba(0,234,255,.07)';ctx.lineWidth=act>.05?1.5:1;ctx.beginPath();ctx.moveTo(p.X,p.Y);const mx=(p.X+q.X)/2;ctx.bezierCurveTo(mx,p.Y,mx,q.Y,q.X,q.Y);ctx.stroke();});
+ parts=parts.filter(p=>(p.t+=p.s)<1);parts.forEach(p=>{const P=lerpP(p.a,p.b,p.t);ctx.fillStyle=p.col;ctx.globalAlpha=.7*Math.sin(p.t*Math.PI);ctx.beginPath();ctx.arc(P.X,P.Y,1.6,0,7);ctx.fill();});ctx.globalAlpha=1;
+ pulses=pulses.filter(p=>p.t<p.ns.length-1+.6);pulses.forEach(p=>{p.t+=p.speed*(p.ns.length);const i=Math.min(p.t|0,p.ns.length-2),f=Math.min(p.t-i,1);const P=lerpP(p.ns[i],p.ns[i+1],f);p.ns[i].act=1;if(f>.9)p.ns[i+1].act=1;
+  for(let k=0;k<=i;k++){const a=proj(p.ns[k]),b=k<i?proj(p.ns[k+1]):P;ctx.strokeStyle=p.col;ctx.globalAlpha=.55;ctx.lineWidth=2.4;ctx.shadowColor=p.col;ctx.shadowBlur=14;ctx.beginPath();ctx.moveTo(a.X,a.Y);ctx.lineTo(b.X,b.Y);ctx.stroke();}
+  ctx.globalAlpha=1;const gr=ctx.createRadialGradient(P.X,P.Y,0,P.X,P.Y,16);gr.addColorStop(0,'#fff');gr.addColorStop(.3,p.col);gr.addColorStop(1,'transparent');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(P.X,P.Y,16,0,7);ctx.fill();ctx.shadowBlur=0;});
+ ctx.globalCompositeOperation='source-over';
+ const order=nodes.map(n=>({n,p:proj(n)})).sort((a,b)=>a.p.f-b.p.f);
+ order.forEach(({n,p})=>{n.act*=.975;const c=nodeCol(n),r=n.r*p.f*(MOB?.85:1)*(1+n.act*.35+(n.kind==='rl'?Math.sin(T/20)*.08:0));n._X=p.X;n._Y=p.Y;n._r=r;
+  ctx.shadowColor=c;ctx.shadowBlur=(n.kind==='str'&&!n.on)?0:12+n.act*24;ctx.fillStyle='rgba(5,8,20,.9)';ctx.strokeStyle=c;ctx.lineWidth=n===hover?3:1.6;
+  if(n.kind==='fil'){ctx.beginPath();for(let k=0;k<6;k++){const a=k*Math.PI/3+T/200;ctx.lineTo(p.X+Math.cos(a)*r,p.Y+Math.sin(a)*r);}ctx.closePath();}else{ctx.beginPath();ctx.arc(p.X,p.Y,r,0,7);}
+  ctx.fill();ctx.stroke();ctx.shadowBlur=0;
+  if(n.kind==='rl'){ctx.strokeStyle='rgba(255,43,214,.5)';ctx.beginPath();ctx.arc(p.X,p.Y,r+6,T/30,T/30+4);ctx.stroke();}
+  const im=n.icon&&icon(n.icon);if(im){ctx.drawImage(im,p.X-r*.7,p.Y-r*.7,r*1.4,r*1.4);}else{ctx.fillStyle=c;ctx.beginPath();ctx.arc(p.X,p.Y,r*.35,0,7);ctx.fill();}
+  if(!MOB||n.kind!=='in'||true){ctx.fillStyle=(n.kind==='str'&&!n.on)?'#5d7a90':'#dff9ff';ctx.font=`${n.kind==='in'?10:11}px Cairo,system-ui,sans-serif`;ctx.textAlign='center';ctx.fillText(n.label,p.X,p.Y+r+12);}});
+ // layer titles
+ ctx.fillStyle='rgba(127,246,255,.55)';ctx.font='bold 11px Cairo,system-ui';ctx.textAlign='center';[['m:NEWS','المدخلات'],['s:trend','الاستراتيجيات'],['f:adx','الفلاتر'],['rl','RL'],['d:ok','القرار'],['o:spot','الأوامر']].forEach(([id,t])=>{const n=byId[id];if(n){const p=proj(Object.assign({},n,{y:-1.12}));ctx.fillText(t,p.X,Math.max(MOB?48:44,p.Y));}});
+}
+let running=false;function loop(){if(document.hidden||typeof cur==='undefined'||cur!=='neural'){running=false;return;}running=true;{const r=cv.getBoundingClientRect();if(Math.abs(r.width-W)>1||Math.abs(r.height-H)>1)resize();}ambient();if(Math.random()<.5)ambient();draw();requestAnimationFrame(loop);}
+function kick(){if(!running&&!document.hidden&&typeof cur!=='undefined'&&cur==='neural'){resize();running=true;requestAnimationFrame(loop);}}
+setInterval(kick,400);document.addEventListener('visibilitychange',kick);addEventListener('resize',()=>{if(running)resize();});
+function stat(n){const S=data.S||{};const ss=arr(g(data.SS,'strategies',[]));const rl=data.RL||{};
+ if(n.kind==='in'){const p=arr(S.positions).find(x=>base(x&&x.symbol)===n.icon);const m=arr(S.markets).find(x=>base(x&&x.symbol)===n.icon);
+  return `<b>${esc(n.label)}</b><br>${m?`السعر: ${esc(m.price)}<br>RSI: ${esc(Number(m.rsi||0).toFixed(1))}<br>الإشارة: ${m.signal?'نعم':'لا'} (${esc(m.strategy_label||m.strategy||'')})`:''}${p?`<br><span class="ok">مركز مفتوح</span> PnL ${esc(Number(p.pnl_usdt||0).toFixed(2))}$`:''}${n.id==='m:NEWS'?`المزاج: ${esc(g(S.news,'sentiment','—'))}<br>${g(S.news,'blocked',false)?'<span class="no">إيقاف بسبب الأخبار</span>':'لا يوجد حظر'}`:''}`;}
+ if(n.kind==='str'){const s=ss.find(x=>stratKey(x&&(x.strategy||x.name))===n.key)||{};return `<b>${esc(n.label)}</b><br>${n.on?'<span class="ok">مفعّلة</span>':'<span class="wa">غير مفعّلة</span>'}<br>الصفقات: ${esc(g(s,'trades',g(s,'count','—')))}<br>نسبة الفوز: ${esc(g(s,'win_rate','—'))}<br>الصافي: ${esc(g(s,'net_pnl',g(s,'pnl','—')))}`;}
+ if(n.kind==='rl')return `<b>التعلّم المعزّز</b><br>الوضع: ${esc(g(rl,'mode','—'))}<br>الأذرع: ${arr(rl.arms).length}<br>الحد الأدنى: ${esc(g(rl,'min_samples',30))} صفقة`;
+ if(n.kind==='dec'){const c=arr(S.decisions).filter(d=>'d:'+outcome(d)===n.id).length;return `<b>${esc(n.label)}</b><br>آخر القرارات: ${c}`;}
+ if(n.kind==='out')return `<b>${esc(n.label)}</b><br>المراكز المفتوحة: ${n.id==='o:fut'?esc(g(S.futures,'open_positions',g(S.settings,'futures_active_trades','—'))):esc(g(S.settings,'spot_active_trades','—'))}`;
+ return `<b>${esc(n.label)}</b><br>فلتر حماية قبل التنفيذ`;}
+function pick(e){const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let best=null;nodes.forEach(n=>{if(n._X!=null&&Math.hypot(n._X-x,n._Y-y)<(n._r||10)+8)best=n;});hover=best;
+ if(best){tip.innerHTML=stat(best);tip.style.display='block';tip.style.left=Math.min(x+14,r.width-250)+'px';tip.style.top=Math.max(4,y-10)+'px';}else tip.style.display='none';}
+cv.addEventListener('mousemove',pick);cv.addEventListener('click',pick);cv.addEventListener('mouseleave',()=>{hover=null;tip.style.display='none';});
+function fmtT(s){if(!s)return'—';const d=new Date(s);return isNaN(d)?esc(s):d.toLocaleTimeString('ar-SA-u-nu-latn',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Riyadh'});}
+function renderHud(){const S=data.S||{},sc=S.scanner||{},rl=data.RL||{};const decs=arr(S.decisions).slice(0,MOB?4:9);
+ hud.innerHTML=`<div class="r"><span>الماسح</span><b>${esc(g(sc,'status','—'))}</b></div><div class="r"><span>آخر فحص</span><b>${fmtT(sc.last_completed_at||sc.last_started_at)}</b></div>
+ <div class="r"><span>مراكز Spot / Futures</span><b>${esc(g(S.settings,'spot_active_trades','—'))} / ${esc(g(S.settings,'futures_active_trades','—'))}</b></div><div class="r"><span>التعلّم المعزّز</span><b>${esc(g(rl,'mode','—'))}</b></div>
+ <div class="r"><span>التداول</span><b>${S.trading_enabled===false?'<span class="no">متوقف</span>':'<span class="ok">مفعّل</span>'}</b></div>
+ <h4>// بث القرارات الحيّ</h4><div class="feed">${decs.map(d=>{const o=outcome(d);return `<div class="${o}">● ${esc(base(d.symbol))} · ${esc(d.strategy||'')} · ${esc(d.outcome||'')}</div>`;}).join('')||'<div>لا توجد قرارات بعد</div>'}</div>`;}
+function poll(){if(document.hidden)return;const J=u=>fetch(u+(u.includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).catch(()=>null);
+ Promise.all([J('/api/state'),J('/api/strategy-stats'),J('/api/rl')]).then(([s,ss,rl])=>{const had=!!data.S;if(s&&typeof s==='object')data.S=s;if(ss&&typeof ss==='object')data.SS=ss;if(rl&&typeof rl==='object')data.RL=rl;
+  if(!had||!nodes.length)build();else{const keep={};nodes.forEach(n=>keep[n.id]=n.act);build();nodes.forEach(n=>n.act=keep[n.id]||0);pulses=[];}
+  const decs=arr(g(data.S,'decisions',[])).slice(0,12).reverse();let fresh=[];decs.forEach(d=>{const k=(d&&d.created_at)+'|'+(d&&d.symbol);if(!seen.has(k)){seen.add(k);fresh.push(d);}});
+  if(firstLoad)fresh=fresh.slice(-5);firstLoad=false;fresh.forEach((d,i)=>setTimeout(()=>fire(d),i*700));renderHud();});}
+poll();setInterval(poll,10000);
+// replay recent decisions so the brain never looks dead
+setInterval(()=>{if(running&&!pulses.length){const d=arr(g(data.S,'decisions',[]));if(d.length)fire(d[Math.random()*Math.min(d.length,15)|0]);}},2500);
+})();
 </script>
 </body></html>
