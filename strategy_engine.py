@@ -17,6 +17,24 @@ RISK_PER_TRADE_PCT = float(os.getenv("RISK_PER_TRADE_PCT", "2.0"))
 if not 0.0 < RISK_PER_TRADE_PCT <= 2.0:
     raise ValueError("RISK_PER_TRADE_PCT must be greater than 0 and at most 2")
 
+# --- Plan A (quick wins); all defaults reproduce the previous behaviour ---
+# When > 0 the per-trade notional cap becomes this percent of equity instead of
+# the fixed dashboard trade amount, so RISK_PER_TRADE_PCT actually drives size.
+MAX_POSITION_EQUITY_PCT = float(os.getenv("MAX_POSITION_EQUITY_PCT", "0"))
+if not 0.0 <= MAX_POSITION_EQUITY_PCT <= 50.0:
+    raise ValueError("MAX_POSITION_EQUITY_PCT must be between 0 and 50")
+BOUNCE_TIMEFRAMES = tuple(t.strip() for t in os.getenv("BOUNCE_TIMEFRAMES", "15m,5m").split(",")
+                          if t.strip() in ("5m", "15m", "1h"))
+# Reject a signal whose ATR target is smaller than k x the round-trip cost (0 = off).
+MIN_TARGET_COST_MULTIPLE = float(os.getenv("MIN_TARGET_COST_MULTIPLE", "0"))
+ROUND_TRIP_COST_PCT = float(os.getenv("ROUND_TRIP_COST_PCT", "0.25"))
+if MIN_TARGET_COST_MULTIPLE < 0 or ROUND_TRIP_COST_PCT < 0:
+    raise ValueError("MIN_TARGET_COST_MULTIPLE and ROUND_TRIP_COST_PCT must be non-negative")
+RANGE_MAX_EMA_SLOPE = float(os.getenv("RANGE_MAX_EMA_SLOPE", "0.006"))
+RANGE_MAX_EMA_DISTANCE = float(os.getenv("RANGE_MAX_EMA_DISTANCE", "0.025"))
+BREAKOUT_VOLUME_MULTIPLE = float(os.getenv("BREAKOUT_VOLUME_MULTIPLE", "1.25"))
+DISABLED_STRATEGIES = frozenset(t.strip() for t in os.getenv("DISABLED_STRATEGIES", "").split(",") if t.strip())
+
 MIN_SPOT_QUOTE_VOLUME_USDT = float(os.getenv("MIN_SPOT_QUOTE_VOLUME_USDT", "1000000"))
 MIN_FUTURES_QUOTE_VOLUME_USDT = float(os.getenv("MIN_FUTURES_QUOTE_VOLUME_USDT", "100000"))
 MAX_SPOT_SPREAD_PCT = float(os.getenv("MAX_SPOT_SPREAD_PCT", "0.15"))
@@ -105,6 +123,28 @@ def risk_sized_notional(equity, entry_price, stop_distance, max_notional,
     risk_budget = equity * risk_percent / 100.0
     stop_fraction = stop_distance / entry_price
     return min(max_notional, risk_budget / stop_fraction)
+
+
+def effective_notional_cap(equity, trade_amount, equity_pct=None):
+    """Per-trade notional cap: the dashboard amount, or equity x pct when enabled."""
+    pct = MAX_POSITION_EQUITY_PCT if equity_pct is None else float(equity_pct)
+    if pct > 0 and float(equity or 0) > 0:
+        return float(equity) * pct / 100.0
+    return float(trade_amount)
+
+
+def target_covers_costs(setup, multiple=None, cost_pct=None):
+    """True when the ATR target distance is at least multiple x round-trip cost."""
+    multiple = MIN_TARGET_COST_MULTIPLE if multiple is None else float(multiple)
+    cost_pct = ROUND_TRIP_COST_PCT if cost_pct is None else float(cost_pct)
+    if multiple <= 0:
+        return True
+    risk = STRATEGY_RISK.get(setup.get("strategy"))
+    price = float(setup.get("ref_close") or 0)
+    if not risk or price <= 0:
+        return True
+    target_pct = risk["target_atr"] * float(setup.get("atr") or 0) / price * 100.0
+    return target_pct >= multiple * cost_pct
 
 
 STRATEGY_RISK = {
@@ -291,7 +331,7 @@ def _breakout_candidate(exchange, symbol, timeframe, cache, direction="long"):
     previous = candles[-21:-1]
     average_volume = sum(c[5] for c in previous) / len(previous)
     last = candles[-1]
-    volume_ok = average_volume > 0 and last[5] >= average_volume * 1.25
+    volume_ok = average_volume > 0 and last[5] >= average_volume * BREAKOUT_VOLUME_MULTIPLE
     if not volume_ok:
         return None
     volume_ratio = last[5] / average_volume
@@ -322,7 +362,7 @@ def _range_ok(v):
         return False
     slope = abs(v["ema50"] / v["ema50_old"] - 1.0)
     distance = abs(v["ref_close"] / v["ema50"] - 1.0)
-    return slope <= 0.006 and distance <= 0.025
+    return slope <= RANGE_MAX_EMA_SLOPE and distance <= RANGE_MAX_EMA_DISTANCE
 
 
 def _bounce_candidate(exchange, symbol, timeframe, cache, direction="long"):
@@ -597,6 +637,8 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
             if found:
                 candidates.append(found)
 
+    candidates = [item for item in candidates
+                  if item.get("strategy") not in DISABLED_STRATEGIES and target_covers_costs(item)]
     if allowed_strategies is not None:
         candidates = [item for item in candidates if item.get("strategy") in allowed_strategies]
     selected = _select_best(candidates)
