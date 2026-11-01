@@ -7,6 +7,7 @@ constructed with live credentials or a live endpoint.
 import contextlib
 import datetime
 import os
+from execution import place_entry_order
 import sqlite3
 import time
 import uuid
@@ -1314,7 +1315,7 @@ class BinanceFuturesDemo:
                                  'اجتازت الإشارة فلاتر المخاطر والسيولة والحساب',
                                  order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 order_attempted = True
-                order = self.exchange.create_order(symbol, "market", order_side, contracts)
+                order = place_entry_order(self.exchange, symbol, order_side, contracts, reference_price=price)
                 if order.get("status") != "closed" and order.get("id"):
                     order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)
                 filled = float(order.get("filled") or 0)

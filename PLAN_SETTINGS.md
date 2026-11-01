@@ -16,3 +16,13 @@
 | `FUTURES_STOP_REPLACE_MODE` | `cancel_then_create` | إصلاح خطأ Binance ‎-4130 عند تشديد وقف closePosition، مع استعادة الوقف القديم عند الفشل |
 | `FUTURES_ADOPT_EXISTING_CLOSE_STOP` | `true` | اعتماد وقف closePosition موجود بدل محاولة إنشاء مكرر |
 | `FUTURES_HEDGE_ONLY_MODE` | `hedge` | `all` يسمح لعقود العملات الرقمية بكل الاستراتيجيات |
+
+## B — التنفيذ والرسوم
+| المتغير | الافتراضي | الوصف |
+|---|---|---|
+| `ENTRY_ORDER_MODE` | `market` | `limit_then_market`: أمر دخول محدد post-only (GTX في Futures) عند أفضل سعر، ثم سوق للباقي بعد المهلة. أوامر الوقف والخروج تبقى سوقًا دائمًا |
+| `LIMIT_ENTRY_TIMEOUT_SECONDS` | `20` | مهلة انتظار التنفيذ كـ Maker |
+| `LIMIT_ENTRY_POLL_SECONDS` | `2` | فترة الاستعلام |
+| `LIMIT_ENTRY_MAX_CHASE_PCT` | `0.3` | لا يُرسل أمر سوق إن ابتعد السعر أكثر من هذا (تُلغى الصفقة بدل مطاردة السعر) |
+
+الرسوم الفعلية تُقرأ من التنفيذ (fees) ومن `fetch_order_trades` عند غيابها. جدول الرسوم الافتراضي في `execution.FEE_SCHEDULE`.
