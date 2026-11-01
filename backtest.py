@@ -277,7 +277,9 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
 
 
 def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
-                     mode, notional, capital, max_positions, fee_rate, slippage_rate):
+                     mode, notional, capital, max_positions, fee_rate, slippage_rate, rl_agent=None):
+    """rl_agent (optional rl_bandit.BanditAgent) learns online in time order: it
+    only sees R of trades that already closed, so there is no lookahead."""
     segment_times = [t for t in timeline if start_ms <= t < end_ms]
     if not segment_times:
         return {"metrics": empty_metrics(), "trades": [], "signals": []}
@@ -334,6 +336,9 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 continue
             trade = manage_position(positions[symbol], candle, now_ms, fee_rate, slippage_rate)
             if trade:
+                if rl_agent is not None and positions[symbol].get("rl_context") and trade.get("r_multiple") is not None:
+                    rl_agent.learn(*positions[symbol]["rl_context"], trade["r_multiple"])
+                    trade["rl_multiplier"] = positions[symbol].get("rl_multiplier")
                 trades.append(trade)
                 sid = trade["signal_id"]
                 if sid in signals:
@@ -383,6 +388,18 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             sized_notional = risk_sized_notional(
                 current_equity, entry_price, atr * risk["stop_atr"], notional,
                 RISK_PER_TRADE_PCT)
+            rl_context = None
+            rl_multiplier = 1.0
+            if rl_agent is not None:
+                from rl_bandit import context_keys
+                rl_choice = rl_agent.decide(mode, symbol, setup, entry_price, atr * risk["stop_atr"])
+                rl_multiplier = min(1.0, max(0.0, float(rl_choice.get("applied_multiplier", 1.0))))
+                rl_context = context_keys(mode, setup, entry_price, atr * risk["stop_atr"])
+                if rl_multiplier <= 0:
+                    entered_keys.add(signal_id)
+                    signals[signal_id]["status"] = "rl_skip"
+                    continue
+                sized_notional *= rl_multiplier
             quantity = sized_notional / entry_price
             entry_fee = quantity * entry_price * fee_rate
             if direction == "long":
@@ -406,6 +423,7 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 "target_price": target, "trailing_distance": atr * risk["trail_atr"],
                 "extreme": extreme, "funding_usdt": 0.0,
                 "last_funding_ms": now_ms,
+                "rl_context": rl_context, "rl_multiplier": rl_multiplier,
             }
             entered_keys.add(signal_id)
             signals[signal_id].update({"status": "open", "entry_price": round(entry_price, 10),

@@ -20,6 +20,7 @@ from strategy_engine import (PARTIAL_TP_FRACTION, PARTIAL_TP_R, effective_notion
                              MAX_DAILY_LOSS_PCT, MAX_SPOT_HEDGE_RATIO)
 from risk_controls import daily_loss_status, portfolio_risk_status
 from database import get_db_connection
+import rl_bandit
 
 HEDGE_ONLY_IDS = {
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
@@ -803,6 +804,11 @@ class BinanceFuturesDemo:
                      gross_total, cost_quality,
                      self.exit_reason_code(reason, pos.get("partial_taken")),
                      trade_risk_usdt, r_multiple(total_pnl, trade_risk_usdt)))
+            try:
+                rl_bandit.get_agent(self.db_path).record_outcome(
+                    'Futures', symbol, r_multiple(total_pnl, trade_risk_usdt))
+            except Exception:
+                pass
             self.positions.pop(symbol, None)
             self.on_event("FUTURES", "إغلاق {} {} {} (صافي {:+.2f} USDT · رسوم {:.4f} · تمويل {:+.4f})".format(
                 symbol, "Short" if side == "short" else "Long", reason, total_pnl,
@@ -1294,6 +1300,20 @@ class BinanceFuturesDemo:
                 amount_usdt = risk_sized_notional(
                     account["total"], price, stop_distance,
                     notional_cap, RISK_PER_TRADE_PCT)
+                rl_decision = rl_bandit.get_agent(self.db_path).decide(
+                    'Futures', symbol, setup, price, stop_distance)
+                if rl_decision.get('note_ar'):
+                    self.on_decision('Futures Demo', symbol, setup, price, 'قرار التعلم المعزز',
+                                     rl_decision['note_ar'], order_status='—',
+                                     price_updated_at=price_updated_at)
+                if rl_decision.get('applied_multiplier', 1.0) <= 0:
+                    self.on_decision('Futures Demo', symbol, setup, price, 'تخطّاها التعلم المعزز',
+                                     'العائد المتوقع لهذا السياق سلبي حسب الصفقات السابقة',
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    self.last_entry_candle[symbol] = setup.get("candle_ts")
+                    continue
+                # RL may only shrink size, never grow it beyond the risk rules.
+                amount_usdt *= min(1.0, max(0.0, float(rl_decision.get('applied_multiplier', 1.0))))
                 if account["free"] < amount_usdt:
                     raise ValueError("رصيد Futures Demo المتاح أقل من قيمة المركز المحسوبة {:.2f} USDT".format(amount_usdt))
                 contracts = float(self.exchange.amount_to_precision(
@@ -1356,6 +1376,7 @@ class BinanceFuturesDemo:
                 }
                 self.positions[symbol] = pos
                 self._save_position(pos)
+                rl_bandit.get_agent(self.db_path).mark_opened(rl_decision.get('decision_id'))
                 try:
                     self._ensure_exchange_stop(symbol, pos, pos["stop_price"])
                 except Exception as protection_error:
