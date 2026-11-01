@@ -2342,6 +2342,20 @@ def read_old_dashboard():
     return _serve_html("index.html")
 
 
+_ICON_RE = re.compile(r"^[A-Z0-9]{1,12}$")
+
+
+@app.get("/icons/{name}.svg", dependencies=[Depends(require_dashboard_auth)])
+def dashboard_icon(name: str):
+    """Bundled asset logos for the dashboard markets map (404 -> letter badge fallback)."""
+    if not _ICON_RE.match(name or ""):
+        raise HTTPException(status_code=404)
+    path = os.path.join(_BASE_DIR, "dashboard", "icons", name + ".svg")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="image/svg+xml", headers={"Cache-Control": "private, max-age=86400"})
+
+
 @app.get("/fonts/Cairo.ttf", dependencies=[Depends(require_dashboard_auth)])
 def dashboard_font():
     return FileResponse(os.path.join(_BASE_DIR, "dashboard", "fonts", "Cairo.ttf"), media_type="font/ttf",

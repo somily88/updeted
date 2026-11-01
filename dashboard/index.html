@@ -2,6 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
 <title>صبحي تريدر · لوحة التحكم</title>
 <style>
 @font-face{font-family:Cairo;src:url(/fonts/Cairo.ttf) format("truetype");font-weight:200 1000;font-display:block}
@@ -44,6 +45,9 @@ main{max-width:1240px;margin:0 auto;padding:12px 28px 40px}
 .spark{width:110px;height:42px}
 .map{display:grid;grid-template-columns:repeat(9,1fr);gap:8px;margin-top:12px}
 .map div{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:700;color:#fff;direction:ltr;overflow:hidden}
+.map div img{width:72%;height:72%;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #fff}
+.coin{width:22px;height:22px;border-radius:50%;vertical-align:middle;margin-inline-end:6px;display:inline-grid;place-items:center;font-size:9px;font-weight:800;color:#fff;background:var(--grad);overflow:hidden}
+.coin img{width:100%;height:100%}
 .legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:12px}
 .bars{display:flex;align-items:flex-end;gap:10px;height:170px;margin-top:14px;direction:ltr}
 .bars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
@@ -89,7 +93,7 @@ td.sym{font-weight:700;direction:ltr;text-align:right}
 <header>
  <div class="logo"><i><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3-1-3 0-7 1-9.5z"/></svg></i>صبحي تريدر</div>
  <nav><div class="navin" id="nav"><span class="pill" id="pill"></span>
-  <button data-v="home" class="on">الرئيسية</button><button data-v="dec">القرارات</button><button data-v="trades">الصفقات</button><button data-v="fut">Futures</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
+  <button data-v="home" class="on">الرئيسية</button><button data-v="spot">Spot</button><button data-v="fut">Futures</button><button data-v="strat">الاستراتيجيات</button><button data-v="dec">قرارات البوت</button><button data-v="trades">الصفقات</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
  <div class="tools"><div class="ic"><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="m13 13 4 4"/></svg></div><div class="ic"><span class="dot"></span><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><path d="M4 13V8a5 5 0 0 1 10 0v5l1.5 2h-13zM7 17a2 2 0 0 0 4 0"/></svg></div><div class="av">ص</div></div>
 </header>
 <main>
@@ -97,6 +101,8 @@ td.sym{font-weight:700;direction:ltr;text-align:right}
  <section class="view" id="v-dec"></section>
  <section class="view" id="v-trades"></section>
  <section class="view" id="v-fut"></section>
+ <section class="view" id="v-spot"></section>
+ <section class="view" id="v-strat"></section>
  <section class="view" id="v-news"></section>
  <section class="view" id="v-set"></section>
 </main>
@@ -132,7 +138,11 @@ function spark(vals,color='#10B981'){if(!vals||vals.length<2)vals=[0,0];const mn
  return `<svg class="spark" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".25"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path d="${d}L${w},${h}L0,${h}Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;}
 function outcomeCls(o,st){const s=(o||'')+' '+(st||'');if(/نُفّذ|نفذ|منفّذ|منفذ|تم التنفيذ|filled|executed|مُرسل/i.test(s)&&!/لم يُرسل/.test(s))return'g';if(/مرفوض|رفض|reject|فشل/i.test(s))return'rd';if(/تجميد|مجمد|تسوية|reconcile|frozen|معلّق/i.test(s))return'y';return'gr';}
 function sigPill(s){return s==='long'?'<span class="chip g">Long ▲</span>':s==='short'?'<span class="chip rd">Short ▼</span>':'<span class="chip gr">لا إشارة</span>';}
-const isFut=s=>/:USDT/.test(s||'');const sym=s=>(s||'').replace(':USDT','');
+const isFut=s=>/:USDT/.test(s||'');
+const ICONS=new Set('ADA AVAX BCH BNB BTC DOGE DOT ETH LINK LTC META NEAR NVDA SOL SPCX SPCXB TRX TSLA USDT XAU XRP'.split(' '));
+const baseSym=s=>String(s||'').split('/')[0].toUpperCase();
+const icoImg=s=>{const b=baseSym(s);return ICONS.has(b)?`<img src="/icons/${b}.svg" alt="${esc(b)}" loading="lazy">`:''};
+const coin=s=>{const b=baseSym(s),i=icoImg(s);return `<span class="coin">${i||esc(b.slice(0,3))}</span>`};const sym=s=>(s||'').replace(':USDT','');
 /* ===== render ===== */
 let S,EQ;
 function homeHTML(){
@@ -147,7 +157,7 @@ function homeHTML(){
  const bk={};EQ.forEach(p=>{const h=new Date(p.t*1000).toLocaleTimeString('en-GB',{hour:'2-digit',timeZone:'Asia/Riyadh'});(bk[h]=bk[h]||[]).push(p.v)});
  const bars=Object.entries(bk).map(([h,v])=>[h,v[v.length-1]-v[0]]).slice(-10);const bm=Math.max(...bars.map(b=>Math.abs(b[1])),.01);
  const mk=S.markets.slice().sort((a,b)=>(b.signal_strength||0)-(a.signal_strength||0)).slice(0,27);
- const dot=m=>{const s=m.signal_strength||0;const a=.15+s/100*.85;return `<div title="${esc(m.symbol)} · ${f2(s,1)}" style="background:rgba(255,94,58,${a.toFixed(2)});${m.in_position?'box-shadow:0 0 0 3px #fff,0 0 0 5px #F2385A;':''}">${esc(m.symbol.split('/')[0].slice(0,4))}</div>`};
+ const dot=m=>{const s=m.signal_strength||0;const a=.15+s/100*.85;return `<div title="${esc(m.symbol)} · ${f2(s,1)}" style="background:rgba(255,94,58,${a.toFixed(2)});${m.in_position?'box-shadow:0 0 0 3px #fff,0 0 0 5px #F2385A;':''}">${icoImg(m.symbol)||esc(baseSym(m.symbol).slice(0,4))}</div>`};
  const decs=S.decisions.slice(0,5);
  return `
  <div class="card c5 r2 gauge"><div class="ttl" style="width:100%"><span>إجمالي المحفظة (Spot + Futures)</span><span class="chip">${S.env==='demo'?'تجريبي':'حقيقي'}</span></div>
@@ -178,8 +188,8 @@ function homeHTML(){
    <button class="wbtn" id="tradeBtn" onclick="toggleTrading()">${entriesOn()?'إيقاف التداول':'تشغيل التداول'}</button></div></div></div>`;}
 function summary(cards){return `<div class="sum">${cards.map((c,i)=>`<div class="card ${i==0?'gradcard':''}"><div class="ttl">${c[0]}</div><div class="big">${N(c[1])}</div><div style="margin-top:4px;${i==0?'':'color:var(--mute)'}">${c[2]}</div></div>`).join('')}</div>`;}
 function tradeRows(pos,trs){
- return pos.map(p=>`<tr><td class="sym">${esc(sym(p.symbol))}</td><td>${isFut(p.symbol)?'Futures':'Spot'}</td><td>${N(f2(p.entry,4))}</td><td>${N(f2(p.price,4))}</td><td class="${p.pnl_usdt>=0?'up':'dn'}">${N(sg(p.pnl_usdt))}</td><td><span class="chip y">مفتوح</span></td><td><span class="chip ${/نشط/.test(p.protection_status)?'g':'y'}">${esc(p.protection_status||'—')}</span></td><td style="color:var(--mute)">${N(esc((p.time||'').slice(5,16)))}</td></tr>`).join('')+
- trs.map(t=>`<tr><td class="sym">${esc(sym(t.symbol))} ${t.side?`<span class="chip">${t.side}</span>`:''}</td><td>${esc(t.market_type||'Spot')}</td><td>${N(f2(t.entry,4))}</td><td>${N(f2(t.exit,4))}</td><td class="${t.pnl_usdt>=0?'up':'dn'}">${N(sg(t.pnl_usdt))}</td><td><span class="chip ${t.status==='WIN'?'g':'rd'}">${t.status==='WIN'?'رابح':'خاسر'}</span></td><td style="color:var(--mute)">رسوم ${N(f2((t.fees_usdt||0)+(t.funding_usdt||0)))}</td><td style="color:var(--mute)">${N(esc((t.time||'').slice(5,16)))}</td></tr>`).join('');}
+ return pos.map(p=>`<tr><td class="sym">${coin(p.symbol)}${esc(sym(p.symbol))}</td><td>${isFut(p.symbol)?'Futures':'Spot'}</td><td>${N(f2(p.entry,4))}</td><td>${N(f2(p.price,4))}</td><td class="${p.pnl_usdt>=0?'up':'dn'}">${N(sg(p.pnl_usdt))}</td><td><span class="chip y">مفتوح</span></td><td><span class="chip ${/نشط/.test(p.protection_status)?'g':'y'}">${esc(p.protection_status||'—')}</span></td><td style="color:var(--mute)">${N(esc((p.time||'').slice(5,16)))}</td></tr>`).join('')+
+ trs.map(t=>`<tr><td class="sym">${coin(t.symbol)}${esc(sym(t.symbol))} ${t.side?`<span class="chip">${t.side}</span>`:''}</td><td>${esc(t.market_type||'Spot')}</td><td>${N(f2(t.entry,4))}</td><td>${N(f2(t.exit,4))}</td><td class="${t.pnl_usdt>=0?'up':'dn'}">${N(sg(t.pnl_usdt))}</td><td><span class="chip ${t.status==='WIN'?'g':'rd'}">${t.status==='WIN'?'رابح':'خاسر'}</span></td><td style="color:var(--mute)">رسوم ${N(f2((t.fees_usdt||0)+(t.funding_usdt||0)))}</td><td style="color:var(--mute)">${N(esc((t.time||'').slice(5,16)))}</td></tr>`).join('');}
 const TH='<thead><tr><th>الرمز</th><th>السوق</th><th>الدخول</th><th>السعر/الخروج</th><th>الربح $</th><th>الحالة</th><th>الحماية / الرسوم</th><th>الوقت</th></tr></thead>';
 function tradesHTML(){const fees=S.trades.reduce((a,t)=>a+(t.fees_usdt||0)+(t.funding_usdt||0),0);
  return `<h1>الصفقات</h1><p class="sub">المراكز المفتوحة والصفقات المغلقة في Spot و Futures</p>`+summary([['الربح المحقق','$'+f2((S.stats.realized_total||0)+(S.futures.realized_pnl||0)),'Spot '+sg(S.stats.realized_total)+' · Futures '+sg(S.futures.realized_pnl)],['قيمة المراكز المفتوحة','$'+f2(S.wallet.positions_value),S.positions.length+' مركز مفتوح'],['الرسوم والتمويل','$'+f2(fees),'آخر '+S.trades.length+' صفقات مغلقة']])+
@@ -188,16 +198,31 @@ function futHTML(){const fu=S.futures;const pos=S.positions.filter(p=>isFut(p.sy
  return `<h1>Futures</h1><p class="sub">${fu.environment==='demo'?'حساب تجريبي':'حساب حقيقي'} · ${fu.connected?'متصل':'غير متصل'} · ${fu.trading_enabled?'التداول مفعّل':'التداول متوقف'}</p>`+summary([['الرصيد','$'+f2(fu.balance),'متاح $'+f2(fu.free_balance)],['الربح المحقق','$'+f2(fu.realized_pnl),fu.wins+' رابح · '+fu.losses+' خاسر'],['المخاطر اليومية',f2((fu.daily_risk||{}).loss_pct||0)+'%','الحد '+((fu.daily_risk||{}).limit_pct??'—')+'% · '+esc((fu.daily_risk||{}).reason)]])+
  `<div class="card" style="margin-bottom:18px"><div class="kvs"><div><small>الحماية</small><b>${fu.protection_degraded?'<span class="chip y">غير مكتملة</span>':'<span class="chip g">كاملة</span>'}</b></div><div><small>اتفاقية TradFi</small><b>${fu.tradfi_agreement_signed?'موقّعة':'غير موقّعة'}</b></div><div><small>الرموز</small><b>${N(fu.symbols.length)}</b></div><div><small>غير متاحة</small><b>${N(fu.unavailable_symbols.length)}</b></div></div></div>
  <div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(pos,trs)}</tbody></table></div></div>`;}
+function spotHTML(){const w=S.wallet||{},st=S.stats||{},dr=((S.daily_risk||{}).spot)||{},en=S.entries_enabled||{},se=S.settings||{};
+ const pos=(S.positions||[]).filter(p=>!isFut(p.symbol)),trs=(S.trades||[]).filter(t=>!isFut(t.symbol));const mk=(S.markets||[]).filter(m=>!isFut(m.symbol));
+ return `<h1>Spot</h1><p class="sub">${S.env==='demo'?'حساب تجريبي':'حساب حقيقي'} · ${en.spot===false?'الدخول متوقف':'التداول مفعّل'} · ${N((se.spot_active_trades??pos.length)+' / '+(se.spot_max_concurrent_trades??'—'))} صفقات نشطة</p>`+summary([['الرصيد','$'+f2(w.total),'نقد $'+f2(w.cash)+' · متاح $'+f2(w.free)],['الربح المحقق','$'+f2(st.realized_total),N((st.wins??0)+' رابح · '+(st.losses??0)+' خاسر')+' · غير محقق '+N(sg(st.unrealized||0))],['المخاطر اليومية',f2(dr.loss_pct||0)+'%','الحد '+(dr.limit_pct??'—')+'% · '+esc(dr.reason||'')]])+
+ `<div class="card" style="margin-bottom:18px"><div class="kvs"><div><small>قيمة المراكز</small><b>${N('$'+f2(w.positions_value))}</b></div><div><small>التعرض</small><b>${N(f2(st.exposure||0,1)+'%')}</b></div><div><small>الرموز</small><b>${N(mk.length)}</b></div><div><small>نسبة الفوز</small><b>${N(f2(st.win_rate||0,0)+'%')}</b></div></div></div>
+ <div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(pos,trs)}</tbody></table></div></div>`;}
+let SS=null,SSF='all';const STRAT_AR={trend:'الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'الزخم الهجين',donchian_trend:'دونشيان',volume_profile_range:'نطاق الحجم',unknown:'غير معروفة'};
+function stratHTML(){const p=S.params||{},on=new Set((p.strategies||[]).map(String));const rows=((SS&&SS.strategies)||[]).filter(r=>r&&(SSF=='all'||r.market==SSF));
+ const names=new Set(rows.map(r=>r.strategy));if(SSF!='fut'&&SSF!='futures')[...on].forEach(n=>{if(!names.has(n)&&SSF=='all')rows.push({market:'—',strategy:n,trades:0});});
+ const tot=rows.reduce((a,r)=>a+(r.trades||0),0),net=rows.reduce((a,r)=>a+(r.net_pnl_usdt||0),0),wins=rows.reduce((a,r)=>a+(r.wins||0),0);
+ const fl=[['all','الكل'],['spot','Spot'],['futures','Futures']];
+ return `<h1>الاستراتيجيات</h1><p class="sub">أداء كل استراتيجية بعد الرسوم · ${esc((SS&&SS.note)||'')}</p>`+summary([['صافي الربح','$'+f2(net),N(tot)+' صفقة مغلقة'],['نسبة الفوز',f2(tot?wins/tot*100:0,0)+'%',N(wins+' / '+tot)],['المفعّلة',on.size,esc([...on].map(n=>STRAT_AR[n]||n).join('، ')||'—')]])+
+ `<div class="card"><div class="filters">${fl.map(([k,l])=>`<button class="fp ${SSF==k?'on':''}" onclick="SSF='${k}';$('#v-strat').innerHTML=stratHTML()">${l}</button>`).join('')}</div>
+ <div class="tblwrap"><table><thead><tr><th>الاستراتيجية</th><th>السوق</th><th>الحالة</th><th>الصفقات</th><th>نسبة الفوز</th><th>صافي الربح $</th><th>متوسط الصفقة $</th><th>معامل الربح</th><th>متوسط R</th><th>الرسوم $</th></tr></thead><tbody>${
+ SS==null?'<tr><td colspan="10" style="color:var(--mute)">جارٍ التحميل…</td></tr>':rows.length?rows.map(r=>`<tr><td><b>${esc(STRAT_AR[r.strategy]||r.strategy)}</b><br><small style="color:var(--mute)" dir="ltr">${esc(r.strategy)}</small></td><td><span class="chip">${r.market=='futures'?'Futures':r.market=='spot'?'Spot':'—'}</span></td><td><span class="chip ${on.has(r.strategy)?'g':'gr'}">${on.has(r.strategy)?'مفعّلة':r.strategy=='unknown'?'—':'غير مدرجة'}</span></td><td>${N(r.trades||0)}${r.sample_warning?' <span class="chip y" title="أقل من 30 صفقة">عينة صغيرة</span>':''}</td><td>${r.trades?N(f2(r.win_rate_pct,0)+'%'):'—'}</td><td class="${(r.net_pnl_usdt||0)>=0?'up':'dn'}">${r.trades?N(sg(r.net_pnl_usdt||0)):'—'}</td><td>${r.trades?N(sg(r.avg_net_usdt||0)):'—'}</td><td>${N(r.profit_factor==null?'—':f2(r.profit_factor))}</td><td>${N(r.expectancy_r==null?'—':f2(r.expectancy_r)+'R')}</td><td>${N(r.trades?f2(r.fees_usdt||0):'—')}</td></tr>`).join(''):'<tr><td colspan="10" style="color:var(--mute)">لا توجد صفقات مغلقة بعد</td></tr>'}</tbody></table></div></div>`;}
+function loadSS(){return getJSON('/api/strategy-stats?_='+Date.now()).then(j=>{SS=j&&typeof j==='object'?j:{strategies:[]};}).catch(()=>{SS=SS||{strategies:[],note:'تعذّر تحميل الإحصائيات'};}).then(()=>{const v=$('#v-strat');if(v&&S)v.innerHTML=stratHTML();});}
 let DF='all',DQ='';
 function decHTML(){const today=new Date().toISOString().slice(0,10);const all=S.decisions;const td=all.filter(d=>(d.created_at||'').startsWith(today)).length||all.length;
  const ex=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='g').length,rj=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='rd').length;
  const fl=[['all','الكل'],['spot','Spot'],['fut','Futures'],['ex','منفّذ'],['rj','مرفوض']];
- return `<h1>القرارات</h1><p class="sub">كل قرار اتخذه البوت في آخر فحص: الإشارة، النتيجة، والسبب</p>`+summary([['قرارات اليوم',td,'آخر فحص '+tm(S.scanner.last_completed_at)],['منفّذة',ex,'أوامر أُرسلت إلى Binance'],['مرفوضة',rj,'رفضتها ضوابط المخاطر']])+
+ return `<h1>قرارات البوت</h1><p class="sub">كل قرار اتخذه البوت في آخر فحص: الإشارة، النتيجة، والسبب</p>`+summary([['قرارات اليوم',td,'آخر فحص '+tm(S.scanner.last_completed_at)],['منفّذة',ex,'أوامر أُرسلت إلى Binance'],['مرفوضة',rj,'رفضتها ضوابط المخاطر']])+
  `<div class="card"><div class="filters">${fl.map(([k,l])=>`<button class="fp ${DF==k?'on':''}" onclick="DF='${k}';renderDec()">${l}</button>`).join('')}<input class="search" id="dq" placeholder="ابحث برمز العملة… مثل BTC" value="${esc(DQ)}" oninput="DQ=this.value;renderDecRows()"></div>
  <div class="tblwrap"><table><thead><tr><th>الوقت</th><th>السوق</th><th>الرمز</th><th>الإشارة</th><th>الاستراتيجية</th><th>الإطار</th><th>السعر</th><th>النتيجة</th><th>الأمر</th><th>السبب</th></tr></thead><tbody id="decRows"></tbody></table></div><div id="decMore"></div></div>`;}
 function renderDecRows(){const q=DQ.trim().toUpperCase();const rows=S.decisions.filter(d=>{const c=outcomeCls(d.outcome,d.order_status);
  if(DF=='spot'&&/Futures/i.test(d.market))return false;if(DF=='fut'&&!/Futures/i.test(d.market))return false;if(DF=='ex'&&c!='g')return false;if(DF=='rj'&&c!='rd')return false;return !q||(d.symbol||'').toUpperCase().includes(q);});const total=rows.length;rows.splice(LIM.dec);$('#decMore').innerHTML=moreBtn('dec',total,25);
- $('#decRows').innerHTML=rows.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td><span class="chip">${/Futures/i.test(d.market)?'Futures':'Spot'}</span></td><td class="sym">${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td>${esc(d.strategy)}</td><td>${N(esc(d.timeframe))}</td><td>${N(f2(d.price,4))}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td><span class="chip gr">${esc(d.order_status)}</span></td><td class="reason">${esc(d.reason)}${(d.api_message_ar||d.api_message)?`<br><small style="color:#DC3B3B">${esc(d.api_message_ar||d.api_message)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--mute)">لا توجد قرارات مطابقة</td></tr>';}
+ $('#decRows').innerHTML=rows.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td><span class="chip">${/Futures/i.test(d.market)?'Futures':'Spot'}</span></td><td class="sym">${coin(d.symbol)}${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td>${esc(d.strategy)}</td><td>${N(esc(d.timeframe))}</td><td>${N(f2(d.price,4))}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td><span class="chip gr">${esc(d.order_status)}</span></td><td class="reason">${esc(d.reason)}${(d.api_message_ar||d.api_message)?`<br><small style="color:#DC3B3B">${esc(d.api_message_ar||d.api_message)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--mute)">لا توجد قرارات مطابقة</td></tr>';}
 function renderDec(){$('#v-dec').innerHTML=decHTML();renderDecRows();}
 function newsHTML(){const n=S.news;const sev=n.severity||0;
  return `<h1>الأخبار</h1><p class="sub">فلتر الأخبار يوقف الدخول عند الأخبار الخطرة</p>`+summary([['الحالة',n.blocked?'إيقاف مؤقت':'مسموح',esc(n.reason)],['الخطورة',sev+' / 10','عتبة الإيقاف '+S.params.news_severity],['المصدر',esc(n.source||'—'),'آخر فحص '+esc(n.checked_at||'—')]])+
@@ -236,9 +261,9 @@ function go(v,t){if(v==cur)return;const btn=nav.querySelector(`[data-v="${v}"]`)
  if(RM){show();return;}
  A(old,[{opacity:1,transform:'none'},{opacity:0,transform:'scale(.95)'}],{duration:220,easing:'ease-in'});setTimeout(()=>{old.getAnimations().forEach(a=>a.cancel());show();},220);}
 nav.addEventListener('click',e=>{const b=e.target.closest('button');if(b)go(b.dataset.v);});
-function renderAll(){$('#homeGrid').innerHTML=homeHTML();if(document.activeElement&&document.activeElement.id==='dq')renderDecRows();else renderDec();$('#v-trades').innerHTML=tradesHTML();$('#v-fut').innerHTML=futHTML();$('#v-news').innerHTML=newsHTML();const vs=$('#v-set');if(!vs.contains(document.activeElement))vs.innerHTML=setHTML();}
+function renderAll(){$('#homeGrid').innerHTML=homeHTML();if(document.activeElement&&document.activeElement.id==='dq')renderDecRows();else renderDec();$('#v-trades').innerHTML=tradesHTML();$('#v-fut').innerHTML=futHTML();$('#v-spot').innerHTML=spotHTML();$('#v-strat').innerHTML=stratHTML();$('#v-news').innerHTML=newsHTML();const vs=$('#v-set');if(!vs.contains(document.activeElement))vs.innerHTML=setHTML();}
 async function boot(){try{[S,EQ]=await Promise.all([API.state(),API.equity().catch(()=>[])]);}catch(e){document.body.insertAdjacentHTML('afterbegin','<div style="background:#FEE2E2;color:#991B1B;padding:12px;text-align:center;font-weight:700">تعذّر تحميل بيانات البوت — '+esc(e.message)+'</div>');return;}
- EQ=Array.isArray(EQ)?EQ:(EQ.points||EQ.data||[]);renderAll();await document.fonts.ready;pillTo(nav.querySelector('.on'),false);
+ EQ=Array.isArray(EQ)?EQ:(EQ.points||EQ.data||[]);renderAll();loadSS();setInterval(()=>{if(!document.hidden)loadSS();},60000);await document.fonts.ready;pillTo(nav.querySelector('.on'),false);
  enter($('#v-home'));setInterval(()=>{if(!document.hidden)refresh();},15000);}
 boot();
 </script>
