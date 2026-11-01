@@ -12,7 +12,7 @@ import time
 import uuid
 
 import ccxt
-from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
+from strategy_engine import (effective_notional_cap, evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, risk_sized_notional,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              MAX_DAILY_LOSS_PCT, MAX_SPOT_HEDGE_RATIO)
@@ -35,6 +35,17 @@ FUNDING_MAX_COST_FRACTION = float(os.getenv("FUNDING_MAX_COST_FRACTION", "0.25")
 FUNDING_EXPECTED_HOLD_HOURS = float(os.getenv("FUNDING_EXPECTED_HOLD_HOURS", "24"))
 
 
+FUTURES_MONITOR_FREEZE_SCOPE = os.getenv("FUTURES_MONITOR_FREEZE_SCOPE", "symbol").strip().lower()
+if FUTURES_MONITOR_FREEZE_SCOPE not in ("symbol", "global"):
+    raise ValueError("FUTURES_MONITOR_FREEZE_SCOPE must be symbol or global")
+# "hedge" keeps crypto perps for Spot hedges only; "all" lets them trade every strategy.
+FUTURES_HEDGE_ONLY_MODE = os.getenv("FUTURES_HEDGE_ONLY_MODE", "hedge").strip().lower()
+if FUTURES_HEDGE_ONLY_MODE not in ("hedge", "all"):
+    raise ValueError("FUTURES_HEDGE_ONLY_MODE must be hedge or all")
+FUTURES_MONITOR_MAX_FAILED_SYMBOLS = int(os.getenv("FUTURES_MONITOR_MAX_FAILED_SYMBOLS", "2"))
+FUTURES_STOP_REPLACE_MODE = os.getenv("FUTURES_STOP_REPLACE_MODE", "cancel_then_create").strip().lower()
+FUTURES_ADOPT_EXISTING_CLOSE_STOP = os.getenv("FUTURES_ADOPT_EXISTING_CLOSE_STOP", "true").lower() in ("1", "true", "yes")
+
 class BinanceFuturesDemo:
     def __init__(self, api_key, secret_key, db_path, on_event=None, on_decision=None,
                  spot_exposure_provider=None, portfolio_risk_provider=None):
@@ -46,6 +57,7 @@ class BinanceFuturesDemo:
         self.spot_exposure_provider = spot_exposure_provider
         self.portfolio_risk_provider = portfolio_risk_provider
         self.protection_degraded = False
+        self.monitor_failed_symbols = set()
         self.exchange = ccxt.binance({
             "apiKey": api_key,
             "secret": secret_key,
@@ -64,7 +76,7 @@ class BinanceFuturesDemo:
                     and market.get("swap") and market.get("linear")
                     and market.get("quote") == "USDT"):
                 self.symbols.append(market["symbol"])
-                if market.get("id") in HEDGE_ONLY_IDS:
+                if market.get("id") in HEDGE_ONLY_IDS and FUTURES_HEDGE_ONLY_MODE == "hedge":
                     self.hedge_only_symbols.append(market["symbol"])
                 available_ids.add(market.get("id"))
         self.symbols.sort()
@@ -545,6 +557,17 @@ class BinanceFuturesDemo:
                 pos["protective_algo_id"] = str(orphaned[0].get("algoId"))
                 pos["protective_client_id"] = orphaned[0].get("clientAlgoId")
                 old_id = pos["protective_algo_id"]
+        if not old_id and FUTURES_ADOPT_EXISTING_CLOSE_STOP:
+            # Binance allows only one closePosition stop per side (-4130). Adopt a
+            # stop that already protects this position instead of failing forever.
+            foreign = [o for o in open_orders
+                       if str(o.get("closePosition")).lower() == "true"
+                       and str(o.get("side") or "").upper() == side]
+            if len(foreign) == 1:
+                pos["protective_algo_id"] = str(foreign[0].get("algoId"))
+                pos["protective_client_id"] = foreign[0].get("clientAlgoId")
+                old_id = pos["protective_algo_id"]
+                self.on_event("WARN", "اعتُمد وقف Futures موجود مسبقًا لـ {} بدل إنشاء وقف مكرر".format(symbol))
         existing = next((o for o in open_orders
                          if str(o.get("algoId")) == str(old_id)
                          or (pos.get("protective_client_id") and
@@ -571,12 +594,37 @@ class BinanceFuturesDemo:
         create = getattr(self.exchange, "fapiPrivatePostAlgoOrder", None)
         if not callable(create):
             raise RuntimeError("إصدار CCXT لا يدعم أوامر وقف Futures الشرطية")
-        response = create({
+        params = {
             "algoType": "CONDITIONAL", "symbol": market_id,
             "side": side, "type": "STOP_MARKET", "triggerPrice": desired_text,
             "workingType": "MARK_PRICE", "closePosition": "true",
             "clientAlgoId": client_id,
-        })
+        }
+        replaced_first = False
+        if existing and FUTURES_STOP_REPLACE_MODE == "cancel_then_create":
+            # closePosition stops cannot coexist (-4130): cancel, create, and restore
+            # the previous trigger if the new stop is rejected.
+            old_trigger_text = self.exchange.price_to_precision(
+                symbol, float(existing.get("triggerPrice") or existing.get("stopPrice") or 0.0))
+            getattr(self.exchange, "fapiPrivateDeleteAlgoOrder")({"symbol": market_id, "algoId": str(old_id)})
+            replaced_first = True
+            try:
+                response = create(params)
+            except Exception:
+                restore_id = "stbot_" + uuid.uuid4().hex[:20]
+                try:
+                    restored = create(dict(params, triggerPrice=old_trigger_text, clientAlgoId=restore_id))
+                    pos["protective_algo_id"] = str(restored.get("algoId"))
+                    pos["protective_client_id"] = restore_id
+                    pos["protective_stop_price"] = float(old_trigger_text)
+                    self._save_position(pos)
+                except Exception:
+                    self.protection_degraded = True
+                    self._mark_reconciliation_required(symbol, pos,
+                        "أُلغي وقف Futures ولم يُستعد؛ المركز بلا وقف على المنصة")
+                raise
+        else:
+            response = create(params)
         new_id = response.get("algoId") if isinstance(response, dict) else None
         if not new_id:
             raise RuntimeError("Binance لم يؤكد إنشاء وقف Futures")
@@ -585,7 +633,7 @@ class BinanceFuturesDemo:
         pos["protective_stop_price"] = float(desired_text)
         pos["protection_status"] = "active"
         self._save_position(pos)
-        if old_id and str(old_id) != str(new_id):
+        if old_id and str(old_id) != str(new_id) and not replaced_first:
             try:
                 getattr(self.exchange, "fapiPrivateDeleteAlgoOrder")(
                     {"symbol": market_id, "algoId": str(old_id)})
@@ -778,6 +826,7 @@ class BinanceFuturesDemo:
 
     def _monitor_positions(self):
         monitor_ok = True
+        failed_symbols = set()
         for symbol, pos in list(self.positions.items()):
             order = None
             try:
@@ -785,14 +834,18 @@ class BinanceFuturesDemo:
                 if pos.get("reconciliation_required"):
                     if pos.get("protective_algo_id") and self._recover_triggered_stop(symbol, pos):
                         monitor_ok = False
+                        failed_symbols.add(symbol)
                         continue
                     monitor_ok = False
+                    failed_symbols.add(symbol)
                     continue
                 if pos.get("partial_attempted") and not pos.get("partial_taken"):
                     monitor_ok = False
+                    failed_symbols.add(symbol)
                     continue  # ambiguous tranche order: require reconciliation before another order
                 if pos.get("exit_attempted"):
                     monitor_ok = False
+                    failed_symbols.add(symbol)
                     self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
                                      'timeframe': pos.get('timeframe')}, outcome='تجميد المركز',
                                      reason='أمر إغلاق سابق غير مؤكد؛ طابق سجل Binance قبل أي أمر آخر',
@@ -815,6 +868,7 @@ class BinanceFuturesDemo:
                             spot_exposure = None
                     if spot_exposure is None:
                         monitor_ok = False
+                        failed_symbols.add(symbol)
                         self.on_event("WARN", "تعذر التحقق من تعرض Spot لتحوط {}؛ تستمر مراقبة الوقف دون إعادة موازنة".format(symbol))
                     else:
                         remaining_spot = float(spot_exposure.get(pos["hedge_base"]) or 0.0)
@@ -879,6 +933,7 @@ class BinanceFuturesDemo:
                             self.on_event("WARN", "تخطي البيع الجزئي {}: نصف المركز أقل من الحد الأدنى؛ ستتم متابعة الوقف فقط".format(symbol))
             except Exception as exc:
                 monitor_ok = False
+                failed_symbols.add(symbol)
                 snapshot = self.snapshot.get(symbol) or {}
                 self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
                                  'timeframe': pos.get('timeframe')}, snapshot.get('price'),
@@ -886,6 +941,7 @@ class BinanceFuturesDemo:
                                  order_status='غير مؤكد' if order is not None else 'لم يُرسل',
                                  api_message=exc, price_updated_at=snapshot.get('price_updated_at'))
                 self.on_event("ERR", "متابعة Futures {} فشلت ({})".format(symbol, type(exc).__name__))
+        self.monitor_failed_symbols = failed_symbols
         self.protection_degraded = not monitor_ok
         return monitor_ok
 
@@ -1152,7 +1208,10 @@ class BinanceFuturesDemo:
                                      (setup or {}).get('reason') or 'لا توجد إشارة مكتملة',
                                      order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
-                if not positions_monitor_ok:
+                if not positions_monitor_ok and (
+                        FUTURES_MONITOR_FREEZE_SCOPE == "global"
+                        or symbol in self.monitor_failed_symbols
+                        or len(self.monitor_failed_symbols) > FUTURES_MONITOR_MAX_FAILED_SYMBOLS):
                     self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',
                                      'أُوقف الدخول بسبب تعذر متابعة مركز Futures مفتوح',
                                      order_status='لم يُرسل', price_updated_at=price_updated_at)
@@ -1214,7 +1273,7 @@ class BinanceFuturesDemo:
                 risk = STRATEGY_RISK[setup["strategy"]]
                 atr = max(float(setup.get("atr") or 0), price * 0.0005)
                 stop_distance = atr * risk["stop_atr"]
-                notional_cap = float(trade_amount_usdt)
+                notional_cap = effective_notional_cap(account["total"], trade_amount_usdt)
                 hedge_exposure = 0.0
                 if setup["strategy"] == "volatility_breakout_hedge":
                     current_exposure = self.spot_exposure_provider() if self.spot_exposure_provider else None

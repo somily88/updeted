@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
-                             TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional,
+                             TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional, effective_notional_cap,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              prefetch_ohlcv)
 from futures_engine import BinanceFuturesDemo
@@ -1029,7 +1029,8 @@ def place_buy(symbol, ref_price, stop_distance=None):
     if stop_distance is not None:
         _, total_equity = get_binance_balance(ttl=0)
         amount_usdt = risk_sized_notional(
-            total_equity, ref_price, stop_distance, TRADE_AMOUNT_USDT, RISK_PER_TRADE_PCT)
+            total_equity, ref_price, stop_distance,
+            effective_notional_cap(total_equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT)
 
     market = exchange.market(symbol)
     min_cost = ((market.get('limits') or {}).get('cost') or {}).get('min')
@@ -1322,6 +1323,21 @@ def _spot_inventory_tolerance(symbol, tracked):
     return max(step, abs(float(tracked)) * 0.002, 1e-12)
 
 
+SPOT_DUST_MAX_USDT = float(os.getenv('SPOT_DUST_MAX_USDT', '1.0'))
+
+
+def _is_spot_dust(symbol, pos, amount):
+    """A leftover too small for Binance to accept any protective/sell order."""
+    if SPOT_DUST_MAX_USDT <= 0 or pos.get('protective_order_id'):
+        return False
+    value = float(amount or 0.0) * float(pos.get('entry_price') or 0.0)
+    try:
+        market_min = float((((exchange.market(symbol).get('limits') or {}).get('cost') or {}).get('min')) or 0.0)
+    except Exception:
+        market_min = 0.0
+    return 0 < value < min(SPOT_DUST_MAX_USDT, market_min or SPOT_DUST_MAX_USDT)
+
+
 def _reconcile_spot_position(symbol, pos):
     """Reconcile one persisted Spot Demo position. Returns True when it is safe to manage."""
     if pos.get('simulated'):
@@ -1359,6 +1375,13 @@ def _reconcile_spot_position(symbol, pos):
             log_event('INFO', 'Spot {}: اعتُمد رصيد Binance الفعلي {:.8g} {} بدل {:.8g} (نقص {:.2f}% يُرجّح أنه عمولات مخصومة من {}); الدخول والوقف دون تغيير'.format(
                 symbol, inventory, base, tracked, shortfall_pct, base))
             tracked = inventory
+        if _is_spot_dust(symbol, pos, tracked):
+            log_event('INFO', 'Spot {}: بقايا صغيرة ({:.8g} ≈ {:.4f} USDT) أقل من حد البقايا؛ أُزيلت من المتابعة'
+                      ' لأن Binance يرفض وقفًا بهذا الحجم'.format(symbol, tracked, tracked * float(pos.get('entry_price') or 0.0)))
+            active_positions.pop(symbol, None)
+            delete_position(symbol)
+            spot_frozen_symbols.discard(symbol)
+            return True
         if inventory + tolerance < tracked:
             reason = ('يوجد أمر بيع جزئي أو إغلاق سابق غير محسوم' if pending else
                       'رصيد Binance من {} ({:.8g}) أقل من الكمية المحفوظة ({:.8g})'.format(base, inventory, tracked))
@@ -1401,7 +1424,7 @@ def _reconcile_spot_positions():
 def _check_sized_spot_risk(symbol, price, stop_distance):
     _, equity = get_binance_balance(ttl=10)
     notional = risk_sized_notional(equity, price, stop_distance,
-                                   TRADE_AMOUNT_USDT, RISK_PER_TRADE_PCT)
+                                   effective_notional_cap(equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT)
     risk_amount = notional * float(stop_distance) / max(float(price), 1e-12)
     result = _check_combined_portfolio_risk(symbol, 'Spot', risk_amount)
     result['candidate_notional_usdt'] = notional

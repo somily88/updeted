@@ -113,3 +113,18 @@ def test_monitor_error_on_frozen_symbol_blocks_only_itself(m, monkeypatch):
     m.active_positions['BNB/USDT'] = _pos()
     assert m.check_and_close_positions() is True
     assert m.spot_frozen_symbols == {'BNB/USDT'}
+
+
+def test_dust_leftover_is_released_not_frozen(m, monkeypatch):
+    _balance(monkeypatch, m, 7.155e-05)
+    m.active_positions['BNB/USDT'] = _pos(amount=7.155e-05, cost=0.0575, entry_price=738.27)
+    assert m._reconcile_spot_positions() is True
+    assert 'BNB/USDT' not in m.active_positions
+    assert not m._test_stops
+
+
+def test_real_position_is_not_treated_as_dust(m, monkeypatch):
+    _balance(monkeypatch, m, 0.30461675)
+    m.active_positions['BNB/USDT'] = _pos(entry_price=738.27)
+    assert m._reconcile_spot_positions() is True
+    assert 'BNB/USDT' in m.active_positions
