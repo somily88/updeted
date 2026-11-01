@@ -54,6 +54,10 @@ def risk_cluster(symbol):
     return "other:" + (base or "unknown")
 
 
+# Count cap on open positions in one correlated cluster (0 = off).
+MAX_POSITIONS_PER_CLUSTER = int(os.getenv("MAX_POSITIONS_PER_CLUSTER", "0"))
+
+
 def portfolio_risk_status(open_risks, candidate, total_equity,
                           max_total_pct=None, max_cluster_pct=None):
     """Check proposed risk against total and correlated-cluster limits.
@@ -88,6 +92,13 @@ def portfolio_risk_status(open_risks, candidate, total_equity,
         allowed = False
         reason = "تجاوز حد مخاطر المجموعة المترابطة {} ({:.2f}% من {:.2f}%)".format(
             cluster, cluster_pct, cluster_limit)
+    max_same = MAX_POSITIONS_PER_CLUSTER
+    if allowed and max_same > 0:
+        same = sum(1 for item in (open_risks or []) if risk_cluster(item.get("symbol")) == cluster
+                   and float(item.get("risk_usdt") or 0.0) > 0)
+        if same >= max_same:
+            allowed = False
+            reason = "بلغ عدد المراكز المفتوحة في المجموعة المترابطة {} الحد ({})".format(cluster, max_same)
     return {"allowed": allowed, "reason": reason, "equity": equity,
             "open_risk_usdt": round(total_risk - candidate_risk, 8),
             "projected_risk_usdt": round(total_risk, 8),

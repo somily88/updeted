@@ -12,7 +12,7 @@ import sys
 from collections import defaultdict
 
 import ccxt
-from strategy_engine import (STRATEGY_RISK, RISK_PER_TRADE_PCT, TRAILING_ACTIVATION_PCT,
+from strategy_engine import (PARTIAL_TP_FRACTION, PARTIAL_TP_R, STRATEGY_RISK, RISK_PER_TRADE_PCT, TRAILING_ACTIVATION_PCT,
                              evaluate_symbol, risk_sized_notional)
 
 TIMEFRAME_MS = {
@@ -222,11 +222,11 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
                 return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
             if high >= target:
                 return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
-        risk_level = float(pos["entry_price"]) + float(pos["risk_distance"])
+        risk_level = float(pos["entry_price"]) + float(pos["risk_distance"]) * PARTIAL_TP_R
         if not pos.get("partial_taken") and high >= risk_level:
             partial_raw = op if op >= risk_level else risk_level
             partial_price = partial_raw * (1.0 - slippage_rate)
-            partial_quantity = float(pos["quantity"]) * 0.5
+            partial_quantity = float(pos["quantity"]) * PARTIAL_TP_FRACTION
             partial_fee = partial_quantity * partial_price * fee_rate
             partial_gross = partial_quantity * (partial_price - float(pos["entry_price"]))
             pos["partial_gross_pnl"] = float(pos.get("partial_gross_pnl") or 0.0) + partial_gross
@@ -251,11 +251,11 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
                 return close_position(pos, op, timestamp, "target_gap", fee_rate, slippage_rate)
             if low <= target:
                 return close_position(pos, target, timestamp, "target", fee_rate, slippage_rate)
-        risk_level = float(pos["entry_price"]) - float(pos["risk_distance"])
+        risk_level = float(pos["entry_price"]) - float(pos["risk_distance"]) * PARTIAL_TP_R
         if not pos.get("partial_taken") and low <= risk_level:
             partial_raw = op if op <= risk_level else risk_level
             partial_price = partial_raw * (1.0 + slippage_rate)
-            partial_quantity = float(pos["quantity"]) * 0.5
+            partial_quantity = float(pos["quantity"]) * PARTIAL_TP_FRACTION
             partial_fee = partial_quantity * partial_price * fee_rate
             partial_gross = partial_quantity * (float(pos["entry_price"]) - partial_price)
             pos["partial_gross_pnl"] = float(pos.get("partial_gross_pnl") or 0.0) + partial_gross

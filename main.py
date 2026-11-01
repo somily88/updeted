@@ -29,6 +29,7 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional, effective_notional_cap,
+                             PARTIAL_TP_R, PARTIAL_TP_FRACTION,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              prefetch_ohlcv)
 from futures_engine import BinanceFuturesDemo
@@ -1793,9 +1794,9 @@ def check_and_close_positions():
 
             if not reason and not pos.get('test') and not pos.get('partial_taken') and not pos.get('partial_attempted'):
                 risk_distance = float(pos.get('risk_distance') or max(entry_price - initial_stop, entry_price * 0.0005))
-                if risk_distance > 0 and current_price >= entry_price + risk_distance:
+                if risk_distance > 0 and current_price >= entry_price + risk_distance * PARTIAL_TP_R:
                     try:
-                        tranche = float(pos['amount']) * 0.5
+                        tranche = float(pos['amount']) * PARTIAL_TP_FRACTION
                         min_cost = float((((exchange.market(symbol).get('limits') or {}).get('cost') or {}).get('min')) or 0.0)
                         if min_cost and tranche * float(current_price) < min_cost:
                             pos['partial_attempted'] = True

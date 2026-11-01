@@ -35,6 +35,27 @@ RANGE_MAX_EMA_DISTANCE = float(os.getenv("RANGE_MAX_EMA_DISTANCE", "0.025"))
 BREAKOUT_VOLUME_MULTIPLE = float(os.getenv("BREAKOUT_VOLUME_MULTIPLE", "1.25"))
 DISABLED_STRATEGIES = frozenset(t.strip() for t in os.getenv("DISABLED_STRATEGIES", "").split(",") if t.strip())
 
+# --- Plan C (strategy & risk); defaults keep previous behaviour ---
+REGIME_FILTER = os.getenv("REGIME_FILTER", "off").strip().lower()
+if REGIME_FILTER not in ("off", "adx"):
+    raise ValueError("REGIME_FILTER must be off or adx")
+ADX_PERIOD = int(os.getenv("ADX_PERIOD", "14"))
+ADX_TREND_MIN = float(os.getenv("ADX_TREND_MIN", "20"))
+ADX_RANGE_MAX = float(os.getenv("ADX_RANGE_MAX", "20"))
+MTF_CONFIRM = os.getenv("MTF_CONFIRM", "false").lower() in ("1", "true", "yes")
+# Volatility-scaled risk: scale risk by VOL_TARGET_STOP_PCT / stop%% (clamped). 0 = off.
+VOL_TARGET_STOP_PCT = float(os.getenv("VOL_TARGET_STOP_PCT", "0"))
+VOL_SCALE_MIN = float(os.getenv("VOL_SCALE_MIN", "0.5"))
+VOL_SCALE_MAX = float(os.getenv("VOL_SCALE_MAX", "1.0"))
+if VOL_TARGET_STOP_PCT < 0 or not 0 < VOL_SCALE_MIN <= VOL_SCALE_MAX <= 1.5:
+    raise ValueError("Invalid volatility scaling settings")
+PARTIAL_TP_R = float(os.getenv("PARTIAL_TP_R", "1.0"))
+PARTIAL_TP_FRACTION = float(os.getenv("PARTIAL_TP_FRACTION", "0.5"))
+if not 0.25 <= PARTIAL_TP_R <= 5 or not 0.0 < PARTIAL_TP_FRACTION < 1.0:
+    raise ValueError("PARTIAL_TP_R must be 0.25..5 and PARTIAL_TP_FRACTION in (0,1)")
+ENABLE_DONCHIAN_TREND = os.getenv("ENABLE_DONCHIAN_TREND", "false").lower() in ("1", "true", "yes")
+DONCHIAN_LOOKBACKS = tuple(int(x) for x in os.getenv("DONCHIAN_LOOKBACKS", "20,40,55").split(",") if x.strip())
+
 MIN_SPOT_QUOTE_VOLUME_USDT = float(os.getenv("MIN_SPOT_QUOTE_VOLUME_USDT", "1000000"))
 MIN_FUTURES_QUOTE_VOLUME_USDT = float(os.getenv("MIN_FUTURES_QUOTE_VOLUME_USDT", "100000"))
 MAX_SPOT_SPREAD_PCT = float(os.getenv("MAX_SPOT_SPREAD_PCT", "0.15"))
@@ -120,9 +141,17 @@ def risk_sized_notional(equity, entry_price, stop_distance, max_notional,
     if (equity <= 0 or entry_price <= 0 or stop_distance <= 0
             or max_notional <= 0 or not 0 < risk_percent <= 2.0):
         raise ValueError("Invalid equity, stop, price, notional cap, or risk percent")
-    risk_budget = equity * risk_percent / 100.0
     stop_fraction = stop_distance / entry_price
+    risk_budget = equity * risk_percent / 100.0 * volatility_risk_scale(stop_fraction * 100.0)
     return min(max_notional, risk_budget / stop_fraction)
+
+
+def volatility_risk_scale(stop_pct, target_stop_pct=None):
+    """Scale risk down when the ATR stop is wide (high volatility). 1.0 when off."""
+    target = VOL_TARGET_STOP_PCT if target_stop_pct is None else float(target_stop_pct)
+    if target <= 0 or stop_pct <= 0:
+        return 1.0
+    return max(VOL_SCALE_MIN, min(VOL_SCALE_MAX, target / stop_pct))
 
 
 def effective_notional_cap(equity, trade_amount, equity_pct=None):
@@ -155,6 +184,7 @@ STRATEGY_RISK = {
     "algorithmic_discretionary_hybrid": {"stop_atr": 1.25, "target_atr": 2.2, "trail_atr": 1.0},
     "volume_profile_range": {"stop_atr": 0.9, "target_atr": 1.4, "trail_atr": 0.7},
     "volatility_breakout_hedge": {"stop_atr": 1.1, "target_atr": 2.0, "trail_atr": 1.0},
+    "donchian_trend": {"stop_atr": 2.0, "target_atr": 6.0, "trail_atr": 2.0},
 }
 STRATEGY_LABELS = {
     "trend": "تتبّع الاتجاه", "breakout": "الاختراق", "bounce": "الارتداد",
@@ -162,6 +192,7 @@ STRATEGY_LABELS = {
     "algorithmic_discretionary_hybrid": "خوارزمي مع سياق الأخبار",
     "volume_profile_range": "نطاق حجم التداول",
     "volatility_breakout_hedge": "اختراق تقلب مع تحوّط",
+    "donchian_trend": "اتجاه دونشيان متعدد الفترات",
 }
 
 
@@ -591,6 +622,77 @@ def _higher_timeframe_confirms(exchange, symbol, cache, direction):
             and (v["hist"] >= 0 or v["hist"] > previous_hist))
 
 
+def _adx(candles, period=None):
+    """Wilder ADX on closed candles; None when history is too short."""
+    period = int(period or ADX_PERIOD)
+    if not candles or len(candles) < period * 2 + 1:
+        return None
+    plus_dm, minus_dm, trs = [], [], []
+    for prev, cur in zip(candles[:-1], candles[1:]):
+        up, down = cur[2] - prev[2], prev[3] - cur[3]
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        trs.append(max(cur[2] - cur[3], abs(cur[2] - prev[4]), abs(cur[3] - prev[4])))
+    tr_s, p_s, m_s = sum(trs[:period]), sum(plus_dm[:period]), sum(minus_dm[:period])
+    dxs = []
+    for i in range(period, len(trs) + 1):
+        if i > period:
+            tr_s = tr_s - tr_s / period + trs[i - 1]
+            p_s = p_s - p_s / period + plus_dm[i - 1]
+            m_s = m_s - m_s / period + minus_dm[i - 1]
+        if tr_s <= 0:
+            dxs.append(0.0)
+            continue
+        pdi, mdi = 100 * p_s / tr_s, 100 * m_s / tr_s
+        dxs.append(0.0 if pdi + mdi == 0 else 100 * abs(pdi - mdi) / (pdi + mdi))
+    if len(dxs) < period:
+        return None
+    adx = sum(dxs[:period]) / period
+    for dx in dxs[period:]:
+        adx = (adx * (period - 1) + dx) / period
+    return adx
+
+
+def _tf_adx(exchange, symbol, timeframe, cache):
+    return _adx(_load(exchange, symbol, timeframe, cache))
+
+
+def _daily_bias(exchange, symbol, cache):
+    v = _view(_load(exchange, symbol, "1d", cache))
+    if not v or not v.get("ema20") or not v.get("ema50"):
+        return None
+    return "long" if v["ema20"] > v["ema50"] else "short"
+
+
+def _donchian_candidate(exchange, symbol, timeframe, cache, direction="long"):
+    """Ensemble Donchian breakout: votes across several lookbacks (trend following)."""
+    candles = _load(exchange, symbol, timeframe, cache)
+    v = _view(candles)
+    if not v or not v["atr"] or len(candles) < max(DONCHIAN_LOOKBACKS) + 2:
+        return None
+    close = candles[-1][4]
+    votes = 0
+    for n in DONCHIAN_LOOKBACKS:
+        window = candles[-n - 1:-1]
+        if direction == "long" and close > max(c[2] for c in window):
+            votes += 1
+        if direction == "short" and close < min(c[3] for c in window):
+            votes += 1
+    if votes * 2 <= len(DONCHIAN_LOOKBACKS):
+        return None
+    strength = min(92.0, 60.0 + 30.0 * votes / len(DONCHIAN_LOOKBACKS))
+    return _candidate("donchian_trend", timeframe, v,
+                      "اختراق قناة دونشيان في {} من {} فترات".format(votes, len(DONCHIAN_LOOKBACKS)),
+                      direction, strength)
+
+
+def _regime_direction_ok(exchange, symbol, cache, direction):
+    v = _view(_load(exchange, symbol, "4h", cache))
+    if not v or not v.get("ema20") or not v.get("ema50"):
+        return False
+    return (v["ema20"] > v["ema50"]) == (direction == "long")
+
+
 def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                     enable_hybrids=True, allowed_strategies=None, cache=None):
     """Evaluate established and hybrid strategies using closed candles only."""
@@ -598,21 +700,43 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
     directions = ("long", "short") if allow_short else ("long",)
     cache = dict(cache) if cache else {}
     candidates = []
+    _adx_memo = {}
+
+    def adx_4h():
+        if "4h" not in _adx_memo:
+            _adx_memo["4h"] = _tf_adx(exchange, symbol, "4h", cache)
+        return _adx_memo["4h"]
 
     for timeframe in ("1h", "15m"):
         for direction in directions:
             found = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
-            if found and _higher_timeframe_confirms(exchange, symbol, cache, direction):
+            if found and (_higher_timeframe_confirms(exchange, symbol, cache, direction)
+                          or (REGIME_FILTER == "adx" and (adx_4h() or 0) >= ADX_TREND_MIN
+                              and _regime_direction_ok(exchange, symbol, cache, direction))):
                 candidates.append(found)
 
     for timeframe in ("1d", "4h"):
         for direction in directions:
             found = _trend_candidate(exchange, symbol, timeframe, cache, direction)
+            if found and REGIME_FILTER == "adx" and (_tf_adx(exchange, symbol, timeframe, cache) or 0) < ADX_TREND_MIN:
+                found = None
+            if found and MTF_CONFIRM and timeframe != "1d" and _daily_bias(exchange, symbol, cache) not in (None, direction):
+                found = None
             if found:
                 candidates.append(found)
+            if ENABLE_DONCHIAN_TREND:
+                found = _donchian_candidate(exchange, symbol, timeframe, cache, direction)
+                if found and MTF_CONFIRM and timeframe != "1d" and _daily_bias(exchange, symbol, cache) not in (None, direction):
+                    found = None
+                if found:
+                    candidates.append(found)
 
     range_view = _view(_load(exchange, symbol, "4h", cache))
-    if _range_ok(range_view):
+    range_regime = _range_ok(range_view)
+    if REGIME_FILTER == "adx":
+        adx_value = adx_4h()
+        range_regime = adx_value is not None and adx_value < ADX_RANGE_MAX
+    if range_regime:
         for timeframe in ("15m", "5m"):
             for direction in directions:
                 found = _bounce_candidate(exchange, symbol, timeframe, cache, direction)
