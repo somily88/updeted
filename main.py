@@ -2366,6 +2366,28 @@ def read_old_dashboard():
 
 _ICON_RE = re.compile(r"^[A-Z0-9]{1,12}$")
 
+_THREE_ALLOWED = frozenset({
+    "three.module.js",
+    "jsm/controls/OrbitControls.js",
+    "jsm/postprocessing/EffectComposer.js", "jsm/postprocessing/RenderPass.js",
+    "jsm/postprocessing/UnrealBloomPass.js", "jsm/postprocessing/OutputPass.js",
+    "jsm/postprocessing/ShaderPass.js", "jsm/postprocessing/MaskPass.js", "jsm/postprocessing/Pass.js",
+    "jsm/shaders/OutputShader.js", "jsm/shaders/CopyShader.js", "jsm/shaders/LuminosityHighPassShader.js",
+    "jsm/renderers/CSS2DRenderer.js",
+})
+
+
+@app.get("/three/{path:path}", dependencies=[Depends(require_dashboard_auth)])
+def dashboard_three_asset(path: str):
+    """Vendored three.js modules for the neural tab (strict allowlist; 404 otherwise)."""
+    if path not in _THREE_ALLOWED:
+        raise HTTPException(status_code=404)
+    full = os.path.join(_BASE_DIR, "dashboard", "three", *path.split("/"))
+    if not os.path.isfile(full):
+        raise HTTPException(status_code=404)
+    return FileResponse(full, media_type="text/javascript", headers={"Cache-Control": "private, max-age=86400"})
+
+
 
 @app.get("/icons/{name}.svg", dependencies=[Depends(require_dashboard_auth)])
 def dashboard_icon(name: str):

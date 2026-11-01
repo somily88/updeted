@@ -173,3 +173,14 @@ def test_dashboard_icons_served_with_auth(app_module):
     html = c.get("/", headers=_auth()).text
     for tab in ('data-v="spot"', 'data-v="strat"', 'data-v="dec"'):
         assert tab in html
+
+
+def test_three_assets_allowlisted_with_auth(app_module):
+    c = _client(app_module)
+    assert c.get("/three/three.module.js").status_code == 401
+    r = c.get("/three/three.module.js", headers=_auth())
+    assert r.status_code == 200 and "javascript" in r.headers["content-type"]
+    assert c.get("/three/jsm/controls/OrbitControls.js", headers=_auth()).status_code == 200
+    assert c.get("/three/jsm/Addons.js", headers=_auth()).status_code == 404
+    assert c.get("/three/../main.py", headers=_auth()).status_code == 404
+    assert c.get("/three/..%2Fmain.py", headers=_auth()).status_code == 404
