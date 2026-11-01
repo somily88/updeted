@@ -15,13 +15,15 @@ import urllib.parse
 import json
 import re
 from cryptography.fernet import Fernet
+from typing import Literal
+
 from pydantic import BaseModel, Field
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
@@ -177,8 +179,17 @@ def _credential_cipher():
     return Fernet(CREDENTIAL_ENCRYPTION_KEY.encode("ascii"))
 
 
+# Manual entry pause from the dashboard (POST /api/trading). This is separate from
+# TRADING_ENABLED (real orders vs simulation): pausing only blocks NEW entries.
+# Open positions keep being monitored, exits still execute and protective stops
+# on Binance are never cancelled by a pause.
+SPOT_ENTRIES_PAUSED = False
+FUTURES_ENTRIES_PAUSED = False
+
+
 def load_runtime_settings():
     global TRADE_AMOUNT_USDT, MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES
+    global SPOT_ENTRIES_PAUSED, FUTURES_ENTRIES_PAUSED
     conn = None
     try:
         conn = open_db_connection(DB_NAME)
@@ -197,6 +208,8 @@ def load_runtime_settings():
                      ('trade_amount_migrated_v2', '1'))
         conn.commit()
         TRADE_AMOUNT_USDT = stored_amount
+        SPOT_ENTRIES_PAUSED = values.get('spot_entries_paused') == '1'
+        FUTURES_ENTRIES_PAUSED = values.get('futures_entries_paused') == '1'
         for setting_key, env_name, global_name, current_value in [
             ('spot_max_concurrent_trades', 'MAX_SPOT_CONCURRENT_TRADES', 'spot', MAX_SPOT_CONCURRENT_TRADES),
             ('futures_max_concurrent_trades', 'MAX_FUTURES_CONCURRENT_TRADES', 'futures', MAX_FUTURES_CONCURRENT_TRADES),
@@ -697,6 +710,11 @@ class BinanceCredentials(BaseModel):
 class FuturesCredentials(BaseModel):
     api_key: str = Field(min_length=8, max_length=256)
     secret_key: str = Field(min_length=8, max_length=256)
+
+
+class TradingToggle(BaseModel):
+    enabled: bool
+    market: Literal['spot', 'futures', 'all'] = 'all'
 
 
 class TradFiAgreementConsent(BaseModel):
@@ -1949,6 +1967,11 @@ def automated_market_scan():
                                     'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
+                if setup.get('signal') and SPOT_ENTRIES_PAUSED:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'التداول موقوف يدوياً من لوحة التحكم؛ المراكز المفتوحة تبقى محمية',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if (setup.get('signal') and daily_risk_state['spot']
                         and daily_risk_state['spot'].get('blocked')):
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
@@ -1969,7 +1992,7 @@ def automated_market_scan():
                     continue
 
                 global test_trade_done
-                if FORCE_TEST_TRADE and not test_trade_done and symbol not in active_positions:
+                if FORCE_TEST_TRADE and not SPOT_ENTRIES_PAUSED and not test_trade_done and symbol not in active_positions:
                     test_trade_done = True
                     try:
                         test_stop_distance = current_price * INITIAL_SL_PCT / 100.0
@@ -2237,7 +2260,7 @@ def automated_market_scan():
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
             futures_engine.scan(
                 TRADE_AMOUNT_USDT,
-                lambda: len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES,
+                lambda: (not FUTURES_ENTRIES_PAUSED) and len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES,
                 force_test_trade=FORCE_FUTURES_TEST_TRADE,
                 force_test_id=FORCE_FUTURES_TEST_ID,
                 force_test_side=FORCE_FUTURES_TEST_SIDE,
@@ -2260,21 +2283,40 @@ def automated_market_scan():
 # =====================================================================
 # 6. لوحة التحكم (صفحة واحدة تقرأ البيانات الحية من /api/state)
 # =====================================================================
-@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
-def read_root():
-    no_cache_headers = {
-        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-        "Pragma": "no-cache",
-        "Expires": "0",
-    }
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _serve_html(filename):
     try:
-        with open("index.html", "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read(), headers=no_cache_headers)
+        with open(os.path.join(_BASE_DIR, filename), "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), headers=_NO_CACHE_HEADERS)
     except Exception as e:
         return HTMLResponse(
-            content="<h1>Error loading index.html: {}</h1>".format(html.escape(str(e))),
-            headers=no_cache_headers,
+            content="<h1>Error loading {}: {}</h1>".format(html.escape(filename), html.escape(str(e))),
+            headers=_NO_CACHE_HEADERS,
         )
+
+
+@app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
+def read_root():
+    return _serve_html(os.path.join("dashboard", "index.html"))
+
+
+@app.get("/old", response_class=HTMLResponse, dependencies=[Depends(require_dashboard_auth)])
+def read_old_dashboard():
+    """Previous dashboard, kept for one release as a fallback."""
+    return _serve_html("index.html")
+
+
+@app.get("/fonts/Cairo.ttf", dependencies=[Depends(require_dashboard_auth)])
+def dashboard_font():
+    return FileResponse(os.path.join(_BASE_DIR, "dashboard", "fonts", "Cairo.ttf"), media_type="font/ttf",
+                        headers={"Cache-Control": "private, max-age=86400"})
 
 
 PERFORMANCE_REPORT_CACHE = {"updated_at": 0.0, "data": None}
@@ -2474,11 +2516,11 @@ def api_state():
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
         'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated')),
         'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None
-    } for t in get_recent_trades(limit=8)]
+    } for t in get_recent_trades(limit=50)]
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality, gross_pnl_usdt, fees_usdt, funding_usdt FROM futures_trades ORDER BY id DESC LIMIT 8').fetchall()
+                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality, gross_pnl_usdt, fees_usdt, funding_usdt FROM futures_trades ORDER BY id DESC LIMIT 50').fetchall()
             trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
                 'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'cost_quality': t[9],
                 'pnl_known': t[9] in ('net_actual_costs', 'net_estimated_costs'),
@@ -2518,6 +2560,7 @@ def api_state():
         'futures': future_state,
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
+        'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED},
         'telegram': bool(TELEGRAM_BOT_TOKEN),
         'trade_amount': TRADE_AMOUNT_USDT,
         'settings': {
@@ -2733,6 +2776,31 @@ def sign_binance_tradfi_agreement(payload: TradFiAgreementConsent):
         return {"ok": True, "environment": "demo", "result": result}
     finally:
         scan_lock.release()
+
+
+@app.post("/api/trading", dependencies=[Depends(require_dashboard_auth)])
+def set_trading_enabled(payload: TradingToggle):
+    """Pause or resume NEW entries. Never closes positions or cancels protective stops."""
+    global SPOT_ENTRIES_PAUSED, FUTURES_ENTRIES_PAUSED
+    markets = ['spot', 'futures'] if payload.market == 'all' else [payload.market]
+    paused_value = '0' if payload.enabled else '1'
+    with settings_lock:
+        with get_db_connection(DB_NAME) as conn:
+            conn.executemany('INSERT OR REPLACE INTO bot_settings (key, value) VALUES (?, ?)',
+                             [('{}_entries_paused'.format(m), paused_value) for m in markets])
+        if 'spot' in markets:
+            SPOT_ENTRIES_PAUSED = not payload.enabled
+        if 'futures' in markets:
+            FUTURES_ENTRIES_PAUSED = not payload.enabled
+    label = {'spot': 'Spot', 'futures': 'Futures', 'all': 'Spot و Futures'}[payload.market]
+    if payload.enabled:
+        log_event("SETTINGS", "تم تشغيل التداول ({}) من لوحة التحكم".format(label))
+        send_telegram_message("▶️ <b>تم تشغيل التداول</b>\n📊 {}\nعاد البوت لفتح صفقات جديدة.".format(label))
+    else:
+        log_event("SETTINGS", "تم إيقاف التداول ({}) من لوحة التحكم؛ المراكز المفتوحة ووقف الخسارة باقية".format(label))
+        send_telegram_message("⏸ <b>تم إيقاف التداول</b>\n📊 {}\nلن يفتح البوت صفقات جديدة. المراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.".format(label))
+    return {'ok': True, 'market': payload.market,
+            'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED}}
 
 
 @app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])

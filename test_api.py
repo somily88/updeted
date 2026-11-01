@@ -113,3 +113,51 @@ def test_futures_exit_reason_codes():
     assert F.exit_reason_code("وقف الخسارة", partial_taken=True) == "breakeven"
     assert F.exit_reason_code("وقف حماية Binance Demo") == "SL"
     assert F.exit_reason_code("زوال تعرض Spot والتحوط المرتبط") == "manual"
+
+
+def test_root_serves_new_dashboard(app_module):
+    resp = _client(app_module).get("/", headers=_auth())
+    assert resp.status_code == 200
+    assert "/api/trading" in resp.text and "sample-data.js" not in resp.text
+    assert "SAMPLE_STATE" not in resp.text and "?cap" not in resp.text
+
+
+def test_old_dashboard_and_font_require_auth(app_module):
+    client = _client(app_module)
+    for path in ("/old", "/fonts/Cairo.ttf"):
+        assert client.get(path).status_code == 401
+        assert client.get(path, headers=_auth()).status_code == 200
+    assert "tradfi-agreement" in client.get("/old", headers=_auth()).text
+
+
+def test_trading_toggle_requires_auth(app_module):
+    resp = _client(app_module).post("/api/trading", json={"enabled": False})
+    assert resp.status_code == 401
+    assert app_module.SPOT_ENTRIES_PAUSED is False
+
+
+def test_trading_toggle_persists_and_leaves_positions(app_module, monkeypatch):
+    sent = []
+    monkeypatch.setattr(app_module, "send_telegram_message", lambda m: sent.append(m))
+    position = {"symbol": "BNB/USDT", "protective_order_id": "123", "amount": 0.28}
+    app_module.active_positions["BNB/USDT"] = position
+    client = _client(app_module)
+    resp = client.post("/api/trading", json={"enabled": False}, headers=_auth())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["entries_enabled"] == {"spot": False, "futures": False}
+    assert app_module.SPOT_ENTRIES_PAUSED and app_module.FUTURES_ENTRIES_PAUSED
+    assert app_module.active_positions["BNB/USDT"] is position
+    assert position["protective_order_id"] == "123"
+    assert sent and "إيقاف" in sent[0]
+    with app_module.get_db_connection(app_module.DB_NAME) as conn:
+        rows = dict(conn.execute("SELECT key, value FROM bot_settings").fetchall())
+    assert rows["spot_entries_paused"] == "1" and rows["futures_entries_paused"] == "1"
+    # survives a restart
+    app_module.SPOT_ENTRIES_PAUSED = app_module.FUTURES_ENTRIES_PAUSED = False
+    app_module.load_runtime_settings()
+    assert app_module.SPOT_ENTRIES_PAUSED and app_module.FUTURES_ENTRIES_PAUSED
+    # resume only futures
+    resp = client.post("/api/trading", json={"enabled": True, "market": "futures"}, headers=_auth())
+    assert resp.json()["entries_enabled"] == {"spot": False, "futures": True}
+    assert client.post("/api/trading", json={"enabled": True, "market": "x"}, headers=_auth()).status_code == 422
+    app_module.active_positions.clear()
