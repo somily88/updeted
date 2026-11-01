@@ -38,6 +38,7 @@ from exchange_client import make_binance_exchange
 from risk_controls import (daily_loss_status, portfolio_risk_status,
                            MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
 import database
+import rl_bandit
 from database import get_db_connection, open_db_connection
 
 from config import *  # noqa: F401,F403  (configuration moved to config.py)
@@ -299,6 +300,10 @@ def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
              pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason,
              risk_usdt, r_multiple(pnl_usdt, risk_usdt)))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
+    try:
+        rl_bandit.get_agent(DB_NAME).record_outcome('Spot', symbol, r_multiple(pnl_usdt, risk_usdt))
+    except Exception:
+        pass
 
 
 def get_recent_trades(limit=15):
@@ -1017,13 +1022,13 @@ def _parse_fill(order, symbol):
     return filled, cost, avg, _fees_in(order, base), _fees_in(order, quote)
 
 
-def place_buy(symbol, ref_price, stop_distance=None):
+def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if TRADING_ENABLED and BINANCE_ENV != 'demo':
         raise RuntimeError('هذا المسار مقفل على Binance Demo ولا يرسل أوامر إلى بيئة حية')
     if not TRADING_ENABLED:
         fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
-        simulated_notional = float(TRADE_AMOUNT_USDT)
+        simulated_notional = float(TRADE_AMOUNT_USDT) * min(1.0, max(0.0, float(size_multiplier)))
         estimated_fee = simulated_notional * fee_rate
         return {'price': ref_price, 'amount': simulated_notional / ref_price,
                 'cost': simulated_notional + estimated_fee, 'fee_usdt': estimated_fee,
@@ -1036,6 +1041,8 @@ def place_buy(symbol, ref_price, stop_distance=None):
         amount_usdt = risk_sized_notional(
             total_equity, ref_price, stop_distance,
             effective_notional_cap(total_equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT)
+    # Reinforcement-learning layer may only shrink size, never grow it.
+    amount_usdt *= min(1.0, max(0.0, float(size_multiplier)))
 
     market = exchange.market(symbol)
     min_cost = ((market.get('limits') or {}).get('cost') or {}).get('min')
@@ -2214,6 +2221,19 @@ def automated_market_scan():
                     continue
 
                 last_entry_candle[symbol] = candle
+                rl_entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
+                rl_decision = rl_bandit.get_agent(DB_NAME).decide(
+                    'Spot', symbol, setup, current_price,
+                    rl_entry_atr * STRATEGY_RISK[setup['strategy']]['stop_atr'])
+                if rl_decision.get('note_ar'):
+                    record_decision('Spot', symbol, setup, current_price, 'قرار التعلم المعزز',
+                                    rl_decision['note_ar'], order_status='—',
+                                    price_updated_at=price_updated_at)
+                if rl_decision.get('applied_multiplier', 1.0) <= 0:
+                    record_decision('Spot', symbol, setup, current_price, 'تخطّاها التعلم المعزز',
+                                    'العائد المتوقع لهذا السياق سلبي حسب الصفقات السابقة',
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 record_decision('Spot', symbol, setup, current_price, 'إرسال أمر شراء',
                                 'اجتازت الإشارة فلاتر المخاطر والسيولة والأخبار',
                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
@@ -2227,7 +2247,8 @@ def automated_market_scan():
                                         price_updated_at=price_updated_at)
                         continue
                 try:
-                    fill = place_buy(symbol, current_price, entry_stop_distance)
+                    fill = place_buy(symbol, current_price, entry_stop_distance,
+                                     rl_decision.get('applied_multiplier', 1.0))
                 except Exception as e:
                     record_decision('Spot', symbol, setup, current_price, 'فشل أو لم يتأكد أمر الشراء',
                                     'لا تعاد المحاولة تلقائيًا؛ راجع سجل Binance',
@@ -2258,6 +2279,7 @@ def automated_market_scan():
                 }
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
+                rl_bandit.get_agent(DB_NAME).mark_opened(rl_decision.get('decision_id'))
                 if not pos.get('simulated'):
                     try:
                         _ensure_spot_protective_stop(symbol, pos, stop_price)
@@ -2844,6 +2866,16 @@ def set_trading_enabled(payload: TradingToggle):
         send_telegram_message("⏸ <b>تم إيقاف التداول</b>\n📊 {}\nلن يفتح البوت صفقات جديدة. المراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.".format(label))
     return {'ok': True, 'market': payload.market,
             'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED}}
+
+
+@app.get("/api/rl", dependencies=[Depends(require_dashboard_auth)])
+def api_rl():
+    """Read-only reinforcement-learning stats: arms, samples, shadow vs actual R."""
+    try:
+        return rl_bandit.get_agent(DB_NAME).stats()
+    except Exception as exc:
+        return {"mode": rl_bandit.RL_MODE, "error": type(exc).__name__, "arms": [], "recent": [],
+                "comparison": {}}
 
 
 @app.get("/api/strategy-stats", dependencies=[Depends(require_dashboard_auth)])
