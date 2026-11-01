@@ -161,3 +161,15 @@ def test_trading_toggle_persists_and_leaves_positions(app_module, monkeypatch):
     assert resp.json()["entries_enabled"] == {"spot": False, "futures": True}
     assert client.post("/api/trading", json={"enabled": True, "market": "x"}, headers=_auth()).status_code == 422
     app_module.active_positions.clear()
+
+
+def test_dashboard_icons_served_with_auth(app_module):
+    c = _client(app_module)
+    assert c.get("/icons/BTC.svg").status_code == 401
+    r = c.get("/icons/BTC.svg", headers=_auth())
+    assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
+    assert c.get("/icons/NOPE.svg", headers=_auth()).status_code == 404
+    assert c.get("/icons/..%2Fmain.svg", headers=_auth()).status_code == 404
+    html = c.get("/", headers=_auth()).text
+    for tab in ('data-v="spot"', 'data-v="strat"', 'data-v="dec"'):
+        assert tab in html
