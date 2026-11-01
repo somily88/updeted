@@ -66,6 +66,15 @@ FORCE_FUTURES_TEST_SIDE = os.getenv("FORCE_FUTURES_TEST_SIDE", "long").strip().l
 # --- فلتر الأخبار: يوقف الشراء الجديد فقط عند أخبار سلبية قوية (لا يغيّر الاستراتيجية ولا يغلق صفقات مفتوحة) ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "").strip()   # فارغ = يكتشف البوت نموذجاً متاحاً لحسابك تلقائياً
+# عنوان واجهة نموذج اللغة (متوافقة مع OpenAI). فارغ = تلقائي: مفاتيح xAI (تبدأ بـ xai-) تذهب إلى api.x.ai وغيرها إلى Groq
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
+# --- Firecrawl: مصدر أخبار إضافي (اختياري). بدون مفتاح يبقى البوت على RSS فقط ---
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "").strip().strip('"').strip("'")
+FIRECRAWL_CACHE_MINUTES = float(os.getenv("FIRECRAWL_CACHE_MINUTES", "15"))
+FIRECRAWL_MAX_CALLS_PER_HOUR = int(os.getenv("FIRECRAWL_MAX_CALLS_PER_HOUR", "6"))
+FIRECRAWL_TIMEOUT = float(os.getenv("FIRECRAWL_TIMEOUT", "12"))
+FIRECRAWL_QUERIES = [q.strip() for q in os.getenv(
+    "FIRECRAWL_QUERIES", "bitcoin crypto news today,ethereum crypto news today").split(",") if q.strip()]
 NEWS_FILTER = os.getenv("NEWS_FILTER", "true").strip().lower() == "true"
 NEWS_PAUSE_HOURS = float(os.getenv("NEWS_PAUSE_HOURS", "3"))     # مدة إيقاف الشراء بعد آخر خبر سلبي قوي
 NEWS_WINDOW_HOURS = float(os.getenv("NEWS_WINDOW_HOURS", "6"))   # نافذة العناوين المعتبرة
