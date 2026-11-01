@@ -1,5 +1,6 @@
 import os
 from execution import place_entry_order
+from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats
 import secrets
 import hashlib
 import hmac
@@ -167,7 +168,8 @@ def init_db():
             for column, definition in [('strategy', 'TEXT'), ('timeframe', 'TEXT'),
                                        ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
                                        ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL'),
-                                       ('exit_reason', 'TEXT')]:
+                                       ('exit_reason', 'TEXT'), ('risk_usdt', 'REAL'),
+                                       ('r_multiple', 'REAL')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
     except Exception as e:
@@ -285,16 +287,17 @@ def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
 
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
                               pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
-                              gross_pnl_usdt=None, fees_usdt=None, exit_reason=None):
+                              gross_pnl_usdt=None, fees_usdt=None, exit_reason=None, risk_usdt=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
             (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
-             cost_quality, gross_pnl_usdt, fees_usdt, exit_reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             cost_quality, gross_pnl_usdt, fees_usdt, exit_reason, risk_usdt, r_multiple)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
-             pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason))
+             pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason,
+             risk_usdt, r_multiple(pnl_usdt, risk_usdt)))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
 
 
@@ -1916,7 +1919,8 @@ def check_and_close_positions():
                                       total_pnl, pos.get('strategy'), pos.get('timeframe'),
                                       ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')),
                                       gross_pnl_usdt=total_pnl + fees_total, fees_usdt=fees_total,
-                                      exit_reason=exit_reason)
+                                      exit_reason=exit_reason,
+                                      risk_usdt=initial_risk_usdt(entry_price, pos.get('risk_distance'), pnl_basis))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -2826,6 +2830,13 @@ def set_trading_enabled(payload: TradingToggle):
         send_telegram_message("⏸ <b>تم إيقاف التداول</b>\n📊 {}\nلن يفتح البوت صفقات جديدة. المراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.".format(label))
     return {'ok': True, 'market': payload.market,
             'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED}}
+
+
+@app.get("/api/strategy-stats", dependencies=[Depends(require_dashboard_auth)])
+def api_strategy_stats():
+    """Read-only per-strategy performance (net of recorded fees; R where initial risk is known)."""
+    return {"strategies": load_strategy_stats(DB_NAME),
+            "note": "عينات أقل من 30 صفقة غير كافية إحصائيًا"}
 
 
 @app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])

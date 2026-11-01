@@ -8,6 +8,7 @@ import contextlib
 import datetime
 import os
 from execution import place_entry_order
+from trade_stats import initial_risk_usdt, r_multiple
 import sqlite3
 import time
 import uuid
@@ -144,7 +145,8 @@ class BinanceFuturesDemo:
                                        ("funding_usdt", "REAL NOT NULL DEFAULT 0"),
                                        ("gross_pnl_usdt", "REAL NOT NULL DEFAULT 0"),
                                        ("cost_quality", "TEXT NOT NULL DEFAULT 'legacy_gross_before_fees'"),
-                                       ("exit_reason", "TEXT")):
+                                       ("exit_reason", "TEXT"), ("risk_usdt", "REAL"),
+                                       ("r_multiple", "REAL")):
                 if column not in trade_columns:
                     conn.execute("ALTER TABLE futures_trades ADD COLUMN {} {}".format(column, definition))
             conn.execute("""CREATE TABLE IF NOT EXISTS futures_funding (
@@ -787,17 +789,20 @@ class BinanceFuturesDemo:
             gross_total = total_pnl - funding_usdt + fees_usdt
             cost_quality = ("net_estimated_costs" if pos.get("fees_estimated")
                             or not pos.get("funding_available") else "net_actual_costs")
+            trade_risk_usdt = initial_risk_usdt(pos.get("entry_price"), pos.get("risk_distance"),
+                                                pos.get("initial_cost") or pos.get("cost"))
             with self._connect() as conn:
                 conn.execute("DELETE FROM futures_positions WHERE symbol = ?", (symbol,))
                 conn.execute("""INSERT INTO futures_trades
                     (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
                      strategy, timeframe, side, fees_usdt, funding_usdt, gross_pnl_usdt, cost_quality,
-                     exit_reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     exit_reason, risk_usdt, r_multiple)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (symbol, pos["entry_price"], exit_price, pnl_pct, total_pnl, status, now,
                      pos["strategy"], pos["timeframe"], side, fees_usdt, funding_usdt,
                      gross_total, cost_quality,
-                     self.exit_reason_code(reason, pos.get("partial_taken"))))
+                     self.exit_reason_code(reason, pos.get("partial_taken")),
+                     trade_risk_usdt, r_multiple(total_pnl, trade_risk_usdt)))
             self.positions.pop(symbol, None)
             self.on_event("FUTURES", "إغلاق {} {} {} (صافي {:+.2f} USDT · رسوم {:.4f} · تمويل {:+.4f})".format(
                 symbol, "Short" if side == "short" else "Long", reason, total_pnl,

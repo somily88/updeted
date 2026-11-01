@@ -178,6 +178,7 @@ def close_position(pos, raw_exit, timestamp, reason, fee_rate, slippage_rate):
     net = gross - fees + funding
     partial_quantity = float(pos.get("partial_quantity") or 0.0)
     total_closed_quantity = partial_quantity + quantity
+    initial_risk = float(pos["notional"]) / float(pos["entry_price"]) * float(pos.get("risk_distance") or 0.0)
     avg_exit_price = ((float(pos.get("partial_exit_notional") or 0.0) + exit_notional)
                       / total_closed_quantity if total_closed_quantity else exit_price)
     return {
@@ -198,6 +199,8 @@ def close_position(pos, raw_exit, timestamp, reason, fee_rate, slippage_rate):
         "result": "WIN" if net > 0 else "LOSS",
         "exit_reason": reason,
         "bars_held": max(0, int((timestamp - pos["entry_ms"]) / TIMEFRAME_MS["5m"])),
+        "risk_usdt": round(initial_risk, 6) if initial_risk else None,
+        "r_multiple": round(net / initial_risk, 4) if initial_risk else None,
     }
 
 
@@ -458,7 +461,30 @@ def metrics(trades, capital, equity_curve=None):
         "profit_factor": round(sum(wins) / abs(sum(losses)), 4) if losses else None,
         "max_drawdown_usdt": round(max_dd, 6),
         "return_on_capital_percent": round(sum(pnls) / capital * 100.0, 4),
+        "expectancy_r": expectancy_r(trades),
+        "by_strategy": strategy_breakdown(trades),
     }
+
+
+def expectancy_r(trades):
+    rs = [float(t["r_multiple"]) for t in trades if t.get("r_multiple") is not None]
+    return round(sum(rs) / len(rs), 4) if rs else None
+
+
+def strategy_breakdown(trades):
+    groups = {}
+    for t in trades:
+        groups.setdefault(t.get("strategy") or "unknown", []).append(t)
+    out = {}
+    for name, items in sorted(groups.items()):
+        pnls = [float(t["net_pnl_usdt"]) for t in items]
+        wins = [x for x in pnls if x > 0]
+        losses = [x for x in pnls if x < 0]
+        out[name] = {"trades": len(items), "win_rate_percent": round(len(wins) / len(items) * 100.0, 2),
+                     "net_pnl_usdt": round(sum(pnls), 4),
+                     "profit_factor": round(sum(wins) / abs(sum(losses)), 3) if losses else None,
+                     "expectancy_r": expectancy_r(items)}
+    return out
 
 
 def write_csv(path, rows):
