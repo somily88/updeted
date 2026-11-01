@@ -1,4 +1,5 @@
 import os
+from execution import place_entry_order
 import secrets
 import hashlib
 import hmac
@@ -1044,7 +1045,7 @@ def place_buy(symbol, ref_price, stop_distance=None):
         raise ValueError("الرصيد المتاح {:.2f} USDT أقل من قيمة الصفقة مع هامش العمولة {:.2f} USDT".format(free_usdt, required_usdt))
 
     amount = float(exchange.amount_to_precision(symbol, amount_usdt / ref_price))
-    order = exchange.create_order(symbol, 'market', 'buy', amount)
+    order = place_entry_order(exchange, symbol, 'buy', amount, reference_price=ref_price)
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
