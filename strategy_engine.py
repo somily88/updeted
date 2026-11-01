@@ -737,7 +737,7 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
         adx_value = adx_4h()
         range_regime = adx_value is not None and adx_value < ADX_RANGE_MAX
     if range_regime:
-        for timeframe in ("15m", "5m"):
+        for timeframe in BOUNCE_TIMEFRAMES:
             for direction in directions:
                 found = _bounce_candidate(exchange, symbol, timeframe, cache, direction)
                 if found:

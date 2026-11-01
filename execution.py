@@ -7,6 +7,8 @@ import os
 import time
 
 ENTRY_ORDER_MODE = os.getenv("ENTRY_ORDER_MODE", "market").strip().lower()
+if ENTRY_ORDER_MODE in ("limit", "post_only", "limit-then-market"):
+    ENTRY_ORDER_MODE = "limit_then_market"
 if ENTRY_ORDER_MODE not in ("market", "limit_then_market"):
     raise ValueError("ENTRY_ORDER_MODE must be market or limit_then_market")
 LIMIT_ENTRY_TIMEOUT_SECONDS = float(os.getenv("LIMIT_ENTRY_TIMEOUT_SECONDS", "20"))
