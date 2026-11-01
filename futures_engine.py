@@ -13,7 +13,7 @@ import time
 import uuid
 
 import ccxt
-from strategy_engine import (effective_notional_cap, evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
+from strategy_engine import (PARTIAL_TP_FRACTION, PARTIAL_TP_R, effective_notional_cap, evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, risk_sized_notional,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              MAX_DAILY_LOSS_PCT, MAX_SPOT_HEDGE_RATIO)
@@ -916,10 +916,10 @@ class BinanceFuturesDemo:
                 elif (pos.get("strategy") != "forced_test" and not pos.get("partial_taken")
                       and not pos.get("partial_attempted")
                       and float(pos.get("risk_distance") or 0.0) > 0):
-                    reached_1r = (price <= pos["entry_price"] - pos["risk_distance"] if side == "short"
-                                  else price >= pos["entry_price"] + pos["risk_distance"])
+                    reached_1r = (price <= pos["entry_price"] - pos["risk_distance"] * PARTIAL_TP_R if side == "short"
+                                  else price >= pos["entry_price"] + pos["risk_distance"] * PARTIAL_TP_R)
                     if reached_1r:
-                        requested = float(self.exchange.amount_to_precision(symbol, pos["contracts"] * 0.5))
+                        requested = float(self.exchange.amount_to_precision(symbol, pos["contracts"] * PARTIAL_TP_FRACTION))
                         market = self.exchange.market(symbol)
                         min_cost = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
                         if requested > 0 and requested * float(market.get("contractSize") or 1) * price >= min_cost:
