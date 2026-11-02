@@ -240,7 +240,12 @@ function renderDecRows(){const q=DQ.trim().toUpperCase();const rows=S.decisions.
 function renderDec(){$('#v-dec').innerHTML=decHTML();renderDecRows();}
 function newsHTML(){const n=S.news;const sev=n.severity||0;
  return `<h1>الأخبار</h1><p class="sub">فلتر الأخبار يوقف الدخول عند الأخبار الخطرة</p>`+summary([['الحالة',n.blocked?'إيقاف مؤقت':'مسموح',esc(n.reason)],['الخطورة',sev+' / 10','عتبة الإيقاف '+S.params.news_severity],['المصدر',esc(n.source||'—'),'آخر فحص '+esc(n.checked_at||'—')]])+
- `<div class="card">${(n.headlines||[]).map(h=>`<div class="hl"><span class="chip">${esc(h.source)}</span><span dir="${h.title_ar?'rtl':'ltr'}" style="flex:1">${esc(h.title_ar||h.title)}</span></div>`).join('')}</div>`;}
+ `<div class="card">${(n.headlines||[]).map(h=>`<div class="hl"><span class="chip">${esc(h.source)}</span><span dir="${h.title_ar?'rtl':'ltr'}" style="flex:1">${esc(h.title_ar||h.title)}</span></div>`).join('')}</div>`+finnhubHTML();}
+function finnhubHTML(){const f=S.finnhub||{};if(!f.has_key)return `<div class="card"><div class="ttl">Finnhub</div><p class="sub">غير مفعّل (لا يوجد مفتاح FINNHUB_API_KEY)</p></div>`;const ev=f.upcoming_events||[],er=f.upcoming_earnings||[],st=f.settings||{},errs=Object.entries(f.errors||{});
+ return `<div class="card"><div class="ttl">Finnhub — التقويم الاقتصادي وأرباح الأسهم</div><p class="sub">${f.enabled?'مفعّل':'متوقف'} · آخر جلب ${esc(f.last_fetch||'—')} · أخبار ${N(f.news_count||0)} · إيقاف حول الأحداث ±${N(st.event_pause_min??'—')} دقيقة · حظر الأرباح ±${N(st.earnings_block_h??'—')} ساعة</p>`+
+ `<div class="ttl" style="margin-top:8px">الأحداث الاقتصادية الأمريكية القادمة</div>`+(f.economic_available===false?`<p class="sub">التقويم الاقتصادي غير متاح في خطة Finnhub المجانية</p>`:(ev.length?ev.map(e=>`<div class="hl"><span class="chip">${esc(e.time)}</span><span dir="ltr" style="flex:1">${esc(e.event)}</span></div>`).join(''):`<p class="sub">لا توجد أحداث مهمة قريبة</p>`))+
+ `<div class="ttl" style="margin-top:8px">مواعيد أرباح الأسهم (TradFi)</div>`+(er.length?er.map(e=>`<div class="hl"><span class="chip">${esc(e.symbol)}</span><span style="flex:1">${esc(e.date)} ${e.hour==='bmo'?'قبل الافتتاح':e.hour==='amc'?'بعد الإغلاق':''}</span></div>`).join(''):`<p class="sub">لا توجد أرباح قريبة للأسهم المتابعة</p>`)+
+ (errs.length?`<p class="sub" style="margin-top:8px">ملاحظات: ${errs.map(([k,v])=>esc(k)+': '+esc(v)).join(' · ')}</p>`:'')+`</div>`;}
 function setHTML(){const st=S.settings,p=S.params,fp=S.platforms||[];
  return `<h1>الإعدادات</h1><p class="sub">تُطبّق فوراً حتى أثناء الفحص</p>
  <div class="card" style="margin-bottom:18px"><div class="ttl">حجم الصفقات والحدود</div><form class="form" onsubmit="event.preventDefault();saveSettings(this)">
@@ -310,13 +315,13 @@ const DPR=Math.min(window.devicePixelRatio||1,MOB?1.5:2);
 const g=(o,k,d)=>(o&&o[k]!=null)?o[k]:d;const arr=v=>Array.isArray(v)?v:[];
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const STRATS=[['trend','تتبّع الاتجاه'],['breakout','الاختراق'],['bounce','الارتداد'],['volume_profile_range','نطاق الحجم'],['donchian','دونشيان'],['macro_momentum_hybrid','الزخم الكلّي']];
-const FILTERS=[['adx','نظام ADX'],['mtf','تأكيد MTF'],['funding','التمويل'],['cost','التكلفة/الهدف'],['cluster','حدّ المجموعة'],['risk','سقوف المخاطرة'],['news','فلتر الأخبار']];
+const FILTERS=[['adx','نظام ADX'],['mtf','تأكيد MTF'],['funding','التمويل'],['cost','التكلفة/الهدف'],['cluster','حدّ المجموعة'],['risk','سقوف المخاطرة'],['news','فلتر الأخبار'],['finnhub','تقويم Finnhub']];
 let nodes=[],edges=[],pulses=[],parts=[],byId={},seen=new Set(),firstLoad=true,data={S:null,SS:null,RL:null};
 function base(sym){return String(sym||'').split('/')[0].replace(/[^A-Z0-9]/gi,'').toUpperCase();}
 const imgs={};function icon(n){if(!n||(typeof ICONS!=='undefined'&&!ICONS.has(n)))return null;if(imgs[n]!==undefined)return imgs[n];const im=new Image();imgs[n]=null;im.onload=()=>imgs[n]=im;im.onerror=()=>imgs[n]=false;im.src='/icons/'+n+'.svg';return null;}
 function stratKey(s){s=String(s||'').toLowerCase();for(const [k,l] of STRATS){if(s.includes(k)||String(s).includes(l))return k;}
  if(/اتجاه/.test(s))return'trend';if(/اختراق/.test(s))return'breakout';if(/ارتداد/.test(s))return'bounce';if(/donch|دونش/.test(s))return'donchian';if(/volume|حجم/.test(s))return'volume_profile_range';if(/macro|زخم/.test(s))return'macro_momentum_hybrid';return null;}
-function filterKey(r){r=String(r||'');if(/adx|عرضي|نظام السوق|regime/i.test(r))return'adx';if(/mtf|فريم أكبر|الإطار الأعلى/i.test(r))return'mtf';if(/funding|تمويل/i.test(r))return'funding';if(/تكلفة|رسوم|cost|هدف/i.test(r))return'cost';if(/cluster|مجموعة|مرتبط/i.test(r))return'cluster';if(/خبر|news/i.test(r))return'news';if(/حد|مخاطر|risk|الأقصى|تحوّط|hedge/i.test(r))return'risk';return null;}
+function filterKey(r){r=String(r||'');if(/حدث اقتصادي|إعلان أرباح/.test(r))return'finnhub';if(/adx|عرضي|نظام السوق|regime/i.test(r))return'adx';if(/mtf|فريم أكبر|الإطار الأعلى/i.test(r))return'mtf';if(/funding|تمويل/i.test(r))return'funding';if(/تكلفة|رسوم|cost|هدف/i.test(r))return'cost';if(/cluster|مجموعة|مرتبط/i.test(r))return'cluster';if(/خبر|news/i.test(r))return'news';if(/حد|مخاطر|risk|الأقصى|تحوّط|hedge/i.test(r))return'risk';return null;}
 function outcome(d){const o=String(g(d,'outcome',''))+' '+String(g(d,'order_status',''));if(d&&d.order_id||/نُفّذ|نفذ|تم التنفيذ|فتح|executed|filled|شراء ناجح/.test(o))return'ok';if(g(d,'signal','none')==='none'||/مراقبة|انتظار/.test(o))return'wa';return'no';}
 function build(){const S=data.S||{};const W=1,cols=[-1.05,-0.6,-0.15,0.3,0.68,1.02];nodes=[];edges=[];byId={};
  const syms=[];const add=s=>{const b=base(s);if(b&&!syms.find(x=>x.b===b))syms.push({b,s});};

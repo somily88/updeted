@@ -1133,7 +1133,7 @@ class BinanceFuturesDemo:
             self.on_event("ERR", "فشل اختبار Futures Demo: {}".format(str(exc)[:100]))
 
     def scan(self, trade_amount_usdt, can_open, force_test_trade=False,
-             force_test_id="", force_test_side="long", market_context=None):
+             force_test_id="", force_test_side="long", market_context=None, entry_block=None):
         if not self.symbols:
             return
         positions_monitor_ok = self._monitor_positions()
@@ -1237,6 +1237,16 @@ class BinanceFuturesDemo:
                     self.on_decision('Futures Demo', symbol, setup, price, 'تجاهل الإشارة',
                                      'يوجد مركز مفتوح على هذا العقد', order_status='لم يُرسل',
                                      price_updated_at=price_updated_at)
+                    continue
+                block_reason = None
+                if entry_block is not None:
+                    try:
+                        block_reason = entry_block(symbol)
+                    except Exception:
+                        block_reason = None
+                if block_reason:
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض', block_reason,
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if not can_open():
                     self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',

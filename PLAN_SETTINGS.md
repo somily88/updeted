@@ -61,3 +61,22 @@
 - الحالة محفوظة في جدولي `rl_arms` و `rl_decisions` داخل قاعدة SQLite.
 - `GET /api/rl` للقراءة فقط، وتبويب «التعلم المعزز» في لوحة التحكم.
 - مقارنة تاريخية: `python rl_backtest.py --market futures --days 60`.
+
+## Finnhub (news + calendars)
+
+Module `finnhub_client.py`. Enabled automatically when `FINNHUB_API_KEY` is set.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `FINNHUB_API_KEY` | empty | Finnhub key (free tier works) |
+| `FINNHUB_ENABLED` | `true` (if key set) | Master switch |
+| `FINNHUB_EVENT_PAUSE_MIN` | `30` | Pause **new entries** N minutes before/after high-impact US events (CPI, FOMC, NFP…). `0` = off. Needs `/calendar/economic` (premium; free tier returns 403 → logged once, feature inactive) |
+| `FINNHUB_EARNINGS_BLOCK_H` | `24` | Block new entries on a TradFi stock perp N hours around its earnings. `0` = off |
+| `FINNHUB_STOCKS` | `META,NVDA,TSLA,AMZN,MU` | Stocks used for company news + earnings |
+| `FINNHUB_MAX_CALLS_PER_MIN` | `30` | Local rate limit (free tier = 60/min) |
+| `FINNHUB_EVENT_KEYWORDS` | cpi,fomc,nonfarm,… | Event names treated as high impact |
+
+- News: `/news?category=crypto|general` + `/company-news` (max 3 per stock) are merged into the RSS headlines, deduped, then go through the existing LLM/keyword filter. Cached 15–30 min.
+- Calendars refresh hourly. Existing positions are never touched.
+- Read-only status: `GET /api/finnhub`. Shown in the dashboard News tab; block reasons appear in bot decisions.
+- Free-tier check (2026-11-02): news ✅, company-news ✅, earnings ✅, economic ❌ 403.

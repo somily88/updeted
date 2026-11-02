@@ -39,6 +39,7 @@ from risk_controls import (daily_loss_status, portfolio_risk_status,
                            MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
 import database
 import rl_bandit
+import finnhub_client
 from database import get_db_connection, open_db_connection
 
 from config import *  # noqa: F401,F403  (configuration moved to config.py)
@@ -676,6 +677,9 @@ async def lifespan(app: FastAPI):
                       max_instances=1, coalesce=True, misfire_grace_time=60)
     if NEWS_FILTER:
         scheduler.add_job(check_news, 'interval', minutes=60, max_instances=1, coalesce=True,
+                          next_run_time=datetime.datetime.now())
+    if finnhub_client.FINNHUB_ENABLED:
+        scheduler.add_job(refresh_finnhub_calendars, 'interval', minutes=60, max_instances=1, coalesce=True,
                           next_run_time=datetime.datetime.now())
     scheduler.start()
     log_event("START", "البوت يعمل ({} | اختيار الاستراتيجية تلقائي)".format(BINANCE_ENV))
@@ -1516,6 +1520,27 @@ class _FollowRedirects(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_FollowRedirects)
 
 
+def refresh_finnhub_calendars():
+    try:
+        finnhub_client.refresh_calendars()
+    except Exception as e:
+        logger.warning("📅 [FINNHUB] تعذر تحديث التقويم: %s", type(e).__name__)
+
+
+def _finnhub_snapshot_safe():
+    try:
+        return finnhub_client.snapshot()
+    except Exception:
+        return None
+
+
+def finnhub_entry_block(symbol):
+    try:
+        return finnhub_client.entry_block_reason(symbol)
+    except Exception:
+        return None
+
+
 def news_blocked():
     return NEWS_FILTER and time.time() < news_state['blocked_until']
 
@@ -1547,10 +1572,19 @@ def fetch_headlines():
                 items.append((ts or datetime.datetime.now(datetime.timezone.utc), name, title))
         except Exception as e:
             print("📰 [NEWS] فشل جلب {}: {}".format(name, e))
-    if ok_feeds == 0:
+    try:
+        fh_items = finnhub_client.fetch_news(window_hours=NEWS_WINDOW_HOURS)
+    except Exception as e:  # never break the news pipeline
+        fh_items = []
+        print("📰 [NEWS] فشل جلب Finnhub: {}".format(type(e).__name__))
+    if ok_feeds == 0 and not fh_items:
         raise RuntimeError("تعذر جلب أي مصدر أخبار")
     items.sort(key=lambda x: x[0], reverse=True)
-    return items[:20]
+    fh_items = finnhub_client.dedupe(fh_items)[:10]
+    # RSS first then Finnhub so existing sources keep priority; dedupe across both
+    merged = finnhub_client.dedupe(items[:20] + fh_items)
+    merged.sort(key=lambda x: x[0], reverse=True)
+    return merged[:25]
 
 
 GROQ_BASE = "https://api.groq.com/openai/v1"
@@ -2093,6 +2127,11 @@ def automated_market_scan():
                                     news_state.get('reason') or 'حظر مرشح الأخبار',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
+                fh_reason = finnhub_entry_block(symbol)
+                if fh_reason:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', fh_reason,
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if (news_state['sentiment'] == 'negative' and news_state['severity'] >= 2
                         and setup['strategy'] != 'trend'):
                     print("📰 [NEWS] خبر سلبي؛ السماح فقط بإشارات الاتجاه وتجاهل {} على {}".format(
@@ -2316,6 +2355,7 @@ def automated_market_scan():
                 force_test_id=FORCE_FUTURES_TEST_ID,
                 force_test_side=FORCE_FUTURES_TEST_SIDE,
                 market_context=strategy_news_context(),
+                entry_block=finnhub_entry_block,
             )
         record_equity()
         scan_succeeded = True
@@ -2703,6 +2743,7 @@ def api_state():
             'headlines': [{'source': n, 'title': t, 'title_ar': (news_state['headlines_ar'][i] if i < len(news_state['headlines_ar']) else '')} for i, (n, t) in enumerate(news_state['headlines'])],
             'error': news_state['error']
         },
+        'finnhub': _finnhub_snapshot_safe(),
         'events': list(event_log),
         'decisions': get_recent_decisions(80)
     }
@@ -2888,6 +2929,14 @@ def set_trading_enabled(payload: TradingToggle):
         send_telegram_message("⏸ <b>تم إيقاف التداول</b>\n📊 {}\nلن يفتح البوت صفقات جديدة. المراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.".format(label))
     return {'ok': True, 'market': payload.market,
             'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED}}
+
+
+@app.get("/api/finnhub", dependencies=[Depends(require_dashboard_auth)])
+def finnhub_status():
+    try:
+        return finnhub_client.snapshot()
+    except Exception as e:
+        return {'enabled': False, 'error': type(e).__name__}
 
 
 @app.get("/api/rl", dependencies=[Depends(require_dashboard_auth)])
