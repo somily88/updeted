@@ -1,6 +1,7 @@
 import os
 from execution import place_entry_order
 from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats
+import spot_rules
 import secrets
 import hashlib
 import hmac
@@ -175,8 +176,56 @@ def init_db():
                                        ('r_multiple', 'REAL')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
+        cleanup_legacy_spot_trades(DB_NAME)
     except Exception as e:
         logger.error("Database Init Error: %s", e)
+
+
+def spot_rules_snapshot():
+    from strategy_engine import MAX_POSITION_EQUITY_PCT
+    sizing = spot_rules.SPOT_SIZING
+    if sizing == 'risk_pct':
+        cap_note = 'risk_pct: {}% من رأس المال لكل صفقة، بسقف {}% من رأس المال'.format(
+            spot_rules.SPOT_RISK_PCT, spot_rules.SPOT_MAX_POSITION_EQUITY_PCT)
+    elif MAX_POSITION_EQUITY_PCT > 0:
+        cap_note = 'fixed: السقف {}% من رأس المال (MAX_POSITION_EQUITY_PCT)'.format(MAX_POSITION_EQUITY_PCT)
+    else:
+        cap_note = 'fixed: السقف = مبلغ الصفقة {} USDT لأن MAX_POSITION_EQUITY_PCT=0'.format(TRADE_AMOUNT_USDT)
+    bnb = spot_bnb_discount_active()
+    return {
+        'sizing': sizing, 'sizing_note': cap_note,
+        'min_target_fee_mult': spot_rules.SPOT_MIN_TARGET_FEE_MULT,
+        'round_trip_fee_pct': spot_rules.round_trip_fee_pct(bnb),
+        'trail_arm_r': spot_rules.SPOT_TRAIL_ARM_R, 'trail_atr_mult': spot_rules.SPOT_TRAIL_ATR_MULT,
+        'trend_require_bull': spot_rules.SPOT_TREND_REQUIRE_BULL,
+        'trend_max_stop_pct': spot_rules.SPOT_TREND_MAX_STOP_PCT,
+        'bnb_fee_discount_detected': bnb,
+        'bnb_note': ('العمولات تُدفع بـ BNB (خصم {}%) وتُحتسب بقيمتها بالدولار'.format(
+            spot_rules.SPOT_BNB_FEE_DISCOUNT_PCT) if bnb else
+            'لم تُرصد عمولات بـ BNB؛ تفعيل "دفع العمولات بـ BNB" في Binance يخفض العمولة 25% (لا يغيّره البوت)'),
+    }
+
+
+def cleanup_legacy_spot_trades(db_path):
+    """One-time, idempotent: label Spot trades without a strategy as 'legacy' and
+    exclude them from strategy stats. Backs up the table first; never deletes rows."""
+    with sqlite3.connect(db_path) as conn:
+        cols = {r[1] for r in conn.execute('PRAGMA table_info(trades)')}
+        if not cols:
+            return 0
+        if 'excluded_from_stats' not in cols:
+            conn.execute('ALTER TABLE trades ADD COLUMN excluded_from_stats INTEGER NOT NULL DEFAULT 0')
+        done = conn.execute("SELECT value FROM bot_settings WHERE key='legacy_spot_cleanup_v1'").fetchone() \
+            if conn.execute("SELECT name FROM sqlite_master WHERE name='bot_settings'").fetchone() else None
+        if done:
+            return 0
+        conn.execute('CREATE TABLE IF NOT EXISTS trades_backup_legacy_v1 AS SELECT * FROM trades')
+        cur = conn.execute("""UPDATE trades SET strategy='legacy', excluded_from_stats=1
+            WHERE strategy IS NULL OR TRIM(strategy)='' OR strategy='unknown'""")
+        conn.execute('CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+        conn.execute("INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('legacy_spot_cleanup_v1', ?)",
+                     (str(cur.rowcount),))
+        return cur.rowcount
 
 
 
@@ -945,7 +994,34 @@ def _third_asset_fees(order, symbol):
         cost = abs(float((f or {}).get('cost') or 0.0))
         if cost > 0 and currency and currency not in (base, quote):
             out[currency] = out.get(currency, 0.0) + cost
+        if cost > 0 and currency == 'BNB':
+            SPOT_FEE_INFO['bnb_fee_seen'] = True
+            SPOT_FEE_INFO['last_bnb_fee_at'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return out
+
+
+SPOT_FEE_INFO = {'bnb_fee_seen': False, 'last_bnb_fee_at': None}
+
+
+def spot_bnb_discount_active():
+    """True once a fill was charged in BNB (Binance 'pay fees with BNB' on).
+    Informational only: account settings are never changed by the bot."""
+    return bool(SPOT_FEE_INFO.get('bnb_fee_seen'))
+
+
+_DAILY_CACHE = {}
+
+
+def daily_closes(symbol, ttl=3600):
+    """Closed 1d candles (cached) for the Spot trend regime filter."""
+    now = time.time()
+    hit = _DAILY_CACHE.get(symbol)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    rows = retry_api_read(exchange.fetch_ohlcv, symbol, '1d', limit=260) or []
+    closes = [float(r[4]) for r in rows[:-1]]  # drop the still-forming candle
+    _DAILY_CACHE[symbol] = (now, closes)
+    return closes
 
 
 def _apply_fee_asset_erosion(fee_assets, traded_symbol=None):
@@ -1046,9 +1122,7 @@ def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0):
     amount_usdt = float(TRADE_AMOUNT_USDT)
     if stop_distance is not None:
         _, total_equity = get_binance_balance(ttl=0)
-        amount_usdt = risk_sized_notional(
-            total_equity, ref_price, stop_distance,
-            effective_notional_cap(total_equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT)
+        amount_usdt = spot_order_notional(total_equity, ref_price, stop_distance)
     # Reinforcement-learning layer may only shrink size, never grow it.
     amount_usdt *= min(1.0, max(0.0, float(size_multiplier)))
 
@@ -1441,10 +1515,19 @@ def _reconcile_spot_positions():
 
 
 
+def spot_order_notional(equity, price, stop_distance):
+    """Spot notional. fixed (default): RISK_PER_TRADE_PCT sizing capped by
+    effective_notional_cap (= TRADE_AMOUNT_USDT unless MAX_POSITION_EQUITY_PCT > 0).
+    risk_pct: SPOT_RISK_PCT of equity, capped at SPOT_MAX_POSITION_EQUITY_PCT of equity."""
+    return spot_rules.spot_notional(
+        equity, price, stop_distance, TRADE_AMOUNT_USDT,
+        lambda: risk_sized_notional(equity, price, stop_distance,
+                                    effective_notional_cap(equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT))
+
+
 def _check_sized_spot_risk(symbol, price, stop_distance):
     _, equity = get_binance_balance(ttl=10)
-    notional = risk_sized_notional(equity, price, stop_distance,
-                                   effective_notional_cap(equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT)
+    notional = spot_order_notional(equity, price, stop_distance)
     risk_amount = notional * float(stop_distance) / max(float(price), 1e-12)
     result = _check_combined_portfolio_risk(symbol, 'Spot', risk_amount)
     result['candidate_notional_usdt'] = notional
@@ -1850,9 +1933,11 @@ def check_and_close_positions():
             initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
             if not pos.get('partial_taken') and target is None:
                 target = r_multiple_target(entry_price, initial_stop)
-            trailing_distance = float(pos.get('trailing_distance') or entry_price * TRAILING_SL_PCT / 100)
-            trail_armed = (bool(pos.get('partial_taken'))
-                           and highest_price >= entry_price * (1 + TRAILING_ACTIVATION_PCT / 100))
+            risk_dist_for_trail = float(pos.get('risk_distance') or max(entry_price - initial_stop, 0.0))
+            trailing_distance = float(pos.get('trailing_distance') or spot_rules.legacy_trail_distance(
+                entry_price, risk_dist_for_trail, TRAILING_SL_PCT))
+            trail_armed = spot_rules.trail_armed(entry_price, highest_price, risk_dist_for_trail,
+                                                 pos.get('partial_taken'), TRAILING_ACTIVATION_PCT)
             active_stop = max(initial_stop, highest_price - trailing_distance) if trail_armed else initial_stop
 
             reason = 'SL' if sale is not None else None
@@ -2289,6 +2374,28 @@ def automated_market_scan():
                     continue
 
                 last_entry_candle[symbol] = candle
+                _spot_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
+                _spot_risk = STRATEGY_RISK[setup['strategy']]
+                _fee_ok, _tgt_pct, _need_pct = spot_rules.target_covers_fees(
+                    setup['strategy'], current_price, current_price + _spot_atr * _spot_risk['target_atr'],
+                    bnb_discount=spot_bnb_discount_active())
+                if not _fee_ok:
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض: الهدف لا يغطي العمولة',
+                                    'الهدف {:.2f}% أقل من {:.2f}% (= {:g} × عمولة الذهاب والعودة)'.format(
+                                        _tgt_pct, _need_pct, spot_rules.SPOT_MIN_TARGET_FEE_MULT),
+                                    order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                if spot_rules.SPOT_TREND_REQUIRE_BULL and setup['strategy'] in spot_rules.SPOT_TREND_STRATEGIES:
+                    try:
+                        _ok, _why = spot_rules.trend_entry_allowed(
+                            setup['strategy'], daily_closes(symbol), current_price,
+                            daily_closes(spot_rules.SPOT_REGIME_SYMBOL))
+                    except Exception as exc:
+                        _ok, _why = False, 'تعذر جلب الشموع اليومية: {}'.format(type(exc).__name__)
+                    if not _ok:
+                        record_decision('Spot', symbol, setup, current_price, 'مرفوض: فلتر الاتجاه اليومي',
+                                        _why, order_status='لم يُرسل', price_updated_at=price_updated_at)
+                        continue
                 rl_entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
                 rl_decision = rl_bandit.get_agent(DB_NAME).decide(
                     'Spot', symbol, setup, current_price,
@@ -2306,7 +2413,8 @@ def automated_market_scan():
                                 'اجتازت الإشارة فلاتر المخاطر والسيولة والأخبار',
                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
-                entry_stop_distance = entry_atr * STRATEGY_RISK[setup['strategy']]['stop_atr']
+                entry_stop_distance = spot_rules.stop_distance(
+                    setup['strategy'], current_price, entry_atr, STRATEGY_RISK[setup['strategy']]['stop_atr'])
                 if TRADING_ENABLED:
                     risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance)
                     if not risk_check.get('allowed'):
@@ -2330,16 +2438,16 @@ def automated_market_scan():
                 entry = fill['price']
                 atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
                 risk = STRATEGY_RISK[setup['strategy']]
-                stop_price = entry - atr * risk['stop_atr']
+                stop_price = entry - spot_rules.stop_distance(setup['strategy'], entry, atr, risk['stop_atr'])
                 target_price = entry + atr * risk['target_atr']
-                trailing_distance = atr * risk['trail_atr']
+                trailing_distance = spot_rules.trail_distance(atr, risk['trail_atr'])
                 pos = {
                     'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
                     'highest_price': entry, 'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     'simulated': fill['simulated'], 'strategy': setup['strategy'],
                     'timeframe': setup['timeframe'], 'stop_price': stop_price,
                     'target_price': target_price, 'trailing_distance': trailing_distance,
-                    'risk_distance': entry_atr * risk['stop_atr'], 'partial_taken': False,
+                    'risk_distance': entry - stop_price, 'partial_taken': False,
                     'partial_pnl_usdt': 0.0, 'initial_cost': fill['cost'],
                     'fee_quality': fill.get('fee_quality', 'unverified'),
                     'fees_usdt': float(fill.get('fee_usdt') or 0.0),
@@ -2726,6 +2834,7 @@ def api_state():
             'futures_active_trades': len(futures_engine.positions) if futures_engine else 0,
             'active_trades': spot_open_trade_slots + (len(futures_engine.positions) if futures_engine else 0),
         },
+        'spot_rules': spot_rules_snapshot(),
         'wallet': {
             'total': total_usdt, 'free': free_usdt,
             'cash': max(0.0, total_usdt - spot_position_value),

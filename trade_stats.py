@@ -62,6 +62,8 @@ def load_strategy_stats(db_path):
                       "fees_usdt" if "fees_usdt" in cols else "0 AS fees_usdt",
                       "r_multiple" if "r_multiple" in cols else "NULL AS r_multiple"]
             where = " WHERE pnl_usdt IS NOT NULL"
+            if "excluded_from_stats" in cols:
+                where += " AND COALESCE(excluded_from_stats, 0) = 0"
             if "cost_quality" in cols:
                 where += " AND COALESCE(cost_quality, '') != 'simulated'"
             for r in conn.execute("SELECT {} FROM {}{}".format(", ".join(select), table, where)):

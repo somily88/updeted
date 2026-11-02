@@ -4,6 +4,7 @@ This module uses public OHLCV only. It never loads credentials and contains no
 order-submission calls. Signal rules are imported unchanged from strategy_engine.
 """
 import argparse
+import spot_rules
 import csv
 import datetime as dt
 import json
@@ -241,8 +242,14 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
             pos["target_price"] = None
             pos["stop_price"] = max(float(pos["stop_price"]), float(pos["entry_price"]))
         pos["extreme"] = max(float(pos["extreme"]), high)
-        if (pos.get("partial_taken")
-                and pos["extreme"] >= pos["entry_price"] * (1.0 + TRAILING_ACTIVATION_PCT / 100.0)):
+        if pos.get("trail_arm_r") is not None:
+            armed = spot_rules.trail_armed(pos["entry_price"], pos["extreme"], pos["risk_distance"],
+                                           pos.get("partial_taken"), TRAILING_ACTIVATION_PCT,
+                                           arm_r=pos["trail_arm_r"])
+        else:
+            armed = (pos.get("partial_taken")
+                     and pos["extreme"] >= pos["entry_price"] * (1.0 + TRAILING_ACTIVATION_PCT / 100.0))
+        if armed:
             pos["stop_price"] = max(float(pos["stop_price"]), pos["extreme"] - pos["trailing_distance"])
     else:
         if op >= stop:
@@ -277,7 +284,8 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
 
 
 def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
-                     mode, notional, capital, max_positions, fee_rate, slippage_rate, rl_agent=None):
+                     mode, notional, capital, max_positions, fee_rate, slippage_rate, rl_agent=None,
+                     spot_cfg=None):
     """rl_agent (optional rl_bandit.BanditAgent) learns online in time order: it
     only sees R of trades that already closed, so there is no lookahead."""
     segment_times = [t for t in timeline if start_ms <= t < end_ms]
@@ -385,9 +393,39 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             atr = max(float(setup.get("atr") or 0.0), entry_price * 0.0005)
             risk = adjusted_risk(setup["strategy"], profile)
             current_equity = liquidation_equity(closed_bar_open)
-            sized_notional = risk_sized_notional(
-                current_equity, entry_price, atr * risk["stop_atr"], notional,
-                RISK_PER_TRADE_PCT)
+            stop_dist = atr * risk["stop_atr"]
+            trail_dist = atr * risk["trail_atr"]
+            target_dist = atr * risk["target_atr"]
+            cfg = spot_cfg if (mode == "spot" and spot_cfg) else None
+            if cfg:
+                strategy = setup["strategy"]
+                stop_dist = spot_rules.stop_distance(strategy, entry_price, atr, risk["stop_atr"],
+                                                     max_stop_pct=cfg.get("trend_max_stop_pct", 0))
+                trail_dist = spot_rules.trail_distance(atr, risk["trail_atr"], mult=cfg.get("trail_atr_mult", 0))
+                ok, _, _ = spot_rules.target_covers_fees(strategy, entry_price, entry_price + target_dist,
+                                                         mult=cfg.get("min_target_fee_mult", 0))
+                if not ok:
+                    entered_keys.add(signal_id)
+                    signals[signal_id]["status"] = "target_below_fees"
+                    continue
+                if cfg.get("trend_require_bull"):
+                    def closes(sym):
+                        rows = data.get(sym, {}).get("1d_long") or data.get(sym, {}).get("1d") or []
+                        return [float(r[4]) for r in rows if int(r[0]) + TIMEFRAME_MS["1d"] <= now_ms]
+                    allowed, _ = spot_rules.trend_entry_allowed(
+                        strategy, closes(symbol), entry_price,
+                        closes(cfg.get("regime_symbol", "BTC/USDT")), enabled=True)
+                    if not allowed:
+                        entered_keys.add(signal_id)
+                        signals[signal_id]["status"] = "trend_regime_block"
+                        continue
+            sized_notional = spot_rules.spot_notional(
+                current_equity, entry_price, stop_dist, notional,
+                lambda: risk_sized_notional(current_equity, entry_price, stop_dist, notional,
+                                            RISK_PER_TRADE_PCT),
+                sizing=(cfg or {}).get("sizing", "fixed"), risk_pct=(cfg or {}).get("risk_pct", 0.5),
+                max_equity_pct=(cfg or {}).get("max_equity_pct", 10.0))
+            sized_notional = min(sized_notional, max(0.0, current_equity))
             rl_context = None
             rl_multiplier = 1.0
             if rl_agent is not None:
@@ -403,8 +441,8 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             quantity = sized_notional / entry_price
             entry_fee = quantity * entry_price * fee_rate
             if direction == "long":
-                stop = entry_price - atr * risk["stop_atr"]
-                target = entry_price + atr * risk["target_atr"]
+                stop = entry_price - stop_dist
+                target = entry_price + target_dist
                 extreme = entry_price
             else:
                 stop = entry_price + atr * risk["stop_atr"]
@@ -419,8 +457,9 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 "notional": sized_notional, "entry_fee": entry_fee, "fees_paid": entry_fee,
                 "partial_gross_pnl": 0.0, "partial_quantity": 0.0,
                 "partial_exit_notional": 0.0, "partial_taken": False,
-                "risk_distance": atr * risk["stop_atr"], "stop_price": stop,
-                "target_price": target, "trailing_distance": atr * risk["trail_atr"],
+                "risk_distance": stop_dist, "stop_price": stop,
+                "target_price": target, "trailing_distance": trail_dist,
+                "trail_arm_r": (cfg.get("trail_arm_r") if cfg else None),
                 "extreme": extreme, "funding_usdt": 0.0,
                 "last_funding_ms": now_ms,
                 "rl_context": rl_context, "rl_multiplier": rl_multiplier,

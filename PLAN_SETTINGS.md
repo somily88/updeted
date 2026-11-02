@@ -98,3 +98,26 @@ Module `massive_client.py`. Free plan verified: market status (`/v1/marketstatus
 | `MASSIVE_SMA_DAYS` | 50 | SMA length for confirm |
 
 Endpoints: `GET /api/massive`, and `massive` key in `/api/state`.
+
+## Spot profitability fixes (`spot_rules.py`)
+
+Shared by the live bot and `backtest.py`, so the backtest tests the same rules.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `SPOT_MIN_TARGET_FEE_MULT` | `3` | Reject a Spot signal (strategies listed in `SPOT_MIN_TARGET_STRATEGIES`, default `bounce`) when its ATR target is below k × the round-trip fee. `0` = off |
+| `SPOT_TAKER_FEE_PCT` | `0.1` | Spot taker fee per side, in %. The round trip is twice this |
+| `SPOT_BNB_FEE_DISCOUNT_PCT` | `25` | Discount used once a fill paid its fee in BNB. Detected automatically from fills; the bot never changes account settings |
+| `SPOT_TRAIL_ARM_R` | `1.0` | The trailing stop arms only after price reaches entry + N × initial risk. `0` = old behaviour (after the partial take-profit and `TRAILING_ACTIVATION_PCT`) |
+| `SPOT_TRAIL_ATR_MULT` | `1.0` | Trail distance = ATR × max(strategy `trail_atr`, this value). Old positions saved without an ATR trail use 1R instead of the fixed 0.3% |
+| `SPOT_TREND_REQUIRE_BULL` | `true` | Spot trend longs (`SPOT_TREND_STRATEGIES`) only when price > daily EMA50 and EMA200, and BTC (`SPOT_REGIME_SYMBOL`) is also above both |
+| `SPOT_TREND_MAX_STOP_PCT` | `6` | Cap on the distance of a Spot trend stop, as % of entry |
+| `SPOT_SIZING` | `fixed` | `fixed` = old sizing (`RISK_PER_TRADE_PCT`, capped at `TRADE_AMOUNT_USDT` unless `MAX_POSITION_EQUITY_PCT` > 0). `risk_pct` = risk `SPOT_RISK_PCT` of equity per trade |
+| `SPOT_RISK_PCT` | `0.5` | Equity at risk per trade when `SPOT_SIZING=risk_pct` |
+| `SPOT_MAX_POSITION_EQUITY_PCT` | `MAX_POSITION_EQUITY_PCT`, or `10` | Notional cap for `risk_pct` |
+
+**Why the trade size is always 200 USDT:** `RISK_PER_TRADE_PCT` does apply to Spot, but the result is capped at `effective_notional_cap`. When `MAX_POSITION_EQUITY_PCT=0` (the default), that cap equals `TRADE_AMOUNT_USDT`, which is stored in the database from the dashboard (200). With about 9,900 USDT equity and roughly a 1% stop, the risk-based size is far above 200, so the cap always wins. This is the configured behaviour, not a bug. To size from equity, set `MAX_POSITION_EQUITY_PCT`, or use `SPOT_SIZING=risk_pct`.
+
+**One-time cleanup:** on startup, Spot trades with no strategy are labelled `legacy` and marked `excluded_from_stats=1`. The `trades` table is first copied to `trades_backup_legacy_v1`, and no rows are deleted. The run is recorded in `bot_settings.legacy_spot_cleanup_v1`, so it runs only once. RL already trains only on its own `rl_decisions`, so legacy trades never reach it.
+
+The current values can be read in `/api/state` → `spot_rules`.
