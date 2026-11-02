@@ -1241,7 +1241,10 @@ class BinanceFuturesDemo:
                 block_reason = None
                 if entry_block is not None:
                     try:
-                        block_reason = entry_block(symbol)
+                        try:
+                            block_reason = entry_block(symbol, direction)
+                        except TypeError:
+                            block_reason = entry_block(symbol)
                     except Exception:
                         block_reason = None
                 if block_reason:

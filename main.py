@@ -40,6 +40,7 @@ from risk_controls import (daily_loss_status, portfolio_risk_status,
 import database
 import rl_bandit
 import finnhub_client
+import massive_client
 from database import get_db_connection, open_db_connection
 
 from config import *  # noqa: F401,F403  (configuration moved to config.py)
@@ -680,6 +681,9 @@ async def lifespan(app: FastAPI):
                           next_run_time=datetime.datetime.now())
     if finnhub_client.FINNHUB_ENABLED:
         scheduler.add_job(refresh_finnhub_calendars, 'interval', minutes=60, max_instances=1, coalesce=True,
+                          next_run_time=datetime.datetime.now())
+    if massive_client.MASSIVE_ENABLED:
+        scheduler.add_job(refresh_massive, 'interval', minutes=2, max_instances=1, coalesce=True,
                           next_run_time=datetime.datetime.now())
     scheduler.start()
     log_event("START", "البوت يعمل ({} | اختيار الاستراتيجية تلقائي)".format(BINANCE_ENV))
@@ -1534,9 +1538,30 @@ def _finnhub_snapshot_safe():
         return None
 
 
-def finnhub_entry_block(symbol):
+def finnhub_entry_block(symbol, side=None):
+    """Combined external-data entry gate (Finnhub calendars + Massive market hours/trend)."""
     try:
-        return finnhub_client.entry_block_reason(symbol)
+        r = finnhub_client.entry_block_reason(symbol)
+        if r:
+            return r
+    except Exception:
+        pass
+    try:
+        return massive_client.entry_block_reason(symbol, side)
+    except Exception:
+        return None
+
+
+def refresh_massive():
+    try:
+        massive_client.refresh()
+    except Exception as e:
+        logger.warning("📈 [MASSIVE] تعذر التحديث: %s", type(e).__name__)
+
+
+def _massive_snapshot_safe():
+    try:
+        return massive_client.snapshot()
     except Exception:
         return None
 
@@ -1577,10 +1602,14 @@ def fetch_headlines():
     except Exception as e:  # never break the news pipeline
         fh_items = []
         print("📰 [NEWS] فشل جلب Finnhub: {}".format(type(e).__name__))
+    try:
+        fh_items = list(fh_items) + list(massive_client.fetch_news(window_hours=NEWS_WINDOW_HOURS))
+    except Exception as e:
+        print("📰 [NEWS] فشل جلب Massive: {}".format(type(e).__name__))
     if ok_feeds == 0 and not fh_items:
         raise RuntimeError("تعذر جلب أي مصدر أخبار")
     items.sort(key=lambda x: x[0], reverse=True)
-    fh_items = finnhub_client.dedupe(fh_items)[:10]
+    fh_items = finnhub_client.dedupe(sorted(fh_items, key=lambda x: x[0], reverse=True))[:12]
     # RSS first then Finnhub so existing sources keep priority; dedupe across both
     merged = finnhub_client.dedupe(items[:20] + fh_items)
     merged.sort(key=lambda x: x[0], reverse=True)
@@ -2127,7 +2156,7 @@ def automated_market_scan():
                                     news_state.get('reason') or 'حظر مرشح الأخبار',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
-                fh_reason = finnhub_entry_block(symbol)
+                fh_reason = finnhub_entry_block(symbol, 'long')
                 if fh_reason:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض', fh_reason,
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
@@ -2744,6 +2773,7 @@ def api_state():
             'error': news_state['error']
         },
         'finnhub': _finnhub_snapshot_safe(),
+        'massive': _massive_snapshot_safe(),
         'events': list(event_log),
         'decisions': get_recent_decisions(80)
     }
@@ -2935,6 +2965,14 @@ def set_trading_enabled(payload: TradingToggle):
 def finnhub_status():
     try:
         return finnhub_client.snapshot()
+    except Exception as e:
+        return {'enabled': False, 'error': type(e).__name__}
+
+
+@app.get("/api/massive", dependencies=[Depends(require_dashboard_auth)])
+def massive_status():
+    try:
+        return massive_client.snapshot()
     except Exception as e:
         return {'enabled': False, 'error': type(e).__name__}
 

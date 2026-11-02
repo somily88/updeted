@@ -80,3 +80,21 @@ Module `finnhub_client.py`. Enabled automatically when `FINNHUB_API_KEY` is set.
 - Calendars refresh hourly. Existing positions are never touched.
 - Read-only status: `GET /api/finnhub`. Shown in the dashboard News tab; block reasons appear in bot decisions.
 - Free-tier check (2026-11-02): news ✅, company-news ✅, earnings ✅, economic ❌ 403.
+
+## Massive (Polygon.io) — TradFi underlyings
+
+Module `massive_client.py`. Free plan verified: market status (`/v1/marketstatus/now`, `/upcoming`), ticker news with sentiment (`/v2/reference/news`), daily aggregates (`/v2/aggs`). `/v2/snapshot` returns 403 on free plan and is not used. A background job every 2 min refreshes stale data within the rate budget; scan gates read only the cache, so scans are never slowed. 403 disables that endpoint for the session; 429 backs off for a minute.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MASSIVE_API_KEY` | — | Required to enable |
+| `MASSIVE_ENABLED` | true | Master switch (needs key) |
+| `MASSIVE_MAX_CALLS_PER_MIN` | 4 | Free tier is 5/min |
+| `MASSIVE_STOCKS` | META,NVDA,TSLA,AMZN,MU | Underlyings tracked |
+| `MASSIVE_NEWS_ENABLED` | true | Merge ticker news into news pipeline (deduped) |
+| `MASSIVE_MARKET_HOURS_GUARD` | false | Block new entries on stock perps while US market is not `open` (pre/after-hours, weekends, holidays) |
+| `MASSIVE_OPEN_BUFFER_MIN` | 15 | With guard on: also block first N minutes after open |
+| `MASSIVE_UNDERLYING_CONFIRM` | false | Long only if stock close > SMA, short only if below |
+| `MASSIVE_SMA_DAYS` | 50 | SMA length for confirm |
+
+Endpoints: `GET /api/massive`, and `massive` key in `/api/state`.
