@@ -165,6 +165,11 @@ def init_db():
             )''')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_decision_log_created_at ON decision_log(id DESC)')
             try:
+                cursor.execute('ALTER TABLE decision_log ADD COLUMN rule TEXT')
+            except Exception:
+                pass  # column already exists
+            cursor.execute('CREATE TABLE IF NOT EXISTS spot_block_stats (rule TEXT PRIMARY KEY, count INTEGER NOT NULL, last_at TEXT)')
+            try:
                 cursor.execute('ALTER TABLE trades ADD COLUMN pnl_usdt REAL')
             except sqlite3.OperationalError:
                 pass  # العمود موجود مسبقاً
@@ -179,6 +184,20 @@ def init_db():
         cleanup_legacy_spot_trades(DB_NAME)
     except Exception as e:
         logger.error("Database Init Error: %s", e)
+
+
+def spot_block_stats():
+    """Persisted per-rule Spot rejection counters (survive restarts)."""
+    conn = None
+    try:
+        conn = open_db_connection(DB_NAME)
+        rows = conn.execute('SELECT rule, count FROM spot_block_stats ORDER BY count DESC').fetchall()
+        return {r[0]: int(r[1]) for r in rows}
+    except Exception:
+        return spot_rules.block_counter.snapshot()
+    finally:
+        if conn:
+            conn.close()
 
 
 def spot_rules_snapshot():
@@ -200,6 +219,14 @@ def spot_rules_snapshot():
         'trend_require_bull': spot_rules.SPOT_TREND_REQUIRE_BULL,
         'trend_max_stop_pct': spot_rules.SPOT_TREND_MAX_STOP_PCT,
         'bnb_fee_discount_detected': bnb,
+        'enforce_stop_cap_legacy': spot_rules.SPOT_ENFORCE_STOP_CAP_LEGACY,
+        'stop_watchdog': spot_rules.SPOT_STOP_WATCHDOG,
+        'trend_enabled': spot_rules.SPOT_TREND_ENABLED,
+        'trend_require_1d_confirm': spot_rules.SPOT_TREND_REQUIRE_1D_CONFIRM,
+        'trend_min_vol_mult': spot_rules.SPOT_TREND_MIN_VOL_MULT,
+        'blocked_by': spot_block_stats(),
+        'blocked_by_since_start': spot_rules.block_counter.snapshot(),
+        'blocked_by_labels': spot_rules.BLOCK_RULE_LABELS,
         'bnb_note': ('العمولات تُدفع بـ BNB (خصم {}%) وتُحتسب بقيمتها بالدولار'.format(
             spot_rules.SPOT_BNB_FEE_DISCOUNT_PCT) if bnb else
             'لم تُرصد عمولات بـ BNB؛ تفعيل "دفع العمولات بـ BNB" في Binance يخفض العمولة 25% (لا يغيّره البوت)'),
@@ -586,8 +613,11 @@ _DECISION_REASON_LABELS_AR = {
 
 
 def record_decision(market, symbol, setup=None, price=None, outcome='مراقبة', reason='',
-                    order_status=None, order_id=None, api_message=None, price_updated_at=None):
+                    order_status=None, order_id=None, api_message=None, price_updated_at=None,
+                    rule=None):
     setup = setup or {}
+    if rule and str(market) == 'Spot':
+        spot_rules.block_counter.add(rule)
     created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
     direction = str(setup.get('direction') or ('long' if setup.get('signal') else 'none'))
     if not setup.get('signal'):
@@ -611,8 +641,12 @@ def record_decision(market, symbol, setup=None, price=None, outcome='مراقب�
         conn = open_db_connection(DB_NAME)
         conn.execute('''INSERT INTO decision_log
             (created_at, market, symbol, signal, strategy, timeframe, price, price_updated_at,
-             outcome, reason, order_status, order_id, api_message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', values)
+             outcome, reason, order_status, order_id, api_message, rule)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', values + (rule,))
+        if rule and str(market) == 'Spot':
+            conn.execute('''INSERT INTO spot_block_stats (rule, count, last_at) VALUES (?, 1, ?)
+                ON CONFLICT(rule) DO UPDATE SET count = count + 1, last_at = excluded.last_at''',
+                         (str(rule), created_at))
         conn.execute('''DELETE FROM decision_log WHERE id NOT IN
             (SELECT id FROM decision_log ORDER BY id DESC LIMIT 10000)''')
         conn.commit()
@@ -1891,6 +1925,32 @@ def check_news():
 spot_frozen_symbols = set()
 
 
+def _enforce_spot_legacy_stop_cap(symbol, pos):
+    """Tighten an open Spot stop that is wider than SPOT_TREND_MAX_STOP_PCT (positions opened
+    before the cap existed). Only ever raises the stop. Returns True when it changed."""
+    entry = float(pos.get('entry_price') or 0.0)
+    current = pos.get('stop_price') or entry * (1 - INITIAL_SL_PCT / 100)
+    new_stop = spot_rules.capped_legacy_stop(entry, current)
+    if new_stop is None:
+        return False
+    old = float(current or 0.0)
+    pos['stop_price'] = new_stop
+    pos['risk_distance'] = entry - new_stop
+    save_position(symbol, pos)
+    msg = 'شُدّ وقف {} من {:.6g} إلى {:.6g} (حد {:g}% من الدخول)'.format(
+        symbol, old, new_stop, spot_rules.SPOT_TREND_MAX_STOP_PCT)
+    logger.warning("[SPOT STOP CAP] %s stop %s -> %s", symbol, old, new_stop)
+    log_event("RISK", msg)
+    record_decision('Spot', symbol, {'signal': False, 'strategy': pos.get('strategy'), 'timeframe': pos.get('timeframe')},
+                    None, 'تشديد وقف قديم', msg, order_status='—')
+    if not pos.get('simulated'):
+        try:
+            _ensure_spot_protective_stop(symbol, pos, new_stop)
+        except Exception as exc:
+            log_event("ERR", "تعذر تحديث وقف Binance لـ {}: {}".format(symbol, type(exc).__name__))
+    return True
+
+
 def check_and_close_positions():
     monitor_ok = True
     spot_frozen_symbols.clear()
@@ -1923,6 +1983,8 @@ def check_and_close_positions():
             entry_price = pos['entry_price']
             if pos.get('protective_order_id') and not pos.get('simulated'):
                 sale = _poll_spot_protective_stop(symbol, pos)
+            if sale is None and not pos.get('test'):
+                _enforce_spot_legacy_stop_cap(symbol, pos)
 
             highest_price = max(pos.get('highest_price', entry_price), current_price)
             if highest_price != pos.get('highest_price'):
@@ -1948,6 +2010,17 @@ def check_and_close_positions():
             elif reason is None and not pos.get('partial_taken') and target is not None and current_price >= target:
                 reason = "TP"
             elif reason is None and current_price <= active_stop:
+                reason = "SL"
+            if (reason is None or reason == 'SL') and sale is None and spot_rules.stop_breached(current_price, active_stop):
+                # Watchdog: the stop (exchange order or bot check) was missed/gapped. Close at market now.
+                gap_pct = (float(active_stop) - float(current_price)) / float(active_stop) * 100.0
+                logger.warning("[SPOT WATCHDOG] %s price %s <= stop %s (gap %.2f%%); market-closing now",
+                               symbol, current_price, active_stop, gap_pct)
+                log_event("WARN", "حارس الوقف: {} السعر {} تحت الوقف {} بفارق {:.2f}%؛ إغلاق فوري".format(
+                    symbol, current_price, active_stop, gap_pct))
+                if gap_pct >= 1.0:
+                    send_telegram_message("⚠️ <b>حارس الوقف Spot</b>\n🪙 {}\nالسعر {} تخطى الوقف {} بفارق {:.2f}%؛ إغلاق فوري".format(
+                        symbol, current_price, active_stop, gap_pct))
                 reason = "SL"
 
             if not reason and not pos.get('test') and not pos.get('partial_taken') and not pos.get('partial_attempted'):
@@ -2126,7 +2199,7 @@ def automated_market_scan():
             setup, current_price, price_updated_at = None, None, None
             try:
                 if symbol not in SUPPORTED_SYMBOLS:
-                    record_decision('Spot', symbol, outcome='مرفوض', reason='الزوج غير مدعوم في الإعداد الحالي')
+                    record_decision('Spot', symbol, outcome='مرفوض', reason='الزوج غير مدعوم في الإعداد الحالي', rule='unsupported_symbol')
                     continue
                 setup = evaluate_symbol(exchange, symbol, context=strategy_news_context(), enable_hybrids=(BINANCE_ENV == 'demo'),
                                         cache=ohlcv_caches.get(symbol))
@@ -2143,23 +2216,23 @@ def automated_market_scan():
                 market_snapshot[symbol] = setup
                 if setup.get('signal') and symbol in spot_frozen_symbols:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    'مركز {} يحتاج مطابقة مع Binance؛ أُوقف الدخول لهذا الزوج فقط'.format(symbol),
+                                    'مركز {} يحتاج مطابقة مع Binance؛ أُوقف الدخول لهذا الزوج فقط'.format(symbol), rule='frozen_symbol',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if setup.get('signal') and not position_monitor_ok:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ',
+                                    'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ', rule='monitor_error',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if setup.get('signal') and SPOT_ENTRIES_PAUSED:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    'التداول موقوف يدوياً من لوحة التحكم؛ المراكز المفتوحة تبقى محمية',
+                                    'التداول موقوف يدوياً من لوحة التحكم؛ المراكز المفتوحة تبقى محمية', rule='entries_paused',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if (setup.get('signal') and daily_risk_state['spot']
                         and daily_risk_state['spot'].get('blocked')):
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    daily_risk_state['spot'].get('reason', 'بلغ حد الخسارة اليومي'),
+                                    daily_risk_state['spot'].get('reason', 'بلغ حد الخسارة اليومي'), rule='daily_loss_limit',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 print("📊 {} | {} {} | RSI: {:.2f} | strength: {}/100 | setup: {}".format(
@@ -2171,7 +2244,7 @@ def automated_market_scan():
                                        if p.get('add_attempted') and int(p.get('entries', 1)) < 2)
                 if setup.get('signal') and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    'بلغت المراكز حد الصفقات المفتوحة في Spot',
+                                    'بلغت المراكز حد الصفقات المفتوحة في Spot', rule='max_open_trades',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
@@ -2224,13 +2297,13 @@ def automated_market_scan():
                 liquid, liquidity_reason = market_liquidity_check(exchange, symbol, "Spot")
                 if not liquid:
                     log_event("GATE", "تخطي Spot {}: {}".format(symbol, liquidity_reason))
-                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', liquidity_reason,
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', liquidity_reason, rule='liquidity',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 candle = setup.get('candle_ts')
                 if last_entry_candle.get(symbol) == candle:
                     record_decision('Spot', symbol, setup, current_price, 'تجاهل مكرر',
-                                    'سبق فحص أو تنفيذ إشارة هذه الشمعة',
+                                    'سبق فحص أو تنفيذ إشارة هذه الشمعة', rule='duplicate_candle',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
@@ -2238,12 +2311,12 @@ def automated_market_scan():
                     print("📰 [NEWS] إشارة {} على {} لكن الشراء موقوف بسبب الأخبار".format(
                         setup['strategy'], symbol))
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    news_state.get('reason') or 'حظر مرشح الأخبار',
+                                    news_state.get('reason') or 'حظر مرشح الأخبار', rule='news_block',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 fh_reason = finnhub_entry_block(symbol, 'long')
                 if fh_reason:
-                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', fh_reason,
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض', fh_reason, rule='finnhub_block',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if (news_state['sentiment'] == 'negative' and news_state['severity'] >= 2
@@ -2251,7 +2324,7 @@ def automated_market_scan():
                     print("📰 [NEWS] خبر سلبي؛ السماح فقط بإشارات الاتجاه وتجاهل {} على {}".format(
                         setup['strategy'], symbol))
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
-                                    'خبر سلبي؛ يسمح النظام بإشارات الاتجاه فقط',
+                                    'خبر سلبي؛ يسمح النظام بإشارات الاتجاه فقط', rule='negative_news',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
 
@@ -2374,6 +2447,24 @@ def automated_market_scan():
                     continue
 
                 last_entry_candle[symbol] = candle
+                if spot_rules.is_trend_strategy(setup['strategy']):
+                    _t_daily, _t_vols = None, None
+                    try:
+                        if spot_rules.SPOT_TREND_ENABLED and spot_rules.SPOT_TREND_REQUIRE_1D_CONFIRM:
+                            _t_daily = daily_closes(symbol)
+                        if spot_rules.SPOT_TREND_ENABLED and spot_rules.SPOT_TREND_MIN_VOL_MULT > 0:
+                            _rows = retry_api_read(exchange.fetch_ohlcv, symbol, setup.get('timeframe') or '1h',
+                                                   limit=spot_rules.SPOT_TREND_VOL_LOOKBACK + 2) or []
+                            _t_vols = [float(r[5]) for r in _rows[:-1]]  # closed bars only
+                    except Exception:
+                        logger.debug("Suppressed error in %s", "trend_v2 data", exc_info=True)
+                    _t_ok, _t_rule, _t_why = spot_rules.trend_v2_allowed(
+                        setup['strategy'], _t_daily, current_price, _t_vols)
+                    if not _t_ok:
+                        record_decision('Spot', symbol, setup, current_price, 'مرفوض: استراتيجية الاتجاه',
+                                        _t_why, order_status='لم يُرسل', price_updated_at=price_updated_at,
+                                        rule=_t_rule)
+                        continue
                 _spot_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
                 _spot_risk = STRATEGY_RISK[setup['strategy']]
                 _fee_ok, _tgt_pct, _need_pct = spot_rules.target_covers_fees(
@@ -2382,7 +2473,7 @@ def automated_market_scan():
                 if not _fee_ok:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض: الهدف لا يغطي العمولة',
                                     'الهدف {:.2f}% أقل من {:.2f}% (= {:g} × عمولة الذهاب والعودة)'.format(
-                                        _tgt_pct, _need_pct, spot_rules.SPOT_MIN_TARGET_FEE_MULT),
+                                        _tgt_pct, _need_pct, spot_rules.SPOT_MIN_TARGET_FEE_MULT), rule='fee_target',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if spot_rules.SPOT_TREND_REQUIRE_BULL and setup['strategy'] in spot_rules.SPOT_TREND_STRATEGIES:
@@ -2394,7 +2485,8 @@ def automated_market_scan():
                         _ok, _why = False, 'تعذر جلب الشموع اليومية: {}'.format(type(exc).__name__)
                     if not _ok:
                         record_decision('Spot', symbol, setup, current_price, 'مرفوض: فلتر الاتجاه اليومي',
-                                        _why, order_status='لم يُرسل', price_updated_at=price_updated_at)
+                                        _why, order_status='لم يُرسل', price_updated_at=price_updated_at,
+                                        rule='bull_filter')
                         continue
                 rl_entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
                 rl_decision = rl_bandit.get_agent(DB_NAME).decide(
@@ -2406,7 +2498,7 @@ def automated_market_scan():
                                     price_updated_at=price_updated_at)
                 if rl_decision.get('applied_multiplier', 1.0) <= 0:
                     record_decision('Spot', symbol, setup, current_price, 'تخطّاها التعلم المعزز',
-                                    'العائد المتوقع لهذا السياق سلبي حسب الصفقات السابقة',
+                                    'العائد المتوقع لهذا السياق سلبي حسب الصفقات السابقة', rule='rl_skip',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 record_decision('Spot', symbol, setup, current_price, 'إرسال أمر شراء',
@@ -2419,7 +2511,7 @@ def automated_market_scan():
                     risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance)
                     if not risk_check.get('allowed'):
                         record_decision('Spot', symbol, setup, current_price, 'مرفوض بسبب مخاطر المحفظة',
-                                        risk_check.get('reason'), order_status='لم يُرسل',
+                                        risk_check.get('reason'), order_status='لم يُرسل', rule='portfolio_risk',
                                         price_updated_at=price_updated_at)
                         continue
                 try:
