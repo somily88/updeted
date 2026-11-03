@@ -285,7 +285,7 @@ def manage_position(pos, candle, timestamp, fee_rate, slippage_rate):
 
 def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                      mode, notional, capital, max_positions, fee_rate, slippage_rate, rl_agent=None,
-                     spot_cfg=None):
+                     spot_cfg=None, allocator_cfg=None):
     """rl_agent (optional rl_bandit.BanditAgent) learns online in time order: it
     only sees R of trades that already closed, so there is no lookahead."""
     segment_times = [t for t in timeline if start_ms <= t < end_ms]
@@ -376,7 +376,7 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
             if symbol in positions:
                 signals[signal_id]["status"] = "position_open"
                 continue
-            if len(positions) >= effective_slots:
+            if allocator_cfg is None and len(positions) >= effective_slots:
                 signals[signal_id]["status"] = "capacity_limit"
                 continue
             if mode == "spot" and setup.get("direction") != "long":
@@ -426,6 +426,27 @@ def simulate_segment(data, symbols, timeline, events, start_ms, end_ms, profile,
                 sizing=(cfg or {}).get("sizing", "fixed"), risk_pct=(cfg or {}).get("risk_pct", 0.5),
                 max_equity_pct=(cfg or {}).get("max_equity_pct", 10.0))
             sized_notional = min(sized_notional, max(0.0, current_equity))
+            if allocator_cfg is not None:
+                import capital_allocator as _ca
+                view = {s_: {"amount": float(p_["quantity"]) - float(p_.get("partial_quantity") or 0.0),
+                             "entry_price": p_["entry_price"], "stop_price": p_["stop_price"],
+                             "side": p_["direction"], "cost": p_["notional"]} for s_, p_ in positions.items()}
+                plan = _ca.plan_entry(
+                    current_equity, entry_price, stop_dist, view,
+                    _ca.score_multiplier(setup, lo=allocator_cfg.get("score_min", 0.5), hi=allocator_cfg.get("score_max", 1.2)),
+                    1.0, allocator_cfg.get("risk_pct", 0.75), allocator_cfg.get("min_notional", 5.0),
+                    allocation_pct=allocator_cfg.get("allocation_pct", 50),
+                    max_open_risk_pct=allocator_cfg.get("max_open_risk_pct", 4),
+                    min_stop_pct=allocator_cfg.get("min_stop_pct", 1.5))
+                if plan["allowed"] and mode == "spot" and allocator_cfg.get("spot_corr_pct", 3):
+                    ok_c, rule_c, _ = _ca.spot_correlation_guard(view, plan["risk_usdt"], current_equity,
+                                                                 max_risk_pct=allocator_cfg.get("spot_corr_pct", 3), max_count=0)
+                    if not ok_c:
+                        plan.update(allowed=False, rule=rule_c)
+                if not plan["allowed"]:
+                    signals[signal_id]["status"] = "alloc_" + str(plan["rule"])
+                    continue
+                sized_notional = plan["notional"]
             rl_context = None
             rl_multiplier = 1.0
             if rl_agent is not None:
