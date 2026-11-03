@@ -21,6 +21,8 @@ from strategy_engine import (PARTIAL_TP_FRACTION, PARTIAL_TP_R, effective_notion
 from risk_controls import daily_loss_status, portfolio_risk_status
 from database import get_db_connection
 import rl_bandit
+import capital_allocator
+from strategy_engine import volatility_risk_scale
 
 HEDGE_ONLY_IDS = {
     "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "ADAUSDT",
@@ -561,6 +563,7 @@ class BinanceFuturesDemo:
                 for p in self.positions.values()),
             **{key: value for key, value in stats.items() if key != "realized_pnl"},
             "daily_risk": self.daily_risk_state,
+            "allocator": capital_allocator.market_state(balance["total"], self.positions),
         }
 
     def _save_position(self, pos):
@@ -1460,6 +1463,24 @@ class BinanceFuturesDemo:
                     continue
                 # RL may only shrink size, never grow it beyond the risk rules.
                 amount_usdt *= min(1.0, max(0.0, float(rl_decision.get('applied_multiplier', 1.0))))
+                if capital_allocator.enabled():
+                    _limits = (market.get("limits") or {}).get("cost") or {}
+                    _caps = [c for c in (_limits.get("max"),
+                                         notional_cap if setup["strategy"] == "volatility_breakout_hedge" else None) if c]
+                    _smult = capital_allocator.score_multiplier(
+                        setup, capital_allocator.strategy_stats(self.db_path, "futures", setup["strategy"]),
+                        strategy_mult, rl_decision.get('applied_multiplier', 1.0), rl_bandit.RL_MODE)
+                    _plan = capital_allocator.plan_entry(
+                        account["total"], price, stop_distance, self.positions, _smult,
+                        volatility_risk_scale(stop_distance / price * 100.0), RISK_PER_TRADE_PCT,
+                        float(_limits.get("min") or 5), min(float(c) for c in _caps) if _caps else None,
+                        account["free"], symbol)
+                    if not _plan["allowed"]:
+                        self.on_decision('Futures Demo', symbol, dict(setup, rule=_plan["rule"]), price, 'مرفوض',
+                                         '[{}] {}'.format(_plan["rule"], _plan["reason"]),
+                                         order_status='لم يُرسل', price_updated_at=price_updated_at)
+                        continue
+                    amount_usdt = _plan["notional"]
                 if account["free"] < amount_usdt:
                     raise ValueError("رصيد Futures Demo المتاح أقل من قيمة المركز المحسوبة {:.2f} USDT".format(amount_usdt))
                 contracts = float(self.exchange.amount_to_precision(
@@ -1500,6 +1521,7 @@ class BinanceFuturesDemo:
                                  'اجتازت الإشارة فلاتر المخاطر والسيولة والحساب',
                                  order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 order_attempted = True
+                capital_allocator.assert_no_increase(self.positions, symbol)
                 order = place_entry_order(self.exchange, symbol, order_side, contracts, reference_price=price)
                 if order.get("status") != "closed" and order.get("id"):
                     order = retry_api_read(self.exchange.fetch_order, order["id"], symbol)

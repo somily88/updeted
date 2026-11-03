@@ -31,7 +31,7 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from strategy_engine import (evaluate_symbol, STRATEGY_RISK, RISK_PER_TRADE_PCT,
                              TRAILING_ACTIVATION_PCT, MAX_DAILY_LOSS_PCT, risk_sized_notional, effective_notional_cap,
-                             PARTIAL_TP_R, PARTIAL_TP_FRACTION,
+                             PARTIAL_TP_R, PARTIAL_TP_FRACTION, volatility_risk_scale,
                              market_liquidity_check, retry_api_read, fetch_fresh_ticker,
                              prefetch_ohlcv)
 from futures_engine import BinanceFuturesDemo
@@ -40,6 +40,7 @@ from risk_controls import (daily_loss_status, portfolio_risk_status,
                            MAX_PORTFOLIO_OPEN_RISK_PCT, MAX_CORRELATED_CLUSTER_RISK_PCT)
 import database
 import rl_bandit
+import capital_allocator
 import finnhub_client
 import massive_client
 from database import get_db_connection, open_db_connection
@@ -1140,13 +1141,14 @@ def _parse_fill(order, symbol):
     return filled, cost, avg, _fees_in(order, base), _fees_in(order, quote)
 
 
-def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0):
+def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0, notional_override=None):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if TRADING_ENABLED and BINANCE_ENV != 'demo':
         raise RuntimeError('هذا المسار مقفل على Binance Demo ولا يرسل أوامر إلى بيئة حية')
     if not TRADING_ENABLED:
         fee_rate = float((exchange.market(symbol).get('taker') or 0.001))
-        simulated_notional = float(TRADE_AMOUNT_USDT) * min(1.0, max(0.0, float(size_multiplier)))
+        simulated_notional = (float(notional_override) if notional_override is not None
+                              else float(TRADE_AMOUNT_USDT) * min(1.0, max(0.0, float(size_multiplier))))
         estimated_fee = simulated_notional * fee_rate
         return {'price': ref_price, 'amount': simulated_notional / ref_price,
                 'cost': simulated_notional + estimated_fee, 'fee_usdt': estimated_fee,
@@ -1159,6 +1161,9 @@ def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0):
         amount_usdt = spot_order_notional(total_equity, ref_price, stop_distance)
     # Reinforcement-learning layer may only shrink size, never grow it.
     amount_usdt *= min(1.0, max(0.0, float(size_multiplier)))
+    if notional_override is not None:
+        # Capital allocator already sized this (budget, open-risk cap, score incl. RL live).
+        amount_usdt = float(notional_override)
 
     market = exchange.market(symbol)
     min_cost = ((market.get('limits') or {}).get('cost') or {}).get('min')
@@ -1559,9 +1564,10 @@ def spot_order_notional(equity, price, stop_distance):
                                     effective_notional_cap(equity, TRADE_AMOUNT_USDT), RISK_PER_TRADE_PCT))
 
 
-def _check_sized_spot_risk(symbol, price, stop_distance):
+def _check_sized_spot_risk(symbol, price, stop_distance, notional=None):
     _, equity = get_binance_balance(ttl=10)
-    notional = spot_order_notional(equity, price, stop_distance)
+    if notional is None:
+        notional = spot_order_notional(equity, price, stop_distance)
     risk_amount = notional * float(stop_distance) / max(float(price), 1e-12)
     result = _check_combined_portfolio_risk(symbol, 'Spot', risk_amount)
     result['candidate_notional_usdt'] = notional
@@ -2242,7 +2248,7 @@ def automated_market_scan():
                 spot_open_slots = sum(max(1, int(p.get('entries', 1))) for p in active_positions.values())
                 spot_open_slots += sum(1 for p in active_positions.values()
                                        if p.get('add_attempted') and int(p.get('entries', 1)) < 2)
-                if setup.get('signal') and spot_open_slots >= MAX_SPOT_CONCURRENT_TRADES:
+                if setup.get('signal') and not capital_allocator.concurrency_allows(spot_open_slots, MAX_SPOT_CONCURRENT_TRADES):
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
                                     'بلغت المراكز حد الصفقات المفتوحة في Spot', rule='max_open_trades',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
@@ -2330,6 +2336,11 @@ def automated_market_scan():
 
                 pos = active_positions.get(symbol)
                 is_add = pos is not None
+                if is_add and capital_allocator.enabled():
+                    record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                    '[no_add_open_position] ' + capital_allocator.RULE_LABELS_AR['no_add_open_position'],
+                                    rule='no_add_open_position', order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if is_add:
                     if BINANCE_ENV != 'demo':
                         record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
@@ -2501,6 +2512,37 @@ def automated_market_scan():
                                     'العائد المتوقع لهذا السياق سلبي حسب الصفقات السابقة', rule='rl_skip',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
+                alloc_notional = None
+                if capital_allocator.enabled():
+                    _a_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
+                    _a_stop = spot_rules.stop_distance(
+                        setup['strategy'], current_price, _a_atr, STRATEGY_RISK[setup['strategy']]['stop_atr'])
+                    _a_free, _a_equity = get_binance_balance(ttl=10)
+                    try:
+                        _a_market = exchange.market(symbol)
+                    except Exception:
+                        _a_market = {}
+                    _a_limits = (_a_market.get('limits') or {}).get('cost') or {}
+                    _a_fee = float(_a_market.get('taker') if _a_market.get('taker') is not None else 0.001)
+                    _a_mult = capital_allocator.score_multiplier(
+                        setup, capital_allocator.strategy_stats(DB_NAME, 'spot', setup['strategy']), 1.0,
+                        rl_decision.get('applied_multiplier', 1.0), rl_bandit.RL_MODE)
+                    _a_plan = capital_allocator.plan_entry(
+                        _a_equity, current_price, _a_stop, active_positions, _a_mult,
+                        volatility_risk_scale(_a_stop / current_price * 100.0), RISK_PER_TRADE_PCT,
+                        float(_a_limits.get('min') or 0), _a_limits.get('max'),
+                        float(_a_free) / (1.0 + max(_a_fee, 0.0)) if TRADING_ENABLED else None, symbol)
+                    if _a_plan['allowed']:
+                        _c_ok, _c_rule, _c_why = capital_allocator.spot_correlation_guard(
+                            active_positions, _a_plan['risk_usdt'], _a_equity)
+                        if not _c_ok:
+                            _a_plan.update(allowed=False, rule=_c_rule, reason=_c_why)
+                    if not _a_plan['allowed']:
+                        record_decision('Spot', symbol, setup, current_price, 'مرفوض: مخصص رأس المال',
+                                        '[{}] {}'.format(_a_plan['rule'], _a_plan['reason']), rule=_a_plan['rule'],
+                                        order_status='لم يُرسل', price_updated_at=price_updated_at)
+                        continue
+                    alloc_notional = _a_plan['notional']
                 record_decision('Spot', symbol, setup, current_price, 'إرسال أمر شراء',
                                 'اجتازت الإشارة فلاتر المخاطر والسيولة والأخبار',
                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
@@ -2508,15 +2550,16 @@ def automated_market_scan():
                 entry_stop_distance = spot_rules.stop_distance(
                     setup['strategy'], current_price, entry_atr, STRATEGY_RISK[setup['strategy']]['stop_atr'])
                 if TRADING_ENABLED:
-                    risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance)
+                    risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance, alloc_notional)
                     if not risk_check.get('allowed'):
                         record_decision('Spot', symbol, setup, current_price, 'مرفوض بسبب مخاطر المحفظة',
                                         risk_check.get('reason'), order_status='لم يُرسل', rule='portfolio_risk',
                                         price_updated_at=price_updated_at)
                         continue
                 try:
+                    capital_allocator.assert_no_increase(active_positions, symbol)
                     fill = place_buy(symbol, current_price, entry_stop_distance,
-                                     rl_decision.get('applied_multiplier', 1.0))
+                                     rl_decision.get('applied_multiplier', 1.0), notional_override=alloc_notional)
                 except Exception as e:
                     record_decision('Spot', symbol, setup, current_price, 'فشل أو لم يتأكد أمر الشراء',
                                     'لا تعاد المحاولة تلقائيًا؛ راجع سجل Binance',
@@ -2579,7 +2622,8 @@ def automated_market_scan():
         if futures_engine and BINANCE_ENV == 'demo' and TRADING_ENABLED:
             futures_engine.scan(
                 TRADE_AMOUNT_USDT,
-                lambda: (not FUTURES_ENTRIES_PAUSED) and len(futures_engine.positions) < MAX_FUTURES_CONCURRENT_TRADES,
+                lambda: (not FUTURES_ENTRIES_PAUSED) and capital_allocator.concurrency_allows(
+                    len(futures_engine.positions), MAX_FUTURES_CONCURRENT_TRADES),
                 force_test_trade=FORCE_FUTURES_TEST_TRADE,
                 force_test_id=FORCE_FUTURES_TEST_ID,
                 force_test_side=FORCE_FUTURES_TEST_SIDE,
@@ -2914,6 +2958,11 @@ def api_state():
             'futures': dict(future_state['daily_risk']) if future_state.get('daily_risk') else None,
         },
         'futures': future_state,
+        'allocator': {
+            'config': capital_allocator.config_snapshot(),
+            'spot': capital_allocator.market_state(total_usdt, active_positions),
+            'futures': future_state.get('allocator') if isinstance(future_state, dict) else None,
+        },
         'env': BINANCE_ENV,
         'trading_enabled': TRADING_ENABLED,
         'entries_enabled': {'spot': not SPOT_ENTRIES_PAUSED, 'futures': not FUTURES_ENTRIES_PAUSED},
