@@ -15,7 +15,7 @@ BINANCE_ENV = os.getenv("BINANCE_ENV", "demo").strip().lower()  # demo | testnet
 # حجم كل صفقة بالدولار (USDT)
 TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "1000"))
 MAX_SPOT_CONCURRENT_TRADES = int(os.getenv("MAX_SPOT_CONCURRENT_TRADES", "6"))
-MAX_FUTURES_CONCURRENT_TRADES = int(os.getenv("MAX_FUTURES_CONCURRENT_TRADES", "6"))
+MAX_FUTURES_CONCURRENT_TRADES = int(os.getenv("MAX_FUTURES_CONCURRENT_TRADES", "8"))
 CREDENTIAL_ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "").strip()
 
 # تنفيذ الأوامر الفعلية:

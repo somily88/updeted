@@ -45,6 +45,117 @@ if FUTURES_MONITOR_FREEZE_SCOPE not in ("symbol", "global"):
 FUTURES_HEDGE_ONLY_MODE = os.getenv("FUTURES_HEDGE_ONLY_MODE", "hedge").strip().lower()
 if FUTURES_HEDGE_ONLY_MODE not in ("hedge", "all"):
     raise ValueError("FUTURES_HEDGE_ONLY_MODE must be hedge or all")
+CRYPTO_CORRELATED_IDS = set(HEDGE_ONLY_IDS)  # crypto alts move with BTC: one correlated bucket
+
+
+def _env_float(name, default):
+    raw = os.getenv(name, "").strip()
+    return float(raw) if raw else float(default)
+
+
+# Optional futures-only override of MAX_POSITION_EQUITY_PCT (0 = use the shared value).
+FUTURES_MAX_POSITION_EQUITY_PCT = _env_float("FUTURES_MAX_POSITION_EQUITY_PCT", 0)
+if not 0 <= FUTURES_MAX_POSITION_EQUITY_PCT <= 50:
+    raise ValueError("FUTURES_MAX_POSITION_EQUITY_PCT must be between 0 and 50")
+# Correlation guard for crypto contracts (0 disables each limit).
+FUTURES_MAX_SAME_DIRECTION_CRYPTO = int(_env_float("FUTURES_MAX_SAME_DIRECTION_CRYPTO", 3))
+FUTURES_MAX_DIRECTIONAL_RISK_PCT = _env_float("FUTURES_MAX_DIRECTIONAL_RISK_PCT", 3.0)
+# Time stops (0 disables).
+FUTURES_TIME_STOP_DAYS = _env_float("FUTURES_TIME_STOP_DAYS", 5)
+FUTURES_TIME_STOP_MIN_R = _env_float("FUTURES_TIME_STOP_MIN_R", 0.5)
+FUTURES_TIME_STOP_TIMEFRAMES = {t.strip() for t in os.getenv(
+    "FUTURES_TIME_STOP_TIMEFRAMES", "1d").split(",") if t.strip()}
+FUTURES_CLOSE_STALE_BREAKEVEN_DAYS = _env_float("FUTURES_CLOSE_STALE_BREAKEVEN_DAYS", 3)
+FUTURES_TIME_STOP_ENABLED = os.getenv("FUTURES_TIME_STOP_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+def parse_strategy_size_mult(raw):
+    """'bounce:0.5,breakout:0.5' -> {'bounce': 0.5, 'breakout': 0.5}; 0 disables a strategy."""
+    out = {}
+    for part in str(raw or "").split(","):
+        if ":" not in part:
+            continue
+        name, value = part.split(":", 1)
+        value = float(value)
+        if not 0 <= value <= 1:
+            raise ValueError("FUTURES_STRATEGY_SIZE_MULT values must be in [0, 1]")
+        out[name.strip()] = value
+    return out
+
+
+FUTURES_STRATEGY_SIZE_MULT = parse_strategy_size_mult(
+    os.getenv("FUTURES_STRATEGY_SIZE_MULT", "bounce:0.5,breakout:0.5"))
+
+
+def is_crypto_contract(symbol):
+    sid = str(symbol or "").split(":")[0].replace("/", "")
+    return sid in CRYPTO_CORRELATED_IDS
+
+
+def correlation_guard(positions, symbol, direction, candidate_risk_usdt, equity,
+                      max_count=None, max_risk_pct=None):
+    """Reject a crypto entry when same-direction crypto exposure is already full.
+    Returns (allowed, rule_code, reason_ar)."""
+    max_count = FUTURES_MAX_SAME_DIRECTION_CRYPTO if max_count is None else int(max_count)
+    max_risk_pct = FUTURES_MAX_DIRECTIONAL_RISK_PCT if max_risk_pct is None else float(max_risk_pct)
+    if not is_crypto_contract(symbol):
+        return True, None, None
+    same = [p for s, p in (positions or {}).items()
+            if is_crypto_contract(s) and p.get("side", "long") == direction
+            and p.get("strategy") != "volatility_breakout_hedge"]
+    if max_count > 0 and len(same) >= max_count:
+        return False, "corr_max_same_direction", \
+            "حد الترابط: {} مراكز كريبتو {} مفتوحة (الحد {})".format(len(same), direction, max_count)
+    if max_risk_pct > 0 and float(equity or 0) > 0:
+        open_risk = sum(float(p.get("contracts") or 0) * float(p.get("_multiplier") or 1)
+                        * float(p.get("risk_distance") or 0) for p in same)
+        total = open_risk + float(candidate_risk_usdt or 0)
+        limit = float(equity) * max_risk_pct / 100.0
+        if total > limit:
+            return False, "corr_directional_risk", \
+                "حد الترابط: مخاطرة كريبتو {} ستصبح {:.2f} USDT > {:.1f}% من الرصيد ({:.2f})".format(
+                    direction, total, max_risk_pct, limit)
+    return True, None, None
+
+
+def position_age_days(pos, now_ms=None):
+    now_ms = time.time() * 1000 if now_ms is None else now_ms
+    opened = float(pos.get("opened_at_ms") or 0)
+    if opened <= 0 and pos.get("opened_at"):
+        try:
+            opened = datetime.datetime.strptime(pos["opened_at"], "%Y-%m-%d %H:%M:%S").timestamp() * 1000
+        except ValueError:
+            opened = 0
+    return (now_ms - opened) / 86400000.0 if opened > 0 else 0.0
+
+
+def time_stop_reason(pos, price, now_ms=None, days=None, min_r=None, breakeven_days=None,
+                     timeframes=None):
+    """Return (code, reason_ar) if a slow position should be closed, else (None, None)."""
+    days = FUTURES_TIME_STOP_DAYS if days is None else float(days)
+    min_r = FUTURES_TIME_STOP_MIN_R if min_r is None else float(min_r)
+    breakeven_days = FUTURES_CLOSE_STALE_BREAKEVEN_DAYS if breakeven_days is None else float(breakeven_days)
+    timeframes = FUTURES_TIME_STOP_TIMEFRAMES if timeframes is None else set(timeframes)
+    if pos.get("strategy") in ("forced_test", "volatility_breakout_hedge") or pos.get("hedge_base"):
+        return None, None
+    if str(pos.get("timeframe")) not in timeframes:
+        return None, None
+    age = position_age_days(pos, now_ms)
+    risk = float(pos.get("risk_distance") or 0)
+    entry = float(pos.get("entry_price") or 0)
+    if risk <= 0 or entry <= 0:
+        return None, None
+    sign = -1.0 if pos.get("side") == "short" else 1.0
+    open_r = sign * (float(price) - entry) / risk
+    if pos.get("partial_taken"):
+        if breakeven_days > 0 and age >= breakeven_days and open_r < min_r:
+            return "time_stop_breakeven", "إيقاف زمني: المتبقي بعد الجني الجزئي راكد {:.1f} يوم ({:+.2f}R)".format(age, open_r)
+        return None, None
+    if days > 0 and age >= days and open_r < min_r:
+        return "time_stop", "إيقاف زمني: {:.1f} يوم دون بلوغ {:.1f}R ({:+.2f}R)".format(age, min_r, open_r)
+    return None, None
+
+
 FUTURES_MONITOR_MAX_FAILED_SYMBOLS = int(os.getenv("FUTURES_MONITOR_MAX_FAILED_SYMBOLS", "2"))
 FUTURES_STOP_REPLACE_MODE = os.getenv("FUTURES_STOP_REPLACE_MODE", "cancel_then_create").strip().lower()
 FUTURES_ADOPT_EXISTING_CLOSE_STOP = os.getenv("FUTURES_ADOPT_EXISTING_CLOSE_STOP", "true").lower() in ("1", "true", "yes")
@@ -147,7 +258,8 @@ class BinanceFuturesDemo:
                                        ("gross_pnl_usdt", "REAL NOT NULL DEFAULT 0"),
                                        ("cost_quality", "TEXT NOT NULL DEFAULT 'legacy_gross_before_fees'"),
                                        ("exit_reason", "TEXT"), ("risk_usdt", "REAL"),
-                                       ("r_multiple", "REAL")):
+                                       ("r_multiple", "REAL"), ("holding_hours", "REAL"),
+                                       ("opened_at", "TEXT")):
                 if column not in trade_columns:
                     conn.execute("ALTER TABLE futures_trades ADD COLUMN {} {}".format(column, definition))
             conn.execute("""CREATE TABLE IF NOT EXISTS futures_funding (
@@ -391,6 +503,8 @@ class BinanceFuturesDemo:
     def exit_reason_code(reason, partial_taken=False):
         """Map the Arabic close label to TP/SL/breakeven/partial/TEST/manual."""
         text = str(reason or "")
+        if "إيقاف زمني" in text:
+            return "time_stop"
         if "هدف" in text:
             return "TP"
         if "وقف" in text:
@@ -797,13 +911,14 @@ class BinanceFuturesDemo:
                 conn.execute("""INSERT INTO futures_trades
                     (symbol, entry_price, exit_price, pnl_pct, pnl_usdt, status, timestamp,
                      strategy, timeframe, side, fees_usdt, funding_usdt, gross_pnl_usdt, cost_quality,
-                     exit_reason, risk_usdt, r_multiple)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     exit_reason, risk_usdt, r_multiple, holding_hours, opened_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (symbol, pos["entry_price"], exit_price, pnl_pct, total_pnl, status, now,
                      pos["strategy"], pos["timeframe"], side, fees_usdt, funding_usdt,
                      gross_total, cost_quality,
                      self.exit_reason_code(reason, pos.get("partial_taken")),
-                     trade_risk_usdt, r_multiple(total_pnl, trade_risk_usdt)))
+                     trade_risk_usdt, r_multiple(total_pnl, trade_risk_usdt),
+                     round(position_age_days(pos) * 24.0, 2), pos.get("opened_at")))
             try:
                 rl_bandit.get_agent(self.db_path).record_outcome(
                     'Futures', symbol, r_multiple(total_pnl, trade_risk_usdt))
@@ -917,6 +1032,15 @@ class BinanceFuturesDemo:
                     active_stop = max(pos["stop_price"], trailing_stop) if trail_armed else pos["stop_price"]
                     hit_target = not pos.get("partial_taken") and price >= pos["target_price"]
                     hit_stop = price <= active_stop
+                if not hit_target and not hit_stop and FUTURES_TIME_STOP_ENABLED:
+                    ts_code, ts_reason = time_stop_reason(pos, price)
+                    if ts_code:
+                        self.on_decision('Futures Demo', symbol, {'signal': False, 'strategy': pos.get('strategy'),
+                                         'timeframe': pos.get('timeframe'), 'rule': ts_code}, price,
+                                         'إغلاق زمني', ts_reason, order_status='جارٍ الإرسال')
+                        self.on_event("FUTURES", "{} {}".format(symbol, ts_reason))
+                        self._close(symbol, pos, price, ts_reason)
+                        continue
                 if not hit_target and not hit_stop:
                     self._ensure_exchange_stop(symbol, pos, active_stop)
                 self._save_position(pos)
@@ -1298,7 +1422,9 @@ class BinanceFuturesDemo:
                 risk = STRATEGY_RISK[setup["strategy"]]
                 atr = max(float(setup.get("atr") or 0), price * 0.0005)
                 stop_distance = atr * risk["stop_atr"]
-                notional_cap = effective_notional_cap(account["total"], trade_amount_usdt)
+                notional_cap = effective_notional_cap(
+                    account["total"], trade_amount_usdt,
+                    FUTURES_MAX_POSITION_EQUITY_PCT or None)
                 hedge_exposure = 0.0
                 if setup["strategy"] == "volatility_breakout_hedge":
                     current_exposure = self.spot_exposure_provider() if self.spot_exposure_provider else None
@@ -1313,6 +1439,13 @@ class BinanceFuturesDemo:
                 amount_usdt = risk_sized_notional(
                     account["total"], price, stop_distance,
                     notional_cap, RISK_PER_TRADE_PCT)
+                strategy_mult = FUTURES_STRATEGY_SIZE_MULT.get(setup["strategy"], 1.0)
+                if strategy_mult <= 0:
+                    self.on_decision('Futures Demo', symbol, dict(setup, rule='strategy_disabled'), price, 'مرفوض',
+                                     'الاستراتيجية {} معطلة على Futures (FUTURES_STRATEGY_SIZE_MULT)'.format(setup["strategy"]),
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                amount_usdt *= strategy_mult
                 rl_decision = rl_bandit.get_agent(self.db_path).decide(
                     'Futures', symbol, setup, price, stop_distance)
                 if rl_decision.get('note_ar'):
@@ -1335,6 +1468,20 @@ class BinanceFuturesDemo:
                 minimum = float(((market.get("limits") or {}).get("cost") or {}).get("min") or 5)
                 if contracts <= 0 or notional < minimum:
                     raise ValueError("قيمة المركز المحسوبة أقل من الحد الأدنى لهذا العقد")
+                if setup["strategy"] != "volatility_breakout_hedge":
+                    for open_symbol, open_pos in self.positions.items():
+                        try:
+                            open_pos["_multiplier"] = float(self.exchange.market(open_symbol).get("contractSize") or 1)
+                        except Exception:
+                            open_pos["_multiplier"] = 1.0
+                    corr_ok, corr_rule, corr_reason = correlation_guard(
+                        self.positions, symbol, direction,
+                        contracts * multiplier * stop_distance, account["total"])
+                    if not corr_ok:
+                        self.on_decision('Futures Demo', symbol, dict(setup, rule=corr_rule), price,
+                                         'مرفوض', '[{}] {}'.format(corr_rule, corr_reason),
+                                         order_status='لم يُرسل', price_updated_at=price_updated_at)
+                        continue
                 risk_check = self._portfolio_risk_check(
                     symbol, contracts * multiplier * stop_distance)
                 if not risk_check.get("allowed"):

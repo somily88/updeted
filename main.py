@@ -800,7 +800,7 @@ app = FastAPI(title="Crypto Trading Bot Spot Dashboard", lifespan=lifespan, docs
 class RuntimeSettings(BaseModel):
     trade_amount_usdt: float = Field(gt=0, le=100000)
     spot_max_concurrent_trades: int = Field(default=6, ge=1, le=20)
-    futures_max_concurrent_trades: int = Field(default=6, ge=1, le=20)
+    futures_max_concurrent_trades: int = Field(default=8, ge=1, le=20)
 
 
 class BinanceCredentials(BaseModel):
