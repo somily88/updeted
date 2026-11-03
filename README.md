@@ -34,3 +34,15 @@
 ## الاختبار قبل الاستخدام
 
 راجع الاستراتيجية وإدارة المخاطر بنفسك، واستخدم الاختبار التاريخي وخارج العينة ثم Paper Trading أو Binance Demo. نتائج backtest لا تضمن نتائج مستقبلية، وهذا المشروع ليس نصيحة استثمارية.
+
+## حماية Spot الإصدار 2 (Spot guard v2)
+
+| المتغير | الافتراضي | الوظيفة |
+|---|---|---|
+| `SPOT_ENFORCE_STOP_CAP_LEGACY` | `true` | يشدّ وقف المراكز المفتوحة الأوسع من `SPOT_TREND_MAX_STOP_PCT` إلى `entry × (1 − cap)` ويحدّث وقف Binance. لا يوسّع الوقف أبدًا. |
+| `SPOT_STOP_WATCHDOG` | `true` | إذا كان السعر ≤ الوقف والمركز ما زال مفتوحًا، يُغلق فورًا بأمر سوق مع تحذير (وتنبيه Telegram إذا تجاوز الفارق 1%). |
+| `SPOT_TREND_ENABLED` | `false` | استراتيجيات الاتجاه (`SPOT_TREND_STRATEGIES`) موقوفة على Spot. الارتداد لا يتغير. |
+| `SPOT_TREND_REQUIRE_1D_CONFIRM` | `true` | عند التفعيل: السعر فوق EMA20 اليومي الصاعد (`SPOT_TREND_1D_EMA`). |
+| `SPOT_TREND_MIN_VOL_MULT` | `1.2` | عند التفعيل: حجم آخر شمعة مغلقة ≥ 1.2× متوسط 20 شمعة (`SPOT_TREND_VOL_LOOKBACK`). `0` يعطّل. |
+
+كل رفض لدخول Spot يُسجَّل مع مفتاح القاعدة (`decision_log.rule`) ويظهر العدد في `/api/state → spot_rules.blocked_by` وفي تبويب Spot.
