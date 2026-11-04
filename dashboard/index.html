@@ -1,514 +1,889 @@
 <!doctype html>
 <html lang="ar" dir="rtl">
-<head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" href="data:,">
-<title>صبحي تريدر · لوحة التحكم</title>
-<style>
-@font-face{font-family:Cairo;src:url(/fonts/Cairo.ttf) format("truetype");font-weight:200 1000;font-display:block}
-:root{--bg:#F9FAFB;--card:#fff;--ink:#1F2228;--mute:#8A9099;--line:#EEF0F3;--g1:#FF8A4C;--g2:#F2385A;--grad:linear-gradient(135deg,#FF9A4D 0%,#FF5E3A 50%,#F2385A 100%);--green:#10B981;--red:#EF4444;--r:22px;--sh:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06)}
-*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Cairo,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-.num{font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate;display:inline-block}
-header{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:16px;padding:14px 28px;background:rgba(249,250,251,.8);backdrop-filter:blur(14px)}
-.logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;white-space:nowrap}
-.logo i{width:36px;height:36px;border-radius:12px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 16px rgba(242,56,90,.3)}
-nav{flex:1;display:flex;justify-content:center;min-width:0}
-.navin{position:relative;display:flex;gap:4px;background:#fff;padding:5px;border-radius:999px;box-shadow:var(--sh);overflow-x:auto;scrollbar-width:none}
-.navin::-webkit-scrollbar{display:none}
-.pill{position:absolute;top:5px;bottom:5px;border-radius:999px;background:var(--ink);z-index:0}
-.navin button{position:relative;z-index:1;border:0;background:none;font:600 14px Cairo;color:var(--mute);padding:8px 18px;border-radius:999px;cursor:pointer;white-space:nowrap;transition:color .25s}
-.navin button.on{color:#fff}
-.tools{display:flex;gap:10px;align-items:center}
-.ic{width:40px;height:40px;border-radius:50%;background:#fff;box-shadow:var(--sh);display:grid;place-items:center;position:relative}
-.ic .dot{position:absolute;top:9px;left:10px;width:8px;height:8px;border-radius:50%;background:var(--g2);border:2px solid #fff}
-.av{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2B2F36,#555B66);color:#fff;display:grid;place-items:center;font-weight:700}
-main{max-width:1240px;margin:0 auto;padding:12px 28px 40px}
-.view{display:none}.view.show{display:block}
-.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px;grid-auto-flow:dense}
-.card{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);padding:22px;transition:transform .3s cubic-bezier(.3,1.4,.5,1),box-shadow .3s;min-width:0}
-.card:hover,.card.lift{transform:translateY(-5px);box-shadow:0 2px 4px rgba(16,24,40,.04),0 18px 40px rgba(16,24,40,.12)}
-.c3{grid-column:span 3}.c4{grid-column:span 4}.c5{grid-column:span 5}.c6{grid-column:span 6}.c7{grid-column:span 7}.c8{grid-column:span 8}.c12{grid-column:span 12}
-.r2{grid-row:span 2}
-.ttl{font-size:14px;color:var(--mute);font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
-.big{font-size:30px;font-weight:800;letter-spacing:-.5px}
-.up{color:var(--green);font-weight:700}.dn{color:var(--red);font-weight:700}
-.chip{font-size:12px;padding:3px 10px;border-radius:999px;background:#F3F4F6;color:#6B7280;font-weight:700;white-space:nowrap;display:inline-block}
-.g{background:#E7F8F1;color:#0E9F6E}.rd{background:#FDECEC;color:#DC3B3B}.y{background:#FEF5DC;color:#B7791F}.gr{background:#F1F2F4;color:#7A808A}.dk{background:var(--ink);color:#fff}
-.gradcard{background:var(--grad);color:#fff}.gradcard .ttl{color:rgba(255,255,255,.85)}
-.cta{display:flex;flex-direction:column;justify-content:space-between;min-height:190px;position:relative;overflow:hidden}
-.cta:after{content:"";position:absolute;width:220px;height:220px;border-radius:50%;background:rgba(255,255,255,.12);left:-60px;bottom:-90px}
-.cta h3{font-size:24px;margin:0;font-weight:800;line-height:1.35}
-.arrow{width:52px;height:52px;border-radius:50%;background:#fff;display:grid;place-items:center;border:0;cursor:pointer;z-index:1;box-shadow:0 6px 18px rgba(0,0,0,.15)}
-.gauge{display:flex;flex-direction:column;align-items:center;text-align:center}
-.gauge svg{width:100%;max-width:330px}
-.stat .row{display:flex;justify-content:space-between;align-items:flex-end;gap:8px;margin-top:6px}
-.spark{width:110px;height:42px}
-.map{display:grid;grid-template-columns:repeat(9,1fr);gap:8px;margin-top:12px}
-.map div{aspect-ratio:1;border-radius:50%;display:grid;place-items:center;font-size:9px;font-weight:700;color:#fff;direction:ltr;overflow:hidden}
-.map div img{width:72%;height:72%;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #fff}
-.coin{width:22px;height:22px;border-radius:50%;vertical-align:middle;margin-inline-end:6px;display:inline-grid;place-items:center;font-size:9px;font-weight:800;color:#fff;background:var(--grad);overflow:hidden}
-.coin img{width:100%;height:100%}
-.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-top:12px}
-.bars{display:flex;align-items:flex-end;gap:10px;height:170px;margin-top:14px;direction:ltr}
-.bars .b{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
-.bars .b i{width:100%;max-width:30px;border-radius:10px 10px 6px 6px;background:linear-gradient(180deg,#FF9A4D,#F2385A)}
-.bars .b i.neg{background:#E5E7EB}
-.bars small{font-size:11px;color:var(--mute)}
-.wide{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:18px}
-.list{display:flex;flex-direction:column;gap:2px;max-height:250px;overflow:hidden}
-.li{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13px;align-items:flex-start}
-.li:last-child{border:0}.li .t{color:var(--mute);min-width:62px;font-weight:600}
-.li .x{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dark{background:var(--ink);color:#fff;border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:14px}
-.dark .kv{display:flex;justify-content:space-between;font-size:14px;color:#B9BEC7}.dark .kv b{color:#fff}
-.wbtn{align-self:flex-start;background:#fff;color:var(--ink);border:0;border-radius:999px;padding:11px 24px;font:700 14px Cairo;cursor:pointer;margin-top:auto}
-.live{display:inline-flex;align-items:center;gap:6px}.live:before{content:"";width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 4px rgba(16,185,129,.2)}
-h1{font-size:38px;font-weight:800;margin:14px 0 4px;letter-spacing:-.5px}.sub{color:var(--mute);margin:0 0 22px}
-.sum{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:18px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th{color:var(--mute);font-weight:600;text-align:right;padding:12px 10px;font-size:13px;white-space:nowrap}
-td{padding:14px 10px;border-top:1px solid var(--line);vertical-align:middle}
-td.sym{font-weight:700;direction:ltr;text-align:right}
-.tblwrap{overflow-x:auto}
-.more{display:block;margin:18px auto 0;background:#fff;border:1px solid #E5E7EB;border-radius:999px;padding:10px 28px;font:700 14px Cairo;cursor:pointer;color:var(--ink)}
-.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
-.fp{border:0;background:#F3F4F6;color:#555;border-radius:999px;padding:8px 16px;font:700 13px Cairo;cursor:pointer}
-.fp.on{background:var(--ink);color:#fff}
-.search{margin-inline-start:auto;border:1px solid #E5E7EB;border-radius:999px;padding:9px 16px;font:500 14px Cairo;min-width:220px;background:#fff;outline:none}
-.reason{color:var(--mute);font-size:12.5px;max-width:330px}
-.form{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
-.fld label{display:block;font-size:13px;color:var(--mute);font-weight:600;margin-bottom:6px}
-.fld input{width:100%;border:1px solid #E5E7EB;border-radius:14px;padding:12px 14px;font:600 15px Cairo;background:#FBFBFC;outline:none}
-.fld input:focus{border-color:var(--g1);box-shadow:0 0 0 4px rgba(255,138,76,.15)}
-.gbtn{background:var(--grad);color:#fff;border:0;border-radius:999px;padding:12px 28px;font:700 14px Cairo;cursor:pointer;box-shadow:0 8px 20px rgba(242,56,90,.25)}
-.kvs{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kvs div{background:#F7F8FA;border-radius:14px;padding:12px}.kvs small{display:block;color:var(--mute);font-size:12px}.kvs b{font-size:15px}
-.hl{padding:14px 0;border-top:1px solid var(--line);display:flex;gap:12px;align-items:center}.hl:first-child{border:0}
-.cursor{position:fixed;z-index:99;width:22px;height:22px;pointer-events:none;display:none;left:0;top:0}
-@media(max-width:900px){.c3,.c4,.c5,.c6,.c7,.c8{grid-column:span 6}.wide{grid-template-columns:1fr}.form,.kvs{grid-template-columns:1fr 1fr}}
-@media(max-width:640px){header{flex-wrap:wrap;padding:12px 16px}nav{order:3;flex-basis:100%;justify-content:flex-start}.navin{max-width:100%}main{padding:8px 16px 30px}.grid{grid-template-columns:1fr}.grid>*{grid-column:1/-1!important;grid-row:auto!important}.sum{grid-template-columns:1fr}.form,.kvs{grid-template-columns:1fr}h1{font-size:30px}.search{min-width:0;width:100%}.big{font-size:26px}.logo{flex:1}}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-</style>
-<script type="importmap">{"imports":{"three":"/three/three.module.js"}}</script>
-</head>
-<body>
-<header>
- <div class="logo"><i><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5 0 2 1 3 2 3-1-3 0-7 1-9.5z"/></svg></i>صبحي تريدر</div>
- <nav><div class="navin" id="nav"><span class="pill" id="pill"></span>
-  <button data-v="home" class="on">الرئيسية</button><button data-v="spot">Spot</button><button data-v="fut">Futures</button><button data-v="strat">الاستراتيجيات</button><button data-v="rl">التعلم المعزز</button><button data-v="dec">قرارات البوت</button><button data-v="neural">الخلية العصبية</button><button data-v="trades">الصفقات</button><button data-v="news">الأخبار</button><button data-v="set">الإعدادات</button></div></nav>
- <div class="tools"><div class="ic"><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="m13 13 4 4"/></svg></div><div class="ic"><span class="dot"></span><svg width="18" height="18" fill="none" stroke="#1F2228" stroke-width="2"><path d="M4 13V8a5 5 0 0 1 10 0v5l1.5 2h-13zM7 17a2 2 0 0 0 4 0"/></svg></div><div class="av">ص</div></div>
-</header>
-<main>
- <section class="view show" id="v-home"><div class="grid" id="homeGrid"></div></section>
- <section class="view" id="v-dec"></section>
- <section class="view" id="v-trades"></section>
- <section class="view" id="v-fut"></section>
- <section class="view" id="v-spot"></section>
- <section class="view" id="v-strat"></section>
-<section class="view" id="v-rl"></section>
-<section class="view" id="v-neural"></section>
- <section class="view" id="v-news"></section>
- <section class="view" id="v-set"></section>
-</main>
-<svg class="cursor" id="cur" viewBox="0 0 24 24"><path d="M4 2l16 9-7 2-3 7z" fill="#1F2228" stroke="#fff" stroke-width="1.5"/></svg>
-<script>
-/* ===== data layer: live endpoints (same-origin, Basic auth session) ===== */
-function errText(j,r){const d=j&&j.detail;if(typeof d==='string')return d;if(d&&d.message)return d.message+(d.reason?' — '+d.reason:'');if(Array.isArray(d))return 'بيانات غير صالحة';return 'HTTP '+r.status;}
-function getJSON(url){return fetch(url,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json();});}
-const API={
- state:()=>getJSON('/api/state?_='+Date.now()),
- equity:(range='1d')=>getJSON('/api/equity?range='+encodeURIComponent(range)+'&_='+Date.now()),
- post:(url,body)=>fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify(body)}).then(r=>r.json().catch(()=>({})).then(j=>{if(!r.ok)throw new Error(errText(j,r));return j;})),
- scanNow:()=>fetch('/check',{cache:'no-store',credentials:'same-origin'}).then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);toast('بدأ فحص السوق في الخلفية');setTimeout(refresh,2500);}).catch(()=>toast('تعذّر بدء الفحص'))
-};
-function act(p,ok){return p.then(j=>{toast(ok);refresh();return j;}).catch(e=>{toast('خطأ: '+e.message);});}
-function refresh(){return API.state().then(d=>{S=d;renderAll();}).catch(()=>{});}
-/* ===== motion: spring easing via linear(), every animation registered so frames can be seeked ===== */
-const RM=matchMedia('(prefers-reduced-motion:reduce)').matches;
-function springEase(st=170,dm=18,n=60){let x=0,v=0,pts=[],dt=1/n*1.1;for(let i=0;i<=n;i++){pts.push(+(x).toFixed(4));const f=-st*(x-1)-dm*v;v+=f*dt/ (1);x+=v*dt;}pts[n]=1;return 'linear('+pts.join(',')+')';}
-const SPRING=springEase(),SPRING2=springEase(260,22);
-let NOW=0;const ANIMS=[];
-function A(el,kf,o){if(RM)return null;const a=el.animate(kf,Object.assign({fill:'both'},o));ANIMS.push({a,s:NOW});return a;}
-/* ===== helpers ===== */
-const $=s=>document.querySelector(s);
-const f2=(n,d=2)=>n==null||isNaN(n)?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
-const sg=n=>(n>=0?'+':'')+f2(n);
-const N=h=>`<span class="num">${h}</span>`;
-const tm=iso=>{if(!iso)return'—';const d=new Date(iso);return d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Riyadh'})};
-const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function toast(m){const t=document.createElement('div');t.textContent=m;t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1F2228;color:#fff;padding:12px 22px;border-radius:999px;font:600 14px Cairo;z-index:100';document.body.appendChild(t);setTimeout(()=>t.remove(),2200);}
-function spark(vals,color='#10B981'){if(!vals||vals.length<2)vals=[0,0];const mn=Math.min(...vals),mx=Math.max(...vals),r=mx-mn||1,w=110,h=42;
- const p=vals.map((v,i)=>[i/(vals.length-1)*w,h-4-(v-mn)/r*(h-8)]);const d='M'+p.map(q=>q.map(z=>z.toFixed(1)).join(',')).join('L');const id='s'+Math.random().toString(36).slice(2,7);
- return `<svg class="spark" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".25"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs><path d="${d}L${w},${h}L0,${h}Z" fill="url(#${id})"/><path d="${d}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;}
-function outcomeCls(o,st){const s=(o||'')+' '+(st||'');if(/نُفّذ|نفذ|منفّذ|منفذ|تم التنفيذ|filled|executed|مُرسل/i.test(s)&&!/لم يُرسل/.test(s))return'g';if(/مرفوض|رفض|reject|فشل/i.test(s))return'rd';if(/تجميد|مجمد|تسوية|reconcile|frozen|معلّق/i.test(s))return'y';return'gr';}
-function sigPill(s){return s==='long'?'<span class="chip g">Long ▲</span>':s==='short'?'<span class="chip rd">Short ▼</span>':'<span class="chip gr">لا إشارة</span>';}
-const isFut=s=>/:USDT/.test(s||'');
-const ICONS=new Set('ADA AVAX BCH BNB BTC DOGE DOT ETH LINK LTC META NEAR NVDA SOL SPCX SPCXB TRX TSLA USDT XAU XRP'.split(' '));
-const baseSym=s=>String(s||'').split('/')[0].toUpperCase();
-const icoImg=s=>{const b=baseSym(s);return ICONS.has(b)?`<img src="/icons/${b}.svg" alt="${esc(b)}" loading="lazy">`:''};
-const coin=s=>{const b=baseSym(s),i=icoImg(s);return `<span class="coin">${i||esc(b.slice(0,3))}</span>`};const sym=s=>(s||'').replace(':USDT','');
-/* ===== render ===== */
-let S,EQ;
-function homeHTML(){
- const w=S.wallet||{},fu=S.futures||{},st=S.stats||{};{const _d=S.daily_risk||{};const mk=(o,eq)=>Object.assign({baseline:eq||0,equity:eq||0,loss_pct:0,limit_pct:0},o||{});S.daily_risk={spot:mk(_d.spot,w.total),futures:mk(_d.futures,fu.balance)};if(!S.daily_risk.spot.baseline)S.daily_risk.spot.baseline=S.daily_risk.spot.equity||1;}const dr=S.daily_risk;const total=(w.total||0)+(fu.balance||0);const base=(dr.spot.baseline||0)+(dr.futures.baseline||0);
- const dPct=base?(dr.spot.equity+dr.futures.equity-base)/base*100:0;const dUsd=dr.spot.equity+dr.futures.equity-base;
- const exp=Math.min(100,Math.max(0,st.exposure||0));const lossUsed=Math.max(dr.spot.loss_pct||0,dr.futures.loss_pct||0)/(dr.spot.limit_pct||9);const L=Math.PI*120,frac=Math.min(.99,Math.max(.04,1-lossUsed));
- const ang=Math.PI*(1-frac),cx=150+120*Math.cos(ang),cy=150-120*Math.sin(ang);
- const ev=EQ.map(p=>p.v);const fcum=[];let c=0;S.trades.filter(t=>isFut(t.symbol)).slice().reverse().forEach(t=>{c+=t.pnl_usdt||0;fcum.push(c)});
- const wr=[];let wn=0,tt=0;S.trades.slice().reverse().forEach(t=>{tt++;if(t.status==='WIN')wn++;wr.push(wn/tt*100)});
- const fwr=fu.closed?fu.wins/fu.closed*100:0;
- // hourly equity change bars
- const bk={};EQ.forEach(p=>{const h=new Date(p.t*1000).toLocaleTimeString('en-GB',{hour:'2-digit',timeZone:'Asia/Riyadh'});(bk[h]=bk[h]||[]).push(p.v)});
- const bars=Object.entries(bk).map(([h,v])=>[h,v[v.length-1]-v[0]]).slice(-10);const bm=Math.max(...bars.map(b=>Math.abs(b[1])),.01);
- const mk=S.markets.slice().sort((a,b)=>(b.signal_strength||0)-(a.signal_strength||0)).slice(0,27);
- const dot=m=>{const s=m.signal_strength||0;const a=.15+s/100*.85;return `<div title="${esc(m.symbol)} · ${f2(s,1)}" style="background:rgba(255,94,58,${a.toFixed(2)});${m.in_position?'box-shadow:0 0 0 3px #fff,0 0 0 5px #F2385A;':''}">${icoImg(m.symbol)||esc(baseSym(m.symbol).slice(0,4))}</div>`};
- const decs=S.decisions.slice(0,5);
- return `
- <div class="card c5 r2 gauge"><div class="ttl" style="width:100%"><span>إجمالي المحفظة (Spot + Futures)</span><span class="chip">${S.env==='demo'?'تجريبي':'حقيقي'}</span></div>
-  <svg viewBox="0 0 300 175"><defs><linearGradient id="gg" x1="0" x2="1"><stop offset="0" stop-color="#FF9A4D"/><stop offset="1" stop-color="#F2385A"/></linearGradient></defs>
-  <path d="M30 150A120 120 0 0 1 270 150" fill="none" stroke="#F1F2F4" stroke-width="20" stroke-linecap="round"/>
-  <path class="arc" d="M30 150A120 120 0 0 1 270 150" fill="none" stroke="url(#gg)" stroke-width="20" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${L*(1-frac)}"/>
-  <circle class="gdot" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="9" fill="#F2385A" stroke="#fff" stroke-width="4"/></svg>
-  <div style="margin-top:-78px" class="big">${N('$'+f2(total))}</div>
-  <div class="${dPct>=0?'up':'dn'}">${N(sg(dPct)+'%')} اليوم · ${N(sg(dUsd)+'$')}</div>
-  <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;justify-content:center"><span class="chip">ميزانية المخاطر المتبقية ${N(f2(frac*100,0)+'%')}</span><span class="chip">التعرض ${N(f2(exp,1)+'%')}</span><span class="chip">صفقات نشطة ${N(S.settings.active_trades)}</span><span class="chip">غير محقق ${N(sg(st.unrealized))}</span></div>
- </div>
- <div class="card c4 stat"><div class="ttl">رصيد Spot <span class="chip">${S.balance_status==='fresh'?'محدّث':'قديم'}</span></div><div class="row"><div><div class="big">${N(f2(w.total))}</div><div class="${dr.spot.equity>=dr.spot.baseline?'up':'dn'}">${N(sg((dr.spot.equity-dr.spot.baseline)/dr.spot.baseline*100)+'%')}</div></div>${spark(ev,dr.spot.equity>=dr.spot.baseline?'#10B981':'#EF4444')}</div></div>
- <div class="card c3 gradcard cta"><div class="ttl">إجراء سريع</div><h3>فحص السوق<br>الآن</h3><button class="arrow" onclick="API.scanNow()" aria-label="فحص"><svg width="20" height="20" fill="none" stroke="#F2385A" stroke-width="2.5" stroke-linecap="round"><path d="M15 10H5m4-4-4 4 4 4"/></svg></button></div>
- <div class="card c4 stat"><div class="ttl">رصيد Futures <span class="chip">${fu.open_positions} مراكز</span></div><div class="row"><div><div class="big">${N(f2(fu.balance))}</div><div class="${fu.realized_pnl>=0?'up':'dn'}">${N(sg(fu.realized_pnl)+'$')} محقق</div></div>${spark(fcum)}</div></div>
- <div class="card c3 stat"><div class="ttl">نسبة الفوز</div><div class="big">${N(f2(st.win_rate,0)+'%')}</div><div class="row"><small style="color:var(--mute)">Spot ${N(st.wins+'/'+st.total)} · Futures ${N(fu.wins+'/'+fu.closed)}</small>${spark(wr)}</div></div>
- <div class="card c7"><div class="ttl">خريطة الأسواق <span class="chip">${S.markets.length} رمز · حسب قوة الإشارة</span></div><div class="map">${mk.map(dot).join('')}</div>
-  <div class="legend"><span>● ضعيفة</span><span style="color:#F2385A">● قوية</span><span>◎ مركز مفتوح</span></div></div>
- <div class="card c5"><div class="ttl">تغيّر المحفظة بالساعة <span class="chip">USDT</span></div><div class="bars">${bars.map(([h,v])=>`<div class="b"><i class="${v<0?'neg':''}" style="height:${Math.max(4,Math.abs(v)/bm*130)}px"></i><small>${h}</small></div>`).join('')}</div></div>
- <div class="card c12"><div class="ttl">آخر القرارات <a href="#" onclick="go('dec');return false" class="chip dk" style="text-decoration:none">عرض الكل</a></div>
-  <div class="tblwrap"><table><tbody>${decs.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td class="sym">${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td class="reason">${esc(d.reason)}</td></tr>`).join('')}</tbody></table></div></div>
- <div class="card c12"><div class="wide"><div><div class="ttl">سجل الفحص</div><div class="list">${S.events.slice(0,7).map(e=>`<div class="li"><span class="t">${N(e.t)}</span><span class="chip">${esc(e.tag)}</span><span class="x" title="${esc(e.text)}">${esc(e.text)}</span></div>`).join('')}</div></div>
-  <div class="dark"><div style="font-size:18px;font-weight:800">حالة البوت</div>
-   <div class="kv"><span>التداول</span><b class="live">${entriesOn()?'يعمل':'متوقف'}${S.trading_enabled?'':' · محاكاة'}</b></div>
-   <div class="kv"><span>الفاحص</span><b>${S.scanner.status==='idle'?'خامل':S.scanner.status==='running'?'يفحص الآن':esc(S.scanner.status)}</b></div>
-   <div class="kv"><span>آخر فحص</span><b>${N(tm(S.scanner.last_completed_at))}</b></div>
-   <div class="kv"><span>مدة الفحص</span><b>${N(f2(S.scanner.duration_seconds,1)+'s')}</b></div>
-   <div class="kv"><span>Telegram</span><b>${S.telegram?'متصل':'غير متصل'}</b></div>
-   <button class="wbtn" id="tradeBtn" onclick="toggleTrading()">${entriesOn()?'إيقاف التداول':'تشغيل التداول'}</button></div></div></div>`;}
-function summary(cards){return `<div class="sum">${cards.map((c,i)=>`<div class="card ${i==0?'gradcard':''}"><div class="ttl">${c[0]}</div><div class="big">${N(c[1])}</div><div style="margin-top:4px;${i==0?'':'color:var(--mute)'}">${c[2]}</div></div>`).join('')}</div>`;}
-function tradeRows(pos,trs){
- return pos.map(p=>`<tr><td class="sym">${coin(p.symbol)}${esc(sym(p.symbol))}</td><td>${isFut(p.symbol)?'Futures':'Spot'}</td><td>${N(f2(p.entry,4))}</td><td>${N(f2(p.price,4))}</td><td class="${p.pnl_usdt>=0?'up':'dn'}">${N(sg(p.pnl_usdt))}</td><td><span class="chip y">مفتوح</span></td><td><span class="chip ${/نشط/.test(p.protection_status)?'g':'y'}">${esc(p.protection_status||'—')}</span></td><td style="color:var(--mute)">${N(esc((p.time||'').slice(5,16)))}</td></tr>`).join('')+
- trs.map(t=>`<tr><td class="sym">${coin(t.symbol)}${esc(sym(t.symbol))} ${t.side?`<span class="chip">${t.side}</span>`:''}</td><td>${esc(t.market_type||'Spot')}</td><td>${N(f2(t.entry,4))}</td><td>${N(f2(t.exit,4))}</td><td class="${t.pnl_usdt>=0?'up':'dn'}">${N(sg(t.pnl_usdt))}</td><td><span class="chip ${t.status==='WIN'?'g':'rd'}">${t.status==='WIN'?'رابح':'خاسر'}</span></td><td style="color:var(--mute)">رسوم ${N(f2((t.fees_usdt||0)+(t.funding_usdt||0)))}</td><td style="color:var(--mute)">${N(esc((t.time||'').slice(5,16)))}</td></tr>`).join('');}
-const TH='<thead><tr><th>الرمز</th><th>السوق</th><th>الدخول</th><th>السعر/الخروج</th><th>الربح $</th><th>الحالة</th><th>الحماية / الرسوم</th><th>الوقت</th></tr></thead>';
-function tradesHTML(){const fees=S.trades.reduce((a,t)=>a+(t.fees_usdt||0)+(t.funding_usdt||0),0);
- return `<h1>الصفقات</h1><p class="sub">المراكز المفتوحة والصفقات المغلقة في Spot و Futures</p>`+summary([['الربح المحقق','$'+f2((S.stats.realized_total||0)+(S.futures.realized_pnl||0)),'Spot '+sg(S.stats.realized_total)+' · Futures '+sg(S.futures.realized_pnl)],['قيمة المراكز المفتوحة','$'+f2(S.wallet.positions_value),S.positions.length+' مركز مفتوح'],['الرسوم والتمويل','$'+f2(fees),'آخر '+S.trades.length+' صفقات مغلقة']])+
- `<div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(S.positions,S.trades.slice(0,Math.max(0,LIM.trades-S.positions.length)))}</tbody></table></div>${moreBtn('trades',S.positions.length+S.trades.length,15)}</div>`;}
-function futHTML(){const fu=S.futures;const pos=S.positions.filter(p=>isFut(p.symbol)),trs=S.trades.filter(t=>isFut(t.symbol));
- return `<h1>Futures</h1><p class="sub">${fu.environment==='demo'?'حساب تجريبي':'حساب حقيقي'} · ${fu.connected?'متصل':'غير متصل'} · ${fu.trading_enabled?'التداول مفعّل':'التداول متوقف'}</p>`+summary([['الرصيد','$'+f2(fu.balance),'متاح $'+f2(fu.free_balance)],['الربح المحقق','$'+f2(fu.realized_pnl),fu.wins+' رابح · '+fu.losses+' خاسر'],['المخاطر اليومية',f2((fu.daily_risk||{}).loss_pct||0)+'%','الحد '+((fu.daily_risk||{}).limit_pct??'—')+'% · '+esc((fu.daily_risk||{}).reason)]])+
- `<div class="card" style="margin-bottom:18px"><div class="kvs"><div><small>الحماية</small><b>${fu.protection_degraded?'<span class="chip y">غير مكتملة</span>':'<span class="chip g">كاملة</span>'}</b></div><div><small>اتفاقية TradFi</small><b>${fu.tradfi_agreement_signed?'موقّعة':'غير موقّعة'}</b></div><div><small>الرموز</small><b>${N(fu.symbols.length)}</b></div><div><small>غير متاحة</small><b>${N(fu.unavailable_symbols.length)}</b></div></div></div>
- <div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(pos,trs)}</tbody></table></div></div>`+allocHTML('futures')+spotBlockedHTML();}
-function allocHTML(m){const A=S.allocator||{},c=A.config||{},a=A[m]||null;
- if(!c.enabled)return `<div class="card" style="margin-top:18px"><b>مخصص رأس المال</b> <span class="chip gr">متوقف</span> <small style="color:var(--mute)">· الحجم الحالي من مبلغ الصفقة/النسبة الثابتة وعدد الصفقات. للتفعيل: CAPITAL_ALLOCATOR_ENABLED=true</small></div>`;
- if(!a)return '';const pct=a.budget?Math.min(100,a.used/a.budget*100):0;
- return `<div class="card" style="margin-top:18px"><b>مخصص رأس المال</b> <span class="chip g">مفعّل</span> <small style="color:var(--mute)">· ${N(a.allocation_pct+'%')} للتداول والباقي احتياطي · لا حد لعدد الصفقات · لا إضافة لمركز مفتوح</small>
- <div class="kvs" style="margin-top:10px"><div><small>الميزانية</small><b>${N('$'+f2(a.budget))}</b></div><div><small>المستخدم</small><b>${N('$'+f2(a.used)+' ('+f2(pct,0)+'%)')}</b></div><div><small>المتبقي</small><b>${N('$'+f2(a.remaining))}</b></div><div><small>الاحتياطي</small><b>${N('$'+f2(a.reserve))}</b></div><div><small>المخاطرة المفتوحة</small><b>${N(f2(a.open_risk_pct,2)+'% / '+a.max_open_risk_pct+'%')}</b></div><div><small>المراكز</small><b>${N(a.positions)}</b></div></div></div>`;}
-function spotBlockedHTML(){const r=S.spot_rules||{},b=r.blocked_by||{},L=r.blocked_by_labels||{},ks=Object.keys(b);
- return `<div class="card" style="margin-top:18px"><b>أسباب رفض دخول Spot</b> <small style="color:var(--mute)">· الاتجاه ${r.trend_enabled?'مفعّل':'موقوف'} · حارس الوقف ${r.stop_watchdog?'مفعّل':'متوقف'} · حد الوقف ${N((r.trend_max_stop_pct??'—')+'%')}</small><div class="tblwrap"><table><thead><tr><th>القاعدة</th><th>عدد مرات الرفض</th></tr></thead><tbody>${ks.length?ks.map(k=>`<tr><td>${esc(L[k]||k)} <small style="color:var(--mute)" dir="ltr">${esc(k)}</small></td><td>${N(b[k])}</td></tr>`).join(''):'<tr><td colspan="2" style="color:var(--mute)">لا توجد حالات رفض مسجلة بعد</td></tr>'}</tbody></table></div></div>`;}
-function spotHTML(){const w=S.wallet||{},st=S.stats||{},dr=((S.daily_risk||{}).spot)||{},en=S.entries_enabled||{},se=S.settings||{};
- const pos=(S.positions||[]).filter(p=>!isFut(p.symbol)),trs=(S.trades||[]).filter(t=>!isFut(t.symbol));const mk=(S.markets||[]).filter(m=>!isFut(m.symbol));
- return `<h1>Spot</h1><p class="sub">${S.env==='demo'?'حساب تجريبي':'حساب حقيقي'} · ${en.spot===false?'الدخول متوقف':'التداول مفعّل'} · ${N((se.spot_active_trades??pos.length)+' / '+(se.spot_max_concurrent_trades??'—'))} صفقات نشطة</p>`+summary([['الرصيد','$'+f2(w.total),'نقد $'+f2(w.cash)+' · متاح $'+f2(w.free)],['الربح المحقق','$'+f2(st.realized_total),N((st.wins??0)+' رابح · '+(st.losses??0)+' خاسر')+' · غير محقق '+N(sg(st.unrealized||0))],['المخاطر اليومية',f2(dr.loss_pct||0)+'%','الحد '+(dr.limit_pct??'—')+'% · '+esc(dr.reason||'')]])+
- `<div class="card" style="margin-bottom:18px"><div class="kvs"><div><small>قيمة المراكز</small><b>${N('$'+f2(w.positions_value))}</b></div><div><small>التعرض</small><b>${N(f2(st.exposure||0,1)+'%')}</b></div><div><small>الرموز</small><b>${N(mk.length)}</b></div><div><small>نسبة الفوز</small><b>${N(f2(st.win_rate||0,0)+'%')}</b></div></div></div>
- <div class="card"><div class="tblwrap"><table>${TH}<tbody>${tradeRows(pos,trs)}</tbody></table></div></div>`+allocHTML('spot')+spotBlockedHTML();}
-function spotBlockedHTML(){const r=S.spot_rules||{},b=r.blocked_by||{},L=r.blocked_by_labels||{},ks=Object.keys(b);
- return `<div class="card" style="margin-top:18px"><b>أسباب رفض دخول Spot</b> <small style="color:var(--mute)">· الاتجاه ${r.trend_enabled?'مفعّل':'موقوف'} · حارس الوقف ${r.stop_watchdog?'مفعّل':'متوقف'} · حد الوقف ${N((r.trend_max_stop_pct??'—')+'%')}</small><div class="tblwrap"><table><thead><tr><th>القاعدة</th><th>عدد مرات الرفض</th></tr></thead><tbody>${ks.length?ks.map(k=>`<tr><td>${esc(L[k]||k)} <small style="color:var(--mute)" dir="ltr">${esc(k)}</small></td><td>${N(b[k])}</td></tr>`).join(''):'<tr><td colspan="2" style="color:var(--mute)">لا توجد حالات رفض مسجلة بعد</td></tr>'}</tbody></table></div></div>`;}
-let SS=null,SSF='all';const STRAT_AR={trend_pullback:'ارتداد مع الاتجاه',donchian_breakout:'اختراق دونشيان',trend:'الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'الزخم الهجين',donchian_trend:'دونشيان',volume_profile_range:'نطاق الحجم',unknown:'غير معروفة'};
-function stratHTML(){const p=S.params||{},on=new Set((p.strategies||[]).map(String));const rows=((SS&&SS.strategies)||[]).filter(r=>r&&(SSF=='all'||r.market==SSF));
- const names=new Set(rows.map(r=>r.strategy));if(SSF!='fut'&&SSF!='futures')[...on].forEach(n=>{if(!names.has(n)&&SSF=='all')rows.push({market:'—',strategy:n,trades:0});});
- const tot=rows.reduce((a,r)=>a+(r.trades||0),0),net=rows.reduce((a,r)=>a+(r.net_pnl_usdt||0),0),wins=rows.reduce((a,r)=>a+(r.wins||0),0);
- const fl=[['all','الكل'],['spot','Spot'],['futures','Futures']];
- return `<h1>الاستراتيجيات</h1><p class="sub">أداء كل استراتيجية بعد الرسوم · ${esc((SS&&SS.note)||'')}</p>`+summary([['صافي الربح','$'+f2(net),N(tot)+' صفقة مغلقة'],['نسبة الفوز',f2(tot?wins/tot*100:0,0)+'%',N(wins+' / '+tot)],['المفعّلة',on.size,esc([...on].map(n=>STRAT_AR[n]||n).join('، ')||'—')]])+
- `<div class="card"><div class="filters">${fl.map(([k,l])=>`<button class="fp ${SSF==k?'on':''}" onclick="SSF='${k}';$('#v-strat').innerHTML=stratHTML()">${l}</button>`).join('')}</div>
- <div class="tblwrap"><table><thead><tr><th>الاستراتيجية</th><th>السوق</th><th>الحالة</th><th>الصفقات</th><th>نسبة الفوز</th><th>صافي الربح $</th><th>متوسط الصفقة $</th><th>معامل الربح</th><th>متوسط R</th><th>الرسوم $</th></tr></thead><tbody>${
- SS==null?'<tr><td colspan="10" style="color:var(--mute)">جارٍ التحميل…</td></tr>':rows.length?rows.map(r=>`<tr><td><b>${esc(STRAT_AR[r.strategy]||r.strategy)}</b><br><small style="color:var(--mute)" dir="ltr">${esc(r.strategy)}</small></td><td><span class="chip">${r.market=='futures'?'Futures':r.market=='spot'?'Spot':'—'}</span></td><td><span class="chip ${on.has(r.strategy)?'g':'gr'}">${on.has(r.strategy)?'مفعّلة':r.strategy=='unknown'?'—':'غير مدرجة'}</span></td><td>${N(r.trades||0)}${r.sample_warning?' <span class="chip y" title="أقل من 30 صفقة">عينة صغيرة</span>':''}</td><td>${r.trades?N(f2(r.win_rate_pct,0)+'%'):'—'}</td><td class="${(r.net_pnl_usdt||0)>=0?'up':'dn'}">${r.trades?N(sg(r.net_pnl_usdt||0)):'—'}</td><td>${r.trades?N(sg(r.avg_net_usdt||0)):'—'}</td><td>${N(r.profit_factor==null?'—':f2(r.profit_factor))}</td><td>${N(r.expectancy_r==null?'—':f2(r.expectancy_r)+'R')}</td><td>${N(r.trades?f2(r.fees_usdt||0):'—')}</td></tr>`).join(''):'<tr><td colspan="10" style="color:var(--mute)">لا توجد صفقات مغلقة بعد</td></tr>'}</tbody></table></div></div>`;}
-function loadSS(){return getJSON('/api/strategy-stats?_='+Date.now()).then(j=>{SS=j&&typeof j==='object'?j:{strategies:[]};}).catch(()=>{SS=SS||{strategies:[],note:'تعذّر تحميل الإحصائيات'};}).then(()=>{const v=$('#v-strat');if(v&&S)v.innerHTML=stratHTML();});}
-let RL=null;const RL_ACT={skip:'تخطي',half:'نصف الحجم',full:'الحجم الكامل'};const RL_ST={pending:'لم تُفتح',opened:'مفتوحة',closed:'مغلقة',superseded:'مستبدلة'};
-function rlCtx(c){const a=String(c||'').split('|');const st=STRAT_AR[a[1]]||a[1]||'—';const vol={'vol:low':'تذبذب منخفض','vol:mid':'تذبذب متوسط','vol:high':'تذبذب عالٍ','vol:na':'—'}[a[4]]||'';return `<span class="chip">${a[0]=='futures'?'Futures':'Spot'}</span> <b>${esc(st)}</b> · ${a[2]=='short'?'Short':'Long'}${a[3]?' · '+esc(a[3]):''}${vol?' · '+vol:''}`;}
-function rlHTML(){const r=RL||{};const arms=Array.isArray(r.arms)?r.arms:[];const cmp=r.comparison||{};const rec=Array.isArray(r.recent)?r.recent:[];const ms=r.min_samples||30;
- const modeCls=r.mode=='live'?'g':r.mode=='shadow'?'y':'gr';const rr=v=>v==null||isNaN(v)?'—':(v>=0?'+':'')+f2(v)+'R';
- return `<h1>التعلم المعزز</h1><p class="sub">طبقة تتعلّم من نتيجة كل صفقة مغلقة (بالـ R بعد الرسوم) وتقرّر: تخطي، نصف الحجم، أو الحجم الكامل. لا ترفع الحجم أبدًا فوق قواعد المخاطرة. ${r.error?'· تعذّر التحميل':''}</p>`+
- summary([['الوضع',`<span class="chip ${modeCls}">${esc(r.mode_label||r.mode||'—')}</span>`,'يعمل فعليًا بعد '+N(ms)+' صفقة لكل سياق'],['صفقات تعلّم منها',N(cmp.closed_trades||0),N(arms.filter(a=>a.level=='context').length)+' سياق'],['R الفعلي',rr(cmp.actual_r),'مقابل '+rr(cmp.baseline_r)+' بدون التعلم'],['R لو طُبّق التعلم',rr(cmp.rl_r),N(cmp.rl_would_skip||0)+' صفقة كان سيتخطاها']])+
- `<div class="card"><div class="ttl">السياقات (الأذرع)</div><div class="tblwrap"><table><thead><tr><th>السياق</th><th>العينات</th><th>متوسط R</th><th>R المتوقع</th><th>احتمال الربح</th><th>القرار المفضّل</th><th>الجاهزية</th></tr></thead><tbody>${
- RL==null?'<tr><td colspan="7" style="color:var(--mute)">جارٍ التحميل…</td></tr>':arms.length?arms.map(a=>`<tr><td>${rlCtx(a.context)}${a.level=='parent'?' <small style="color:var(--mute)">(مجمّع)</small>':''}</td><td>${N(a.samples||0)}</td><td class="${(a.avg_r||0)>=0?'up':'dn'}">${N(rr(a.avg_r))}</td><td class="${(a.expected_r||0)>=0?'up':'dn'}">${N(rr(a.expected_r))} <small style="color:var(--mute)">±${N(f2(a.uncertainty||0))}</small></td><td>${N(f2((a.prob_positive||0)*100,0)+'%')}</td><td><span class="chip ${a.preferred_action=='full'?'g':a.preferred_action=='half'?'y':'r'}">${RL_ACT[a.preferred_action]||'—'}</span></td><td><span class="chip ${a.ready?'g':'gr'}">${a.ready?'جاهز':N((a.samples||0)+' / '+ms)}</span></td></tr>`).join(''):'<tr><td colspan="7" style="color:var(--mute)">لم يتعلّم من أي صفقة بعد. فعّل RL_MODE=shadow ليبدأ التعلّم بدون تغيير التداول.</td></tr>'}</tbody></table></div></div>`+
- `<div class="card"><div class="ttl">آخر قرارات التعلم المعزز</div><div class="tblwrap"><table><thead><tr><th>الوقت</th><th>الزوج</th><th>السياق</th><th>القرار</th><th>المطبّق</th><th>R المتوقع</th><th>الحالة</th><th>R الفعلي</th></tr></thead><tbody>${
- rec.length?rec.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td class="sym">${coin(d.symbol)}${esc(sym(d.symbol))}</td><td>${rlCtx(d.context)}</td><td><span class="chip ${d.action=='full'?'g':d.action=='half'?'y':'r'}">${RL_ACT[d.action]||'—'}</span></td><td>${N('×'+f2(d.applied_multiplier==null?1:d.applied_multiplier,1))}</td><td>${N(rr(d.expected_r))}</td><td>${esc(RL_ST[d.status]||d.status||'—')}</td><td class="${(d.r_multiple||0)>=0?'up':'dn'}">${N(rr(d.r_multiple))}</td></tr>`).join(''):'<tr><td colspan="8" style="color:var(--mute)">لا توجد قرارات بعد</td></tr>'}</tbody></table></div></div>`;}
-function loadRL(){return getJSON('/api/rl?_='+Date.now()).then(j=>{RL=j&&typeof j==='object'?j:{};}).catch(()=>{RL=RL||{error:true,arms:[],recent:[],comparison:{}};}).then(()=>{const v=$('#v-rl');if(v&&S)v.innerHTML=rlHTML();});}
-let DF='all',DQ='';
-function decHTML(){const today=new Date().toISOString().slice(0,10);const all=S.decisions;const td=all.filter(d=>(d.created_at||'').startsWith(today)).length||all.length;
- const ex=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='g').length,rj=all.filter(d=>outcomeCls(d.outcome,d.order_status)==='rd').length;
- const fl=[['all','الكل'],['spot','Spot'],['fut','Futures'],['ex','منفّذ'],['rj','مرفوض']];
- return `<h1>قرارات البوت</h1><p class="sub">كل قرار اتخذه البوت في آخر فحص: الإشارة، النتيجة، والسبب</p>`+summary([['قرارات اليوم',td,'آخر فحص '+tm(S.scanner.last_completed_at)],['منفّذة',ex,'أوامر أُرسلت إلى Binance'],['مرفوضة',rj,'رفضتها ضوابط المخاطر']])+
- `<div class="card"><div class="filters">${fl.map(([k,l])=>`<button class="fp ${DF==k?'on':''}" onclick="DF='${k}';renderDec()">${l}</button>`).join('')}<input class="search" id="dq" placeholder="ابحث برمز العملة… مثل BTC" value="${esc(DQ)}" oninput="DQ=this.value;renderDecRows()"></div>
- <div class="tblwrap"><table><thead><tr><th>الوقت</th><th>السوق</th><th>الرمز</th><th>الإشارة</th><th>الاستراتيجية</th><th>الإطار</th><th>السعر</th><th>النتيجة</th><th>الأمر</th><th>السبب</th></tr></thead><tbody id="decRows"></tbody></table></div><div id="decMore"></div></div>`;}
-function renderDecRows(){const q=DQ.trim().toUpperCase();const rows=S.decisions.filter(d=>{const c=outcomeCls(d.outcome,d.order_status);
- if(DF=='spot'&&/Futures/i.test(d.market))return false;if(DF=='fut'&&!/Futures/i.test(d.market))return false;if(DF=='ex'&&c!='g')return false;if(DF=='rj'&&c!='rd')return false;return !q||(d.symbol||'').toUpperCase().includes(q);});const total=rows.length;rows.splice(LIM.dec);$('#decMore').innerHTML=moreBtn('dec',total,25);
- $('#decRows').innerHTML=rows.map(d=>`<tr><td style="color:var(--mute)">${N(tm(d.created_at))}</td><td><span class="chip">${/Futures/i.test(d.market)?'Futures':'Spot'}</span></td><td class="sym">${coin(d.symbol)}${esc(sym(d.symbol))}</td><td>${sigPill(d.signal)}</td><td>${esc(d.strategy)}</td><td>${N(esc(d.timeframe))}</td><td>${N(f2(d.price,4))}</td><td><span class="chip ${outcomeCls(d.outcome,d.order_status)}">${esc(d.outcome)}</span></td><td><span class="chip gr">${esc(d.order_status)}</span></td><td class="reason">${esc(d.reason)}${(d.api_message_ar||d.api_message)?`<br><small style="color:#DC3B3B">${esc(d.api_message_ar||d.api_message)}</small>`:''}</td></tr>`).join('')||'<tr><td colspan="10" style="text-align:center;color:var(--mute)">لا توجد قرارات مطابقة</td></tr>';}
-function renderDec(){$('#v-dec').innerHTML=decHTML();renderDecRows();}
-function newsHTML(){const n=S.news;const sev=n.severity||0;
- return `<h1>الأخبار</h1><p class="sub">فلتر الأخبار يوقف الدخول عند الأخبار الخطرة</p>`+summary([['الحالة',n.blocked?'إيقاف مؤقت':'مسموح',esc(n.reason)],['الخطورة',sev+' / 10','عتبة الإيقاف '+S.params.news_severity],['المصدر',esc(n.source||'—'),'آخر فحص '+esc(n.checked_at||'—')]])+
- `<div class="card">${(n.headlines||[]).map(h=>`<div class="hl"><span class="chip">${esc(h.source)}</span><span dir="${h.title_ar?'rtl':'ltr'}" style="flex:1">${esc(h.title_ar||h.title)}</span></div>`).join('')}</div>`+massiveHTML()+finnhubHTML();}
-function massiveHTML(){const m=S.massive||{};if(!m.has_key)return `<div class="card"><div class="ttl">Massive</div><p class="sub">غير مفعّل (لا يوجد مفتاح MASSIVE_API_KEY)</p></div>`;const st=m.settings||{},mk=m.market||{},tr=m.trend||{},nw=m.news||{},up=m.upcoming||[],errs=Object.entries(m.errors||{});const col=mk.market==='open'?'var(--up,#3ddc97)':'var(--down,#ff6b6b)';const sa={positive:'إيجابي',negative:'سلبي',neutral:'محايد'};
- return `<div class="card"><div class="ttl">Massive — السوق الأمريكي والأسهم الأساسية</div><p class="sub">${m.enabled?'مفعّل':'متوقف'} · آخر جلب ${esc(m.last_fetch||'—')} · حالة السوق: <b style="color:${col}">${esc(m.market_ar||'—')}</b> · حارس ساعات السوق ${st.market_hours_guard?'مفعّل':'متوقف'} · تأكيد اتجاه السهم ${st.underlying_confirm?'مفعّل':'متوقف'}</p>`+
- `<div class="ttl" style="margin-top:8px">اتجاه السهم مقابل متوسط ${N(st.sma_days??50)} يوم</div>`+(Object.keys(tr).length?Object.entries(tr).map(([k,t])=>`<div class="hl"><span class="chip">${esc(k)}</span><span style="flex:1">${t&&t.above?'فوق المتوسط ▲':'تحت المتوسط ▼'} · ${N(t?.close??"—")} / ${N(t?.sma??"—")} (${N(t?.dist_pct??"—")}%)</span></div>`).join(''):`<p class="sub">لا توجد بيانات بعد</p>`)+
- `<div class="ttl" style="margin-top:8px">عطلات قادمة</div>`+(up.length?up.slice(0,4).map(u=>`<div class="hl"><span class="chip">${esc(u.date)}</span><span dir="ltr" style="flex:1">${esc(u.name)} · ${u.status==='closed'?'مغلق':'إغلاق مبكر'}</span></div>`).join(''):`<p class="sub">لا توجد</p>`)+
- `<div class="ttl" style="margin-top:8px">أخبار الأسهم</div>`+(Object.entries(nw).flatMap(([k,a])=>(a||[]).slice(0,2).map(n=>`<div class="hl"><span class="chip">${esc(k)}</span>${n&&n.sentiment?`<span class="chip">${esc(sa[n.sentiment]||n.sentiment)}</span>`:''}<span dir="ltr" style="flex:1">${esc(n&&n.title)}</span></div>`)).join('')||`<p class="sub">لا توجد أخبار</p>`)+
- (errs.length?`<p class="sub">ملاحظات: ${errs.map(([k,v])=>esc(k+': '+v)).join(' · ')}</p>`:'')+`</div>`;}
-function finnhubHTML(){const f=S.finnhub||{};if(!f.has_key)return `<div class="card"><div class="ttl">Finnhub</div><p class="sub">غير مفعّل (لا يوجد مفتاح FINNHUB_API_KEY)</p></div>`;const ev=f.upcoming_events||[],er=f.upcoming_earnings||[],st=f.settings||{},errs=Object.entries(f.errors||{});
- return `<div class="card"><div class="ttl">Finnhub — التقويم الاقتصادي وأرباح الأسهم</div><p class="sub">${f.enabled?'مفعّل':'متوقف'} · آخر جلب ${esc(f.last_fetch||'—')} · أخبار ${N(f.news_count||0)} · إيقاف حول الأحداث ±${N(st.event_pause_min??'—')} دقيقة · حظر الأرباح ±${N(st.earnings_block_h??'—')} ساعة</p>`+
- `<div class="ttl" style="margin-top:8px">الأحداث الاقتصادية الأمريكية القادمة</div>`+(f.economic_available===false?`<p class="sub">التقويم الاقتصادي غير متاح في خطة Finnhub المجانية</p>`:(ev.length?ev.map(e=>`<div class="hl"><span class="chip">${esc(e.time)}</span><span dir="ltr" style="flex:1">${esc(e.event)}</span></div>`).join(''):`<p class="sub">لا توجد أحداث مهمة قريبة</p>`))+
- `<div class="ttl" style="margin-top:8px">مواعيد أرباح الأسهم (TradFi)</div>`+(er.length?er.map(e=>`<div class="hl"><span class="chip">${esc(e.symbol)}</span><span style="flex:1">${esc(e.date)} ${e.hour==='bmo'?'قبل الافتتاح':e.hour==='amc'?'بعد الإغلاق':''}</span></div>`).join(''):`<p class="sub">لا توجد أرباح قريبة للأسهم المتابعة</p>`)+
- (errs.length?`<p class="sub" style="margin-top:8px">ملاحظات: ${errs.map(([k,v])=>esc(k)+': '+esc(v)).join(' · ')}</p>`:'')+`</div>`;}
-function setHTML(){const st=S.settings,p=S.params,fp=S.platforms||[];
- return `<h1>الإعدادات</h1><p class="sub">تُطبّق فوراً حتى أثناء الفحص</p>
- <div class="card" style="margin-bottom:18px"><div class="ttl">حجم الصفقات والحدود</div><form class="form" onsubmit="event.preventDefault();saveSettings(this)">
-  <div class="fld"><label>حجم الصفقة (USDT)${(S.allocator||{}).config?.enabled?' <span class="chip y">متجاهَل: المخصص مفعّل</span>':''}</label><input name="trade_amount_usdt" type="number" min="1" step="1" value="${S.trade_amount}"></div>
-  <div class="fld"><label>أقصى صفقات Spot (نشطة ${st.spot_active_trades})${(S.allocator||{}).config?.enabled?' <span class="chip y">متجاهَل</span>':''}</label><input name="spot_max_concurrent_trades" type="number" min="1" value="${st.spot_max_concurrent_trades}"></div>
-  <div class="fld"><label>أقصى صفقات Futures (نشطة ${st.futures_active_trades})${(S.allocator||{}).config?.enabled?' <span class="chip y">متجاهَل</span>':''}</label><input name="futures_max_concurrent_trades" type="number" min="1" value="${st.futures_max_concurrent_trades}"></div>
-  <div><button class="gbtn">حفظ الإعدادات</button></div></form></div>
- <div class="grid">${[['binance','Binance Spot','/api/platforms/binance/credentials'],['binance_futures','Binance Futures','/api/platforms/binance-futures/credentials']].map(([id,nm,url])=>{const pl=fp.find(x=>x.id==id)||{};return `<div class="card c6"><div class="ttl">${nm} <span class="chip ${pl.connected?'g':'rd'}">${pl.connected?'متصل':'غير متصل'} · ${pl.environment||''}</span></div>
-  <form class="form" style="grid-template-columns:1fr" onsubmit="event.preventDefault();saveCreds(this,'${url}')"><div class="fld"><label>API Key</label><input name="api_key" autocomplete="off" placeholder="••••••••"></div><div class="fld"><label>Secret Key</label><input name="secret_key" type="password" autocomplete="off" placeholder="••••••••"></div><div><button class="gbtn">تحديث المفاتيح</button>${id=='binance_futures'?` <button type="button" class="more" style="display:inline-block;margin:0 8px" onclick="signTradFi()">${S.futures.tradfi_agreement_signed?'اتفاقية TradFi موقّعة ✓':'توقيع اتفاقية TradFi'}</button>`:''}</div></form></div>`}).join('')}
- <div class="card c12"><div class="ttl">معايير الاستراتيجية (للعرض)</div><div class="kvs">${[['الإطار الزمني',p.timeframe],['الوضع',p.strategy_mode],['الاستراتيجيات',(p.strategies||[]).join('، ')],['EMA',p.ema_period],['RSI الأقصى',p.rsi_max],['شرط MACD',p.require_macd?'نعم':'لا'],['الهدف (R)',p.tp_r_multiple],['وقف الخسارة %',p.sl],['التتبع %',p.trail],['خطورة الأخبار',p.news_severity],['إيقاف الأخبار (ساعة)',p.news_pause_h],['حد الخسارة اليومي %',S.daily_risk.spot.limit_pct]].map(([k,v])=>`<div><small>${k}</small><b>${N(esc(v))}</b></div>`).join('')}</div></div></div>`;}
-function saveSettings(f){act(API.post('/api/settings',{trade_amount_usdt:Number(f.trade_amount_usdt.value),spot_max_concurrent_trades:parseInt(f.spot_max_concurrent_trades.value,10),futures_max_concurrent_trades:parseInt(f.futures_max_concurrent_trades.value,10)}),'تم حفظ الإعدادات');}
-function saveCreds(f,url){const k=f.api_key.value.trim(),sk=f.secret_key.value.trim();if(!k||!sk){toast('أدخل المفتاحين');return;}
- act(API.post(url,{api_key:k,secret_key:sk}),'تم حفظ المفاتيح مشفّرة').then(()=>{f.reset();});}
-function signTradFi(){if(S.futures.tradfi_agreement_signed){toast('الاتفاقية موقّعة مسبقاً');return;}
- if(!confirm('هل قرأت شروط TradFi وتوافق على إرسال طلب توقيع الاتفاقية لحساب Demo؟'))return;
- act(API.post('/api/platforms/binance-futures/tradfi-agreement',{accepted:true}),'قبل Binance طلب التوقيع. لم تُرسل أي صفقة.');}
-function entriesOn(){const e=S.entries_enabled;return !e||(e.spot||e.futures);}
-function toggleTrading(){const on=entriesOn();
- const msg=on?'إيقاف التداول؟\nلن يفتح البوت صفقات جديدة في Spot و Futures.\nالمراكز المفتوحة وأوامر وقف الخسارة تبقى كما هي.':'تشغيل التداول؟\nسيعود البوت لفتح صفقات جديدة في Spot و Futures.';
- if(!confirm(msg))return;const b=$('#tradeBtn');if(b)b.disabled=true;
- act(API.post('/api/trading',{enabled:!on,market:'all'}),on?'تم إيقاف التداول':'تم تشغيل التداول');}
-/* ===== "عرض المزيد" row limits ===== */
-const LIM={trades:10,dec:25};
-function moreBtn(k,total,step){return total>LIM[k]?`<button class="more" onclick="LIM.${k}+=${step};${k==='dec'?'renderDecRows()':"$('#v-trades').innerHTML=tradesHTML()"}">عرض المزيد (${N(total-LIM[k])})</button>`:'';}
-/* ===== nav + transitions ===== */
-let cur='home';const nav=$('#nav'),pill=$('#pill');
-function pillTo(btn,animate){const r={left:btn.offsetLeft+'px',width:btn.offsetWidth+'px'};if(animate){const from={left:pill.style.left,width:pill.style.width};A(pill,[from,r],{duration:550,easing:SPRING});}pill.style.left=r.left;pill.style.width=r.width;}
-function enter(view){const cards=view.querySelectorAll('.card, h1, .sub');cards.forEach((c,i)=>A(c,[{opacity:0,transform:'scale(.92) translateY(14px)'},{opacity:1,transform:'none'}],{duration:700,delay:i*55,easing:SPRING}));}
-function go(v,t){if(v==cur)return;const btn=nav.querySelector(`[data-v="${v}"]`);nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b==btn));pillTo(btn,true);btn.scrollIntoView&&btn.scrollIntoView({inline:'nearest',block:'nearest'});
- const old=$('#v-'+cur),nw=$('#v-'+v);cur=v;
- const show=()=>{old.classList.remove('show');nw.classList.add('show');scrollTo(0,0);enter(nw);};
- if(RM){show();return;}
- A(old,[{opacity:1,transform:'none'},{opacity:0,transform:'scale(.95)'}],{duration:220,easing:'ease-in'});setTimeout(()=>{old.getAnimations().forEach(a=>a.cancel());show();},220);}
-nav.addEventListener('click',e=>{const b=e.target.closest('button');if(b)go(b.dataset.v);});
-function renderAll(){$('#homeGrid').innerHTML=homeHTML();if(document.activeElement&&document.activeElement.id==='dq')renderDecRows();else renderDec();$('#v-trades').innerHTML=tradesHTML();$('#v-fut').innerHTML=futHTML();$('#v-spot').innerHTML=spotHTML();$('#v-strat').innerHTML=stratHTML();$('#v-rl').innerHTML=rlHTML();$('#v-news').innerHTML=newsHTML();const vs=$('#v-set');if(!vs.contains(document.activeElement))vs.innerHTML=setHTML();}
-async function boot(){try{[S,EQ]=await Promise.all([API.state(),API.equity().catch(()=>[])]);}catch(e){document.body.insertAdjacentHTML('afterbegin','<div style="background:#FEE2E2;color:#991B1B;padding:12px;text-align:center;font-weight:700">تعذّر تحميل بيانات البوت — '+esc(e.message)+'</div>');return;}
- EQ=Array.isArray(EQ)?EQ:(EQ.points||EQ.data||[]);renderAll();loadSS();loadRL();setInterval(()=>{if(!document.hidden){loadSS();loadRL();}},60000);await document.fonts.ready;pillTo(nav.querySelector('.on'),false);
- enter($('#v-home'));setInterval(()=>{if(!document.hidden)refresh();},15000);}
-boot();
-</script>
-<script>
-/* الخلية العصبية — Cyberpunk neural ops view (2.5D canvas, no deps) */
-(function(){
-const SEC=document.getElementById('v-neural');if(!SEC)return;
-SEC.innerHTML=`<style>
-#v-neural .nwrap{position:relative;border-radius:22px;overflow:hidden;background:radial-gradient(120% 90% at 50% 0%,#140a2a 0%,#05040d 70%);border:1px solid rgba(0,240,255,.25);box-shadow:0 0 40px rgba(0,240,255,.12),inset 0 0 60px rgba(255,0,200,.08);height:min(72vh,680px);min-height:440px}
-#v-neural canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-#v-neural .scan{position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px);mix-blend-mode:overlay}
-#v-neural .ttl{position:absolute;top:12px;right:16px;font-weight:800;letter-spacing:.5px;color:#7ff6ff;text-shadow:0 0 12px #00eaff,2px 0 #ff2bd6;font-size:18px;animation:nglitch 6s infinite}
-@keyframes nglitch{0%,93%,100%{transform:none;text-shadow:0 0 12px #00eaff,2px 0 #ff2bd6}94%{transform:translateX(-2px) skewX(8deg);text-shadow:-3px 0 #ff2bd6,3px 0 #00eaff}96%{transform:translateX(2px)}}
-#v-neural .hud{position:absolute;top:44px;left:12px;width:min(270px,44%);max-height:calc(100% - 56px);overflow:auto;background:rgba(6,10,24,.72);backdrop-filter:blur(8px);border:1px solid rgba(0,240,255,.3);border-radius:14px;padding:10px 12px;font-size:12px;color:#cfefff;box-shadow:0 0 18px rgba(0,240,255,.15)}
-#v-neural .hud b{color:#7ff6ff}#v-neural .hud .r{display:flex;justify-content:space-between;gap:8px;padding:2px 0}
-#v-neural .hud h4{margin:8px 0 4px;color:#ff6be6;font-size:12px;letter-spacing:.5px}
-#v-neural .feed div{padding:3px 0;border-bottom:1px dashed rgba(127,246,255,.15);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#v-neural .ok{color:#39ff9f}#v-neural .no{color:#ff4d6d}#v-neural .wa{color:#ffd166}
-#v-neural .tip{position:absolute;pointer-events:none;background:rgba(5,8,20,.92);border:1px solid #00eaff;border-radius:10px;padding:8px 10px;font-size:12px;color:#e6fbff;box-shadow:0 0 16px rgba(0,234,255,.35);display:none;max-width:240px;z-index:3}
-#v-neural .lg{position:absolute;bottom:10px;right:14px;font-size:11px;color:#9adfff;opacity:.85}
-@media(max-width:640px){#v-neural .nwrap{height:78vh}#v-neural .hud{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:34%}#v-neural .lg{display:none}}
-</style>
-<h1>الخلية العصبية</h1><div class="sub">كيف يفكّر البوت: من الأسواق إلى الاستراتيجيات ثم الفلاتر والتعلّم المعزّز حتى القرار — ببيانات حيّة</div>
-<div class="card nwrap"><canvas id="ncv"></canvas><div class="scan"></div><div class="ttl">// NEURAL OPS · صبحي تريدر</div>
-<div class="hud" id="nhud">جارٍ التحميل…</div><div class="tip" id="ntip"></div>
-<div class="lg"><span class="ok">●</span> تنفيذ &nbsp; <span class="no">●</span> رفض &nbsp; <span class="wa">●</span> مراقبة</div></div>`;
-const cv=SEC.querySelector('#ncv'),ctx=cv.getContext('2d'),hud=SEC.querySelector('#nhud'),tip=SEC.querySelector('#ntip');
-const MOB=matchMedia('(max-width:640px)').matches||('ontouchstart' in window);
-const DPR=Math.min(window.devicePixelRatio||1,MOB?1.5:2);
-const g=(o,k,d)=>(o&&o[k]!=null)?o[k]:d;const arr=v=>Array.isArray(v)?v:[];
-const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const STRATS=[['trend_pullback','ارتداد الاتجاه'],['donchian_breakout','اختراق دونشيان'],['trend','تتبّع الاتجاه'],['breakout','الاختراق'],['bounce','الارتداد'],['volume_profile_range','نطاق الحجم'],['donchian_trend','دونشيان'],['macro_momentum_hybrid','الزخم الكلّي']];
-const FILTERS=[['adx','نظام ADX'],['mtf','تأكيد MTF'],['funding','التمويل'],['cost','التكلفة/الهدف'],['cluster','حدّ المجموعة'],['risk','سقوف المخاطرة'],['news','فلتر الأخبار'],['finnhub','تقويم Finnhub'],['massive','Massive السوق']];
-let nodes=[],edges=[],pulses=[],parts=[],byId={},seen=new Set(),firstLoad=true,data={S:null,SS:null,RL:null};
-function base(sym){return String(sym||'').split('/')[0].replace(/[^A-Z0-9]/gi,'').toUpperCase();}
-const imgs={};function icon(n){if(!n||(typeof ICONS!=='undefined'&&!ICONS.has(n)))return null;if(imgs[n]!==undefined)return imgs[n];const im=new Image();imgs[n]=null;im.onload=()=>imgs[n]=im;im.onerror=()=>imgs[n]=false;im.src='/icons/'+n+'.svg';return null;}
-function stratKey(s){s=String(s||'').toLowerCase();const keys=[...STRATS].sort((a,b)=>b[0].length-a[0].length);for(const [k,l] of keys){if(s===k||s.includes(k)||String(s).includes(l))return k;}
- if(/ارتداد مع الاتجاه|trend_pullback/.test(s))return'trend_pullback';if(/donchian_breakout|اختراق دونشيان/.test(s))return'donchian_breakout';if(/اتجاه/.test(s))return'trend';if(/اختراق/.test(s))return'breakout';if(/ارتداد/.test(s))return'bounce';if(/donch|دونش/.test(s))return'donchian_trend';if(/volume|حجم/.test(s))return'volume_profile_range';if(/macro|زخم/.test(s))return'macro_momentum_hybrid';return null;}
-function filterKey(r){r=String(r||'');if(/Massive/.test(r))return'massive';if(/حدث اقتصادي|إعلان أرباح/.test(r))return'finnhub';if(/adx|عرضي|نظام السوق|regime/i.test(r))return'adx';if(/mtf|فريم أكبر|الإطار الأعلى/i.test(r))return'mtf';if(/funding|تمويل/i.test(r))return'funding';if(/تكلفة|رسوم|cost|هدف/i.test(r))return'cost';if(/cluster|مجموعة|مرتبط/i.test(r))return'cluster';if(/خبر|news/i.test(r))return'news';if(/حد|مخاطر|risk|الأقصى|تحوّط|hedge/i.test(r))return'risk';return null;}
-function outcome(d){const o=String(g(d,'outcome',''))+' '+String(g(d,'order_status',''));if(d&&d.order_id||/نُفّذ|نفذ|تم التنفيذ|فتح|executed|filled|شراء ناجح/.test(o))return'ok';if(g(d,'signal','none')==='none'||/مراقبة|انتظار/.test(o))return'wa';return'no';}
-function build(){const S=data.S||{};const W=1,cols=[-1.05,-0.6,-0.15,0.3,0.68,1.02];nodes=[];edges=[];byId={};
- const syms=[];const add=s=>{const b=base(s);if(b&&!syms.find(x=>x.b===b))syms.push({b,s});};
- arr(S.positions).forEach(p=>add(p&&p.symbol));arr(S.markets).forEach(m=>add(m&&m.symbol));arr(g(S.futures,'symbols',[])).forEach(x=>add(typeof x==='string'?x:g(x,'symbol','')));
- const ms=syms.slice(0,MOB?9:14);const N=(id,x,y,z,label,kind,extra)=>{const n=Object.assign({id,x,y,z,label,kind,act:0,r:kind==='dec'?16:kind==='in'?11:12},extra||{});nodes.push(n);byId[id]=n;return n;};
- ms.forEach((m,i)=>N('m:'+m.b,cols[0],(i-(ms.length-1)/2)*(1.7/Math.max(ms.length,6)),Math.sin(i)*0.25,m.b,'in',{icon:m.b}));
- N('m:NEWS',cols[0]-0.05,0.98,0,'الأخبار / LLM','in',{color:'#ff2bd6'});
- const enabled=new Set(arr(g(S.params,'strategies',[])).map(x=>String(x).toLowerCase()));
- STRATS.forEach(([k,l],i)=>N('s:'+k,cols[1],(i-(STRATS.length-1)/2)*0.22,Math.cos(i)*0.3,l,'str',{key:k,on:enabled.size?enabled.has(k):i<2}));
- FILTERS.forEach(([k,l],i)=>N('f:'+k,cols[2],(i-3)*0.26,Math.sin(i*1.3)*0.3,l,'fil',{key:k}));
- const rl=data.RL||{};N('rl',cols[3],0,0,'التعلّم المعزّز','rl',{r:20});
- N('d:ok',cols[4],-0.35,0,'تنفيذ','dec',{color:'#39ff9f'});N('d:no',cols[4],0.35,0,'رفض','dec',{color:'#ff4d6d'});N('d:wa',cols[4],0,0.3,'مراقبة','dec',{color:'#ffd166'});
- N('o:spot',cols[5],-0.3,0,'أوامر Spot','out');N('o:fut',cols[5],0.3,0,'أوامر Futures','out');
- const E=(a,b)=>{if(byId[a]&&byId[b])edges.push([byId[a],byId[b]]);};
- ms.forEach((m,i)=>STRATS.forEach(([k],j)=>{if((i+j)%2===0||j<3)E('m:'+m.b,'s:'+k);}));STRATS.forEach(([k])=>E('m:NEWS','s:'+k));
- STRATS.forEach(([k],i)=>FILTERS.forEach(([f],j)=>{if((i+j)%2===0)E('s:'+k,'f:'+f);}));FILTERS.forEach(([f])=>E('f:'+f,'rl'));
- E('rl','d:ok');E('rl','d:no');E('rl','d:wa');E('d:ok','o:spot');E('d:ok','o:fut');}
-function fire(d){const b=base(d.symbol),sk=stratKey(d.strategy)||'trend',fk=filterKey(d.reason)||'risk',o=outcome(d);
- const fut=/future|:USDT/i.test(String(d.market)+String(d.symbol));const path=['m:'+(byId['m:'+b]?b:'NEWS'),'s:'+sk,'f:'+fk,'rl','d:'+o];if(o==='ok')path.push(fut?'o:fut':'o:spot');
- const col=o==='ok'?'#39ff9f':o==='no'?'#ff4d6d':'#ffd166';const ns=path.map(id=>byId[id]).filter(Boolean);if(ns.length<2)return;
- pulses.push({ns,t:0,col,big:true,speed:MOB?.012:.01});if(window.__NB.onFire)try{window.__NB.onFire(ns.map(n=>n.id),col);}catch(e){}}
-function ambient(){if(edges.length&&parts.length<(MOB?40:110)){const e=edges[Math.random()*edges.length|0];parts.push({a:e[0],b:e[1],t:0,s:.004+Math.random()*.01,col:Math.random()<.5?'#00eaff':'#ff2bd6'});}}
-let W=0,H=0,rot=0;function resize(){const r=cv.getBoundingClientRect();W=r.width;H=r.height;cv.width=W*DPR;cv.height=H*DPR;}
-function proj(n){const ca=Math.cos(rot),sa=Math.sin(rot);let x=n.x*ca-n.z*sa,z=n.x*sa+n.z*ca;const f=2.6/(2.6+z);const sx=MOB?W*0.37:Math.min(W*0.28,H*0.85),sy=MOB?H*0.3:H*0.38,cx=MOB?W*0.5:W*0.6,cy=MOB?H*0.4:H*0.52;return{X:cx-x*sx*f,Y:cy+n.y*sy*f,f};}
-function lerpP(a,b,t){const p=proj(a),q=proj(b);return{X:p.X+(q.X-p.X)*t,Y:p.Y+(q.Y-p.Y)*t};}
-function nodeCol(n){if(n.color)return n.color;if(n.kind==='str')return n.on?'#00eaff':'#2a4660';if(n.kind==='fil')return'#b26bff';if(n.kind==='rl')return'#ff2bd6';if(n.kind==='out')return'#39ff9f';return'#7ff6ff';}
-let hover=null,T=0;
-function draw(){T+=1;rot=Math.sin(T/900)*0.22;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
- // grid floor
- ctx.save();ctx.strokeStyle='rgba(0,234,255,.12)';ctx.lineWidth=1;const hy=H*0.62;for(let i=0;i<14;i++){const y=hy+Math.pow(i/14,2)*(H-hy)+((T*0.6)%((H-hy)/14))*(i/14);ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
- for(let i=-12;i<=12;i++){ctx.beginPath();ctx.moveTo(W/2+i*20,hy);ctx.lineTo(W/2+i*W/10,H);ctx.stroke();}ctx.restore();
- ctx.globalCompositeOperation='lighter';
- edges.forEach(([a,b])=>{const p=proj(a),q=proj(b);const act=Math.max(a.act,b.act);ctx.strokeStyle=act>.05?`rgba(255,43,214,${.12+act*.5})`:'rgba(0,234,255,.07)';ctx.lineWidth=act>.05?1.5:1;ctx.beginPath();ctx.moveTo(p.X,p.Y);const mx=(p.X+q.X)/2;ctx.bezierCurveTo(mx,p.Y,mx,q.Y,q.X,q.Y);ctx.stroke();});
- parts=parts.filter(p=>(p.t+=p.s)<1);parts.forEach(p=>{const P=lerpP(p.a,p.b,p.t);ctx.fillStyle=p.col;ctx.globalAlpha=.7*Math.sin(p.t*Math.PI);ctx.beginPath();ctx.arc(P.X,P.Y,1.6,0,7);ctx.fill();});ctx.globalAlpha=1;
- pulses=pulses.filter(p=>p.t<p.ns.length-1+.6);pulses.forEach(p=>{p.t+=p.speed*(p.ns.length);const i=Math.min(p.t|0,p.ns.length-2),f=Math.min(p.t-i,1);const P=lerpP(p.ns[i],p.ns[i+1],f);p.ns[i].act=1;if(f>.9)p.ns[i+1].act=1;
-  for(let k=0;k<=i;k++){const a=proj(p.ns[k]),b=k<i?proj(p.ns[k+1]):P;ctx.strokeStyle=p.col;ctx.globalAlpha=.55;ctx.lineWidth=2.4;ctx.shadowColor=p.col;ctx.shadowBlur=14;ctx.beginPath();ctx.moveTo(a.X,a.Y);ctx.lineTo(b.X,b.Y);ctx.stroke();}
-  ctx.globalAlpha=1;const gr=ctx.createRadialGradient(P.X,P.Y,0,P.X,P.Y,16);gr.addColorStop(0,'#fff');gr.addColorStop(.3,p.col);gr.addColorStop(1,'transparent');ctx.fillStyle=gr;ctx.beginPath();ctx.arc(P.X,P.Y,16,0,7);ctx.fill();ctx.shadowBlur=0;});
- ctx.globalCompositeOperation='source-over';
- const order=nodes.map(n=>({n,p:proj(n)})).sort((a,b)=>a.p.f-b.p.f);
- order.forEach(({n,p})=>{n.act*=.975;const c=nodeCol(n),r=n.r*p.f*(MOB?.85:1)*(1+n.act*.35+(n.kind==='rl'?Math.sin(T/20)*.08:0));n._X=p.X;n._Y=p.Y;n._r=r;
-  ctx.shadowColor=c;ctx.shadowBlur=(n.kind==='str'&&!n.on)?0:12+n.act*24;ctx.fillStyle='rgba(5,8,20,.9)';ctx.strokeStyle=c;ctx.lineWidth=n===hover?3:1.6;
-  if(n.kind==='fil'){ctx.beginPath();for(let k=0;k<6;k++){const a=k*Math.PI/3+T/200;ctx.lineTo(p.X+Math.cos(a)*r,p.Y+Math.sin(a)*r);}ctx.closePath();}else{ctx.beginPath();ctx.arc(p.X,p.Y,r,0,7);}
-  ctx.fill();ctx.stroke();ctx.shadowBlur=0;
-  if(n.kind==='rl'){ctx.strokeStyle='rgba(255,43,214,.5)';ctx.beginPath();ctx.arc(p.X,p.Y,r+6,T/30,T/30+4);ctx.stroke();}
-  const im=n.icon&&icon(n.icon);if(im){ctx.drawImage(im,p.X-r*.7,p.Y-r*.7,r*1.4,r*1.4);}else{ctx.fillStyle=c;ctx.beginPath();ctx.arc(p.X,p.Y,r*.35,0,7);ctx.fill();}
-  if(!MOB||n.kind!=='in'||true){ctx.fillStyle=(n.kind==='str'&&!n.on)?'#5d7a90':'#dff9ff';ctx.font=`${n.kind==='in'?10:11}px Cairo,system-ui,sans-serif`;ctx.textAlign='center';ctx.fillText(n.label,p.X,p.Y+r+12);}});
- // layer titles
- ctx.fillStyle='rgba(127,246,255,.55)';ctx.font='bold 11px Cairo,system-ui';ctx.textAlign='center';[['m:NEWS','المدخلات'],['s:trend','الاستراتيجيات'],['f:adx','الفلاتر'],['rl','RL'],['d:ok','القرار'],['o:spot','الأوامر']].forEach(([id,t])=>{const n=byId[id];if(n){const p=proj(Object.assign({},n,{y:-1.12}));ctx.fillText(t,p.X,Math.max(MOB?48:44,p.Y));}});
-}
-let running=false;function loop(){if(window.__N3D||document.hidden||typeof cur==='undefined'||cur!=='neural'){running=false;return;}running=true;{const r=cv.getBoundingClientRect();if(Math.abs(r.width-W)>1||Math.abs(r.height-H)>1)resize();}ambient();if(Math.random()<.5)ambient();draw();requestAnimationFrame(loop);}
-function kick(){if(window.__N3D)return;if(!running&&!document.hidden&&typeof cur!=='undefined'&&cur==='neural'){resize();running=true;requestAnimationFrame(loop);}}
-setInterval(kick,400);document.addEventListener('visibilitychange',kick);addEventListener('resize',()=>{if(running)resize();});
-function stat(n){const S=data.S||{};const ss=arr(g(data.SS,'strategies',[]));const rl=data.RL||{};
- if(n.kind==='in'){const p=arr(S.positions).find(x=>base(x&&x.symbol)===n.icon);const m=arr(S.markets).find(x=>base(x&&x.symbol)===n.icon);
-  return `<b>${esc(n.label)}</b><br>${m?`السعر: ${esc(m.price)}<br>RSI: ${esc(Number(m.rsi||0).toFixed(1))}<br>الإشارة: ${m.signal?'نعم':'لا'} (${esc(m.strategy_label||m.strategy||'')})`:''}${p?`<br><span class="ok">مركز مفتوح</span> PnL ${esc(Number(p.pnl_usdt||0).toFixed(2))}$`:''}${n.id==='m:NEWS'?`المزاج: ${esc(g(S.news,'sentiment','—'))}<br>${g(S.news,'blocked',false)?'<span class="no">إيقاف بسبب الأخبار</span>':'لا يوجد حظر'}`:''}`;}
- if(n.kind==='str'){const s=ss.find(x=>stratKey(x&&(x.strategy||x.name))===n.key)||{};return `<b>${esc(n.label)}</b><br>${n.on?'<span class="ok">مفعّلة</span>':'<span class="wa">غير مفعّلة</span>'}<br>الصفقات: ${esc(g(s,'trades',g(s,'count','—')))}<br>نسبة الفوز: ${esc(g(s,'win_rate','—'))}<br>الصافي: ${esc(g(s,'net_pnl',g(s,'pnl','—')))}`;}
- if(n.kind==='rl')return `<b>التعلّم المعزّز</b><br>الوضع: ${esc(g(rl,'mode','—'))}<br>الأذرع: ${arr(rl.arms).length}<br>الحد الأدنى: ${esc(g(rl,'min_samples',30))} صفقة`;
- if(n.kind==='dec'){const c=arr(S.decisions).filter(d=>'d:'+outcome(d)===n.id).length;return `<b>${esc(n.label)}</b><br>آخر القرارات: ${c}`;}
- if(n.kind==='out')return `<b>${esc(n.label)}</b><br>المراكز المفتوحة: ${n.id==='o:fut'?esc(g(S.futures,'open_positions',g(S.settings,'futures_active_trades','—'))):esc(g(S.settings,'spot_active_trades','—'))}`;
- return `<b>${esc(n.label)}</b><br>فلتر حماية قبل التنفيذ`;}
-function pick(e){const r=cv.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;let best=null;nodes.forEach(n=>{if(n._X!=null&&Math.hypot(n._X-x,n._Y-y)<(n._r||10)+8)best=n;});hover=best;
- if(best){tip.innerHTML=stat(best);tip.style.display='block';tip.style.left=Math.min(x+14,r.width-250)+'px';tip.style.top=Math.max(4,y-10)+'px';}else tip.style.display='none';}
-cv.addEventListener('mousemove',pick);cv.addEventListener('click',pick);cv.addEventListener('mouseleave',()=>{hover=null;tip.style.display='none';});
-function fmtT(s){if(!s)return'—';const d=new Date(s);return isNaN(d)?esc(s):d.toLocaleTimeString('ar-SA-u-nu-latn',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Riyadh'});}
-function renderHud(){const S=data.S||{},sc=S.scanner||{},rl=data.RL||{};const decs=arr(S.decisions).slice(0,MOB?4:9);
- hud.innerHTML=`<div class="r"><span>الماسح</span><b>${esc(g(sc,'status','—'))}</b></div><div class="r"><span>آخر فحص</span><b>${fmtT(sc.last_completed_at||sc.last_started_at)}</b></div>
- <div class="r"><span>مراكز Spot / Futures</span><b>${esc(g(S.settings,'spot_active_trades','—'))} / ${esc(g(S.settings,'futures_active_trades','—'))}</b></div><div class="r"><span>التعلّم المعزّز</span><b>${esc(g(rl,'mode','—'))}</b></div>
- <div class="r"><span>التداول</span><b>${S.trading_enabled===false?'<span class="no">متوقف</span>':'<span class="ok">مفعّل</span>'}</b></div>
- <h4>// بث القرارات الحيّ</h4><div class="feed">${decs.map(d=>{const o=outcome(d);return `<div class="${o}">● ${esc(base(d.symbol))} · ${esc(d.strategy||'')} · ${esc(d.outcome||'')}</div>`;}).join('')||'<div>لا توجد قرارات بعد</div>'}</div>`;}
-function poll(){if(document.hidden)return;const J=u=>fetch(u+(u.includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}}).then(r=>r.ok?r.json():null).catch(()=>null);
- Promise.all([J('/api/state'),J('/api/strategy-stats'),J('/api/rl')]).then(([s,ss,rl])=>{const had=!!data.S;if(s&&typeof s==='object')data.S=s;if(ss&&typeof ss==='object')data.SS=ss;if(rl&&typeof rl==='object')data.RL=rl;
-  if(!had||!nodes.length)build();else{const keep={};nodes.forEach(n=>keep[n.id]=n.act);build();nodes.forEach(n=>n.act=keep[n.id]||0);pulses=[];}
-  const decs=arr(g(data.S,'decisions',[])).slice(0,12).reverse();let fresh=[];decs.forEach(d=>{const k=(d&&d.created_at)+'|'+(d&&d.symbol);if(!seen.has(k)){seen.add(k);fresh.push(d);}});
-  if(firstLoad)fresh=fresh.slice(-5);firstLoad=false;fresh.forEach((d,i)=>setTimeout(()=>fire(d),i*700));renderHud();});}
-setInterval(()=>{if(window.__N3D)pulses=pulses.filter(p=>(p.t+=0.5)<p.ns.length+1);},400);
-window.__NB={onFire:null,stat:n=>stat(n),get nodes(){return nodes},get edges(){return edges},sec:SEC,hud,tip,MOB,cv};
-poll();setInterval(poll,10000);
-// replay recent decisions so the brain never looks dead
-setInterval(()=>{if((running||window.__N3D&&window.__N3D.active())&&!pulses.length){const d=arr(g(data.S,'decisions',[]));if(d.length)fire(d[Math.random()*Math.min(d.length,15)|0]);}},2500);
-})();
-</script>
-<script type="module">
-/* الخلية العصبية — real 3D (three.js r160). Falls back to the 2.5D canvas if WebGL/imports fail. */
-import * as THREE from 'three';
-import {OrbitControls} from '/three/jsm/controls/OrbitControls.js';
-import {EffectComposer} from '/three/jsm/postprocessing/EffectComposer.js';
-import {RenderPass} from '/three/jsm/postprocessing/RenderPass.js';
-import {UnrealBloomPass} from '/three/jsm/postprocessing/UnrealBloomPass.js';
-import {OutputPass} from '/three/jsm/postprocessing/OutputPass.js';
-import {CSS2DRenderer,CSS2DObject} from '/three/jsm/renderers/CSS2DRenderer.js';
-(function(){
-const NB=window.__NB;if(!NB)return;
-let gl=null;try{const c=document.createElement('canvas');gl=c.getContext('webgl2')||c.getContext('webgl');}catch(e){}
-if(!gl)return;
-const MOB=NB.MOB,wrap=NB.cv.parentElement,DPR=Math.min(window.devicePixelRatio||1,MOB?1.25:1.75);
-let renderer;try{renderer=new THREE.WebGLRenderer({antialias:!MOB,alpha:false,powerPreference:'high-performance'});}catch(e){return;}
-renderer.setPixelRatio(DPR);renderer.setClearColor(0x05040d,1);
-const el=renderer.domElement;el.style.cssText='position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none';
-const lr=new CSS2DRenderer();lr.domElement.style.cssText='position:absolute;inset:0;pointer-events:none;overflow:hidden';lr.domElement.dir='ltr';
-NB.cv.style.display='none';wrap.insertBefore(el,NB.cv);wrap.insertBefore(lr.domElement,NB.cv);
-const st=document.createElement('style');st.textContent=`#v-neural .n3l,#v-neural .n3t{left:0;top:0}#v-neural .n3l{font:600 11px Cairo,system-ui,sans-serif;color:#dff9ff;text-shadow:0 0 6px #00eaff,0 0 2px #000;white-space:nowrap;transform:translateY(16px)}#v-neural .n3l.dim{color:#5d7a90;text-shadow:none}#v-neural .n3t{font:800 12px Cairo,system-ui;color:rgba(127,246,255,.75);letter-spacing:.5px;text-shadow:0 0 8px #ff2bd6}@media(max-width:640px){#v-neural .n3l{font-size:10px}}`;document.head.appendChild(st);
-const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x05040d,MOB?0.03:0.025);
-const cam=new THREE.PerspectiveCamera(MOB?62:50,1,0.1,400);cam.position.set(0,3,MOB?36:26);
-const ctl=new OrbitControls(cam,el);ctl.enableDamping=true;ctl.dampingFactor=.08;ctl.autoRotate=true;ctl.autoRotateSpeed=.35;ctl.enablePan=false;ctl.minDistance=10;ctl.maxDistance=55;ctl.maxPolarAngle=Math.PI*.62;ctl.minAzimuthAngle=-1.1;ctl.maxAzimuthAngle=1.1;
-let rotDir=1;
-const comp=new EffectComposer(renderer);comp.addPass(new RenderPass(scene,cam));
-const bloom=new UnrealBloomPass(new THREE.Vector2(256,256),MOB?0.55:0.7,0.45,0.3);comp.addPass(bloom);comp.addPass(new OutputPass());
-scene.add(new THREE.AmbientLight(0x6070ff,.6));const pl=new THREE.PointLight(0xff2bd6,40,60);pl.position.set(0,6,6);scene.add(pl);
-// grid floor + stars
-const grid=new THREE.GridHelper(80,MOB?40:64,0x00eaff,0x163a55);grid.position.y=-8;grid.material.transparent=true;grid.material.opacity=.35;scene.add(grid);
-{const n=MOB?500:1400,g=new THREE.BufferGeometry(),a=new Float32Array(n*3);for(let i=0;i<n;i++){a[i*3]=(Math.random()-.5)*160;a[i*3+1]=(Math.random()-.3)*80;a[i*3+2]=-20-Math.random()*90;}
- g.setAttribute('position',new THREE.BufferAttribute(a,3));scene.add(new THREE.Points(g,new THREE.PointsMaterial({color:0x9adfff,size:.18,transparent:true,opacity:.45,fog:false})));}
-const COL={str:0x00eaff,fil:0xb26bff,rl:0xff2bd6,out:0x39ff9f,in:0x7ff6ff};
-const hex=s=>new THREE.Color(s);
-const G={root:new THREE.Group(),meshes:[],byId:{},curves:[],sig:''};scene.add(G.root);G.root.position.set(MOB?1.2:2.8,MOB?1.5:0,0);
-const texL=new THREE.TextureLoader();
-function pos(n){return new THREE.Vector3(-n.x*10,-n.y*(MOB?7.5:6.2),n.z*6+(n.kind==='in'?Math.sin(n.y*9)*1.2:0));}
-function label(text,cls){const d=document.createElement('div');d.className=cls;d.textContent=text;return new CSS2DObject(d);}
-function clear(){G.root.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material){[].concat(o.material).forEach(m=>{if(m.map)m.map.dispose();m.dispose();});}});
- G.root.children.slice().forEach(c=>{c.traverse(o=>{if(o.isCSS2DObject&&o.element)o.element.remove();});G.root.remove(c);});G.meshes=[];G.byId={};G.curves=[];}
-const MOBLABEL=new Set(['rl','dec','out']);
-function build(){const nodes=NB.nodes||[],edges=NB.edges||[];const sig=nodes.map(n=>n.id+(n.on?1:0)).join(',');if(sig===G.sig)return;G.sig=sig;clear();
- nodes.forEach(n=>{const p=pos(n);const c=n.color?hex(n.color):new THREE.Color(COL[n.kind]||0x7ff6ff);const dim=n.kind==='str'&&!n.on;const hasIc=n.icon&&typeof ICONS!=='undefined'&&ICONS.has(n.icon);
-  const r=n.kind==='rl'?1.15:n.kind==='dec'?.8:n.kind==='in'?.5:.6;
-  const geo=n.kind==='fil'?new THREE.OctahedronGeometry(r,0):n.kind==='rl'?new THREE.IcosahedronGeometry(r,1):new THREE.IcosahedronGeometry(r,MOB?1:2);
-  const mat=new THREE.MeshStandardMaterial({color:0x0a0f22,emissive:c,emissiveIntensity:dim?.1:hasIc?.12:.55,roughness:.3,metalness:.4,transparent:true,opacity:dim?.55:1});
-  const m=new THREE.Mesh(geo,mat);m.position.copy(p);m.userData={id:n.id,base:dim?.1:hasIc?.12:.55,act:0};G.root.add(m);G.meshes.push(m);G.byId[n.id]=m;
-  const shell=new THREE.Mesh(new THREE.IcosahedronGeometry(r*1.45,1),new THREE.MeshBasicMaterial({color:c,wireframe:true,transparent:true,opacity:dim?.06:.18}));m.add(shell);m.userData.shell=shell;
-  if(n.icon&&typeof ICONS!=='undefined'&&ICONS.has(n.icon)){{const im=new Image();im.onload=()=>{const c=document.createElement('canvas');c.width=c.height=128;const x=c.getContext('2d');x.drawImage(im,4,4,120,120);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;const s=new THREE.Sprite(new THREE.SpriteMaterial({map:t,transparent:true,depthWrite:false,depthTest:false,fog:false}));s.renderOrder=10;s.scale.set(1.25,1.25,1);m.add(s);};im.onerror=()=>{};im.src='/icons/'+n.icon+'.svg';}}
-  if(!MOB||MOBLABEL.has(n.kind)){const L=label(MOB&&n.kind==='out'?n.label.replace('أوامر ',''):n.label,'n3l'+(dim?' dim':''));L.position.set(0,-r-.15,0);m.add(L);}
- });
- [['m:NEWS','المدخلات'],['s:trend','الاستراتيجيات'],['f:adx','الفلاتر'],['rl','التعلّم المعزّز'],['d:ok','القرار'],['o:spot','الأوامر']].forEach(([id,t])=>{const m=G.byId[id];if(!m)return;const L=label(MOB&&t==='التعلّم المعزّز'?'RL':t,'n3t');L.position.set(m.position.x,8.2,0);G.root.add(L);});
- const tubeMat=new THREE.MeshBasicMaterial({color:0x00eaff,transparent:true,opacity:.12,depthWrite:false,blending:THREE.AdditiveBlending});
- edges.forEach(([a,b])=>{const A=G.byId[a.id],B=G.byId[b.id];if(!A||!B)return;const pa=A.position,pb=B.position;const mid=pa.clone().lerp(pb,.5);mid.z+=(Math.random()-.5)*3;mid.y+=(pb.y-pa.y)*.15;
-  const cv=new THREE.QuadraticBezierCurve3(pa.clone(),mid,pb.clone());const key=a.id+'>'+b.id;G.curves.push({a:a.id,b:b.id,cv});G.curves[key]=cv;
-  const obj=MOB?new THREE.Line(new THREE.BufferGeometry().setFromPoints(cv.getPoints(16)),new THREE.LineBasicMaterial({color:0x00eaff,transparent:true,opacity:.18,blending:THREE.AdditiveBlending,depthWrite:false})):new THREE.Mesh(new THREE.TubeGeometry(cv,20,.025,4,false),tubeMat);
-  G.root.add(obj);});
- initParts();}
-// ambient particles
-const PN=MOB?60:180;let partGeo,partArr,parts=[];
-function initParts(){if(partGeo){partGeo.dispose();}partGeo=new THREE.BufferGeometry();partArr=new Float32Array(PN*3);partGeo.setAttribute('position',new THREE.BufferAttribute(partArr,3));
- const pts=new THREE.Points(partGeo,new THREE.PointsMaterial({color:0xff6be6,size:MOB?.22:.18,transparent:true,opacity:.9,blending:THREE.AdditiveBlending,depthWrite:false}));G.root.add(pts);
- parts=Array.from({length:PN},()=>({c:G.curves[Math.random()*G.curves.length|0],t:Math.random(),s:.002+Math.random()*.006}));}
-function stepParts(){if(!partArr||!G.curves.length)return;const v=new THREE.Vector3();parts.forEach((p,i)=>{p.t+=p.s;if(p.t>1||!p.c){p.t=0;p.c=G.curves[Math.random()*G.curves.length|0];}p.c.cv.getPoint(p.t,v);partArr[i*3]=v.x;partArr[i*3+1]=v.y;partArr[i*3+2]=v.z;});partGeo.attributes.position.needsUpdate=true;}
-// decision pulses
-const pulses=[];
-function curveBetween(a,b){const k=a+'>'+b;if(G.curves[k])return G.curves[k];const A=G.byId[a],B=G.byId[b];if(!A||!B)return null;const mid=A.position.clone().lerp(B.position,.5);mid.z+=1.5;const c=new THREE.QuadraticBezierCurve3(A.position.clone(),mid,B.position.clone());G.curves[k]=c;return c;}
-NB.onFire=(ids,col)=>{if(!G.meshes.length)return;const segs=[];for(let i=0;i<ids.length-1;i++){const c=curveBetween(ids[i],ids[i+1]);if(c)segs.push({c,to:ids[i+1],from:ids[i]});}if(!segs.length)return;
- const color=hex(col);const head=new THREE.Mesh(new THREE.SphereGeometry(.28,12,12),new THREE.MeshBasicMaterial({color:0xffffff}));const halo=new THREE.Mesh(new THREE.SphereGeometry(.6,12,12),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.55,blending:THREE.AdditiveBlending,depthWrite:false}));head.add(halo);G.root.add(head);
- const trails=[];pulses.push({segs,t:0,head,color,trails});const s0=G.byId[segs[0].from];if(s0)s0.userData.act=1;};
-function stepPulses(dt){for(let k=pulses.length-1;k>=0;k--){const p=pulses[k];p.t+=dt*1.1;const i=Math.floor(p.t);
- if(i>=p.segs.length){p.head.removeFromParent();p.head.geometry.dispose();p.trails.forEach(t=>{t.material.opacity-=.0;});p.fade=(p.fade||1)-dt*.8;p.trails.forEach(t=>t.material.opacity=Math.max(0,.7*p.fade));if(p.fade<=0){p.trails.forEach(t=>{t.removeFromParent();t.geometry.dispose();t.material.dispose();});pulses.splice(k,1);}continue;}
- const sg=p.segs[i];p.head.position.copy(sg.c.getPoint(p.t-i));
- if(p.trails.length<=i){const tm=new THREE.Mesh(new THREE.TubeGeometry(sg.c,24,MOB?.07:.06,5,false),new THREE.MeshBasicMaterial({color:p.color,transparent:true,opacity:.7,blending:THREE.AdditiveBlending,depthWrite:false}));G.root.add(tm);p.trails.push(tm);}
- if(p.t-i>.92){const m=G.byId[sg.to];if(m)m.userData.act=1;}}}
-// hover / tap
-const ray=new THREE.Raycaster(),mv=new THREE.Vector2();let hoverM=null;
-function pick(e){const r=el.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top;mv.set(x/r.width*2-1,-(y/r.height)*2+1);ray.setFromCamera(mv,cam);const hit=ray.intersectObjects(G.meshes,false)[0];
- hoverM=hit?hit.object:null;el.style.cursor=hoverM?'pointer':'grab';const n=hoverM&&(NB.nodes||[]).find(z=>z.id===hoverM.userData.id);
- if(n){NB.tip.innerHTML=NB.stat(n);NB.tip.style.display='block';NB.tip.style.left=Math.max(4,Math.min(x+14,r.width-250))+'px';NB.tip.style.top=Math.max(4,Math.min(y-10,r.height-120))+'px';}else NB.tip.style.display='none';}
-el.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')pick(e);});el.addEventListener('pointerup',pick);el.addEventListener('pointerleave',()=>{hoverM=null;NB.tip.style.display='none';});
-// lifecycle
-let W=0,H=0,running=false,last=0,clock=new THREE.Clock();
-function size(){const r=wrap.getBoundingClientRect();if(r.width<2||r.height<2)return false;if(Math.abs(r.width-W)>1||Math.abs(r.height-H)>1){W=r.width;H=r.height;renderer.setSize(W,H,false);comp.setSize(W,H);lr.setSize(W,H);bloom.resolution.set(W*DPR*(MOB?.5:.75),H*DPR*(MOB?.5:.75));cam.aspect=W/H;cam.updateProjectionMatrix();}return true;}
-const active=()=>!document.hidden&&typeof cur!=='undefined'&&cur==='neural';
-function frame(){if(!active()){running=false;return;}requestAnimationFrame(frame);if(!size())return;const dt=Math.min(clock.getDelta(),.05),t=clock.elapsedTime;
- build();const az=ctl.getAzimuthalAngle();if(az>1.0)rotDir=-1;else if(az<-1.0)rotDir=1;ctl.autoRotateSpeed=.35*rotDir;ctl.update();
- G.meshes.forEach(m=>{const u=m.userData;u.act*=.965;m.material.emissiveIntensity=u.base+u.act*1.6;const s=1+u.act*.35+(u.id==='rl'?Math.sin(t*2)*.06:0);m.scale.setScalar(s);m.rotation.y+=dt*.4;if(u.shell)u.shell.rotation.x+=dt*.3;});
- grid.position.z=(t*1.5)%(80/(MOB?40:64));stepParts();stepPulses(dt);comp.render();lr.render(scene,cam);}
-function kick(){if(!running&&active()){running=true;clock.getDelta();requestAnimationFrame(frame);}}
-window.__N3D={active};setInterval(kick,400);document.addEventListener('visibilitychange',kick);
-el.addEventListener('webglcontextlost',e=>{e.preventDefault();window.__N3D=null;el.style.display='none';lr.domElement.style.display='none';NB.cv.style.display='block';});
-})();
-</script>
-</body></html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>صبحي تريدر | لوحة التحكم</title>
+    <style>
+      :root {
+        --bg: #08111f;
+        --bg-2: #101b2d;
+        --panel: rgba(17, 25, 38, 0.82);
+        --panel-strong: rgba(22, 31, 47, 0.96);
+        --line: rgba(148, 163, 184, 0.18);
+        --text: #edf3ff;
+        --muted: #9aa9bf;
+        --brand-1: #7c5cff;
+        --brand-2: #22c55e;
+        --brand-3: #f59e0b;
+        --danger: #ef4444;
+        --cyan: #38bdf8;
+        --shadow: 0 20px 50px rgba(6, 10, 18, 0.5);
+        --radius: 22px;
+      }
+
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(124, 92, 255, 0.2), transparent 28%),
+          radial-gradient(circle at top right, rgba(34, 197, 94, 0.16), transparent 25%),
+          linear-gradient(180deg, #07111d 0%, #0d1726 100%);
+        color: var(--text);
+      }
+
+      a { color: inherit; text-decoration: none; }
+      button, input { font: inherit; }
+
+      .shell {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding: 24px 20px 40px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 16px 20px;
+        margin-bottom: 20px;
+        border: 1px solid var(--line);
+        background: rgba(13, 20, 30, 0.7);
+        backdrop-filter: blur(18px);
+        border-radius: 18px;
+        box-shadow: var(--shadow);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, var(--brand-1), #3b82f6 55%, #22d3ee);
+        font-weight: 800;
+        font-size: 18px;
+        box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 1.1rem;
+      }
+
+      .brand small {
+        display: block;
+        color: var(--muted);
+        font-weight: 600;
+      }
+
+      .header-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.02);
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+      }
+
+      .pill::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 12px currentColor;
+      }
+
+      .pill.live { color: var(--brand-2); }
+      .pill.warn { color: var(--brand-3); }
+      .pill.danger { color: var(--danger); }
+      .pill.neutral { color: var(--cyan); }
+
+      .content {
+        display: grid;
+        gap: 18px;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        position: relative;
+        overflow: hidden;
+        background: linear-gradient(180deg, rgba(17,25,38,0.88), rgba(12,18,29,0.85));
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+      }
+
+      .card::after {
+        content: "";
+        position: absolute;
+        inset: 0 auto auto 0;
+        width: 100%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+      }
+
+      .stat-card {
+        padding: 18px 18px 16px;
+      }
+
+      .stat-card.hero {
+        background: linear-gradient(135deg, rgba(124,92,255,0.22), rgba(17,25,38,0.92));
+      }
+
+      .label-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-size: 0.72rem;
+        margin-bottom: 8px;
+      }
+
+      .value {
+        font-size: clamp(1.5rem, 2vw, 2.2rem);
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .delta {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+
+      .up { color: var(--brand-2); }
+      .down { color: var(--danger); }
+      .neutral { color: var(--cyan); }
+
+      .two-col {
+        display: grid;
+        grid-template-columns: 1.3fr 0.7fr;
+        gap: 18px;
+      }
+
+      .panel {
+        padding: 20px;
+      }
+
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .panel-header h2 {
+        margin: 0;
+        font-size: 1.08rem;
+      }
+
+      .market-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .market-tile {
+        padding: 14px 12px;
+        border-radius: 16px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.02);
+      }
+
+      .market-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+
+      .coin-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+      }
+
+      .coin-icon {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 0.72rem;
+        color: white;
+        background: linear-gradient(135deg, #f59e0b, #f97316);
+      }
+
+      .price {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .signal-bar {
+        height: 8px;
+        border-radius: 999px;
+        background: rgba(148,163,184,0.12);
+        overflow: hidden;
+      }
+
+      .signal-fill {
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #22c55e, #38bdf8, #7c5cff);
+      }
+
+      .account-stack {
+        display: grid;
+        gap: 12px;
+      }
+
+      .account-box {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.02);
+        padding: 14px 14px 12px;
+      }
+
+      .account-heading {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .account-heading strong {
+        font-size: 0.95rem;
+      }
+
+      .mini-stat {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .mini-stat b {
+        display: block;
+        margin-top: 4px;
+        color: var(--text);
+        font-size: 0.95rem;
+      }
+
+      .three-col {
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 18px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th, td {
+        text-align: right;
+        padding: 12px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 0.74rem;
+        font-weight: 700;
+      }
+
+      td {
+        font-size: 0.82rem;
+      }
+
+      .symbol {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 700;
+      }
+
+      .chip {
+        display: inline-block;
+        padding: 5px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 0.68rem;
+        font-weight: 700;
+        background: rgba(255,255,255,0.02);
+      }
+
+      .chip.green { background: rgba(34,197,94,0.12); color: var(--brand-2); }
+      .chip.red { background: rgba(239,68,68,0.12); color: var(--danger); }
+      .chip.cyan { background: rgba(56,189,248,0.1); color: var(--cyan); }
+      .chip.orange { background: rgba(245,158,11,0.12); color: var(--brand-3); }
+
+      .timeline {
+        display: grid;
+        gap: 12px;
+      }
+
+      .decision {
+        padding: 12px 14px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(255,255,255,0.02);
+      }
+
+      .decision-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 7px;
+        font-weight: 700;
+      }
+
+      .decision-meta {
+        color: var(--muted);
+        font-size: 0.72rem;
+        line-height: 1.7;
+      }
+
+      .news-box {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(255,255,255,0.02);
+        padding: 14px;
+      }
+
+      .news-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .news-item {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.02);
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .news-item strong {
+        color: var(--text);
+      }
+
+      .muted { color: var(--muted); }
+      .tiny { font-size: 0.7rem; }
+
+      @media (max-width: 1100px) {
+        .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .two-col, .three-col { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 760px) {
+        .topbar { flex-direction: column; align-items: stretch; }
+        .header-meta { justify-content: flex-start; }
+        .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .market-grid { grid-template-columns: 1fr; }
+      }
+
+      @media (max-width: 520px) {
+        .shell { padding: 16px 12px 30px; }
+        .stats-grid { grid-template-columns: 1fr; }
+        th, td { padding: 10px 8px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="logo">S</div>
+          <div>
+            <h1>صبحي تريدر</h1>
+            <small>لوحة مراقبة Binance</small>
+          </div>
+        </div>
+
+        <div class="header-meta">
+          <span class="pill neutral" id="statusPill">التواصل...</span>
+          <span class="pill live" id="modePill">الوضع: تجريبي</span>
+          <span class="pill warn" id="riskPill">نسبة المخاطرة</span>
+        </div>
+      </header>
+
+      <main class="content">
+        <section class="stats-grid">
+          <article class="card stat-card hero">
+            <div class="label-row">
+              <span>قيمة المحفظة</span>
+              <span class="chip cyan" id="walletBadge">محدث</span>
+            </div>
+            <div class="value" id="totalWallet">$0.00</div>
+            <div class="delta" id="walletDelta">تحديث...</div>
+          </article>
+
+          <article class="card stat-card">
+            <div class="label-row"><span>الربح المحقق</span></div>
+            <div class="value up" id="realizedPnl">$0.00</div>
+            <div class="delta" id="realizedMeta">...</div>
+          </article>
+
+          <article class="card stat-card">
+            <div class="label-row"><span>الربح غير المحقق</span></div>
+            <div class="value neutral" id="unrealizedPnl">$0.00</div>
+            <div class="delta" id="unrealizedMeta">...</div>
+          </article>
+
+          <article class="card stat-card">
+            <div class="label-row"><span>الصفقات المفتوحة</span></div>
+            <div class="value" id="openTrades">0</div>
+            <div class="delta" id="openMeta">...</div>
+          </article>
+
+          <article class="card stat-card">
+            <div class="label-row"><span>نسبة الفوز</span></div>
+            <div class="value" id="winRate">0%</div>
+            <div class="delta" id="winMeta">...</div>
+          </article>
+
+          <article class="card stat-card">
+            <div class="label-row"><span>التعرّض</span></div>
+            <div class="value" id="exposurePct">0%</div>
+            <div class="delta" id="exposureMeta">منخفض</div>
+          </article>
+        </section>
+
+        <section class="two-col">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>الأسواق</h2>
+              <span class="chip cyan" id="marketCount">0 رموز</span>
+            </div>
+            <div class="market-grid" id="marketGrid"></div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>حالة الحسابات</h2>
+            </div>
+            <div class="account-stack">
+              <div class="account-box">
+                <div class="account-heading">
+                  <strong>Spot</strong>
+                  <span class="chip green" id="spotState">متصل</span>
+                </div>
+                <div class="mini-stat">
+                  <div>الرصيد<b id="spotBalance">$0.00</b></div>
+                  <div>المتاح<b id="spotFree">$0.00</b></div>
+                  <div>المراكز<b id="spotOpen">0</b></div>
+                  <div>الربح<b id="spotPnl">$0.00</b></div>
+                </div>
+              </div>
+
+              <div class="account-box">
+                <div class="account-heading">
+                  <strong>Futures Demo</strong>
+                  <span class="chip cyan" id="futuresState">غير متصل</span>
+                </div>
+                <div class="mini-stat">
+                  <div>الرصيد<b id="futuresBalance">$0.00</b></div>
+                  <div>المتاح<b id="futuresFree">$0.00</b></div>
+                  <div>المراكز<b id="futuresOpen">0</b></div>
+                  <div>الربح<b id="futuresPnl">$0.00</b></div>
+                </div>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section class="three-col">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>المراكز المفتوحة</h2>
+              <span class="chip cyan" id="openCountLabel">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الرمز</th>
+                    <th>الاتجاه</th>
+                    <th>الإدخال</th>
+                    <th>السعر</th>
+                    <th>الربح</th>
+                  </tr>
+                </thead>
+                <tbody id="positionsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>آخر القرارات</h2>
+            </div>
+            <div class="timeline" id="decisionList"></div>
+          </article>
+        </section>
+
+        <section class="three-col">
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>آخر الصفقات المغلقة</h2>
+              <span class="chip orange" id="tradeCount">0</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الزوج</th>
+                    <th>الدخول</th>
+                    <th>الخروج</th>
+                    <th>صافي الربح</th>
+                  </tr>
+                </thead>
+                <tbody id="tradeBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card panel">
+            <div class="panel-header">
+              <h2>الأخبار وفلتر المخاطر</h2>
+            </div>
+            <div class="news-box">
+              <div class="tiny muted" id="newsSummary">جارٍ التحميل...</div>
+              <div class="news-list" id="newsList"></div>
+            </div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const STRAT_AR = {
+        trend_pullback: 'ارتداد مع الاتجاه',
+        donchian_breakout: 'اختراق دونشيان',
+        trend: 'تتبّع الاتجاه',
+        breakout: 'الاختراق',
+        bounce: 'الارتداد',
+        macro_momentum_hybrid: 'هجين الزخم الكلي',
+        algorithmic_discretionary_hybrid: 'خوارزمي مع سياق الأخبار',
+        volume_profile_range: 'نطاق حجم التداول',
+        volatility_breakout_hedge: 'اختراق تقلب مع تحوّط',
+        donchian_trend: 'اتجاه دونشيان متعدد الفترات',
+        forced_test: 'اختبار Futures',
+        test: 'اختبار Spot',
+        wait: 'انتظار',
+        unknown: 'غير معروفة'
+      };
+
+      function stratLabel(id) {
+        const key = String(id == null ? '' : id).trim();
+        if (!key) return 'استراتيجية';
+        return Object.prototype.hasOwnProperty.call(STRAT_AR, key) ? STRAT_AR[key] : key;
+      }
+
+      const fallbackData = {
+        env: 'demo',
+        trading_enabled: true,
+        wallet: { total: 12540.75, free: 3800.45, cash: 1500.4, positions_value: 7240.3 },
+        stats: {
+          realized_total: 1820.4,
+          realized_today: 245.1,
+          unrealized: 462.7,
+          win_rate: 58.3,
+          wins: 14,
+          losses: 10,
+          total: 24,
+          exposure: 37.5,
+          open_trades: 3
+        },
+        positions: [
+          { symbol: 'BTC/USDT', side: 'long', entry: 64320, price: 64680, pnl_usdt: 214.8 },
+          { symbol: 'ETH/USDT', side: 'short', entry: 3120, price: 3084, pnl_usdt: 126.4 },
+          { symbol: 'SOL/USDT', side: 'long', entry: 156.2, price: 160.8, pnl_usdt: 88.1 }
+        ],
+        markets: [
+          { symbol: 'BTC/USDT', price: 64680, signal_strength: 76, signal: true, direction: 'long' },
+          { symbol: 'ETH/USDT', price: 3118.4, signal_strength: 68, signal: true, direction: 'short' },
+          { symbol: 'SOL/USDT', price: 160.5, signal_strength: 63, signal: true, direction: 'long' },
+          { symbol: 'BNB/USDT', price: 602.7, signal_strength: 52, signal: false, direction: 'long' },
+          { symbol: 'XRP/USDT', price: 0.61, signal_strength: 47, signal: false, direction: 'short' },
+          { symbol: 'ADA/USDT', price: 0.82, signal_strength: 44, signal: false, direction: 'long' }
+        ],
+        futures: { balance: 3200.5, free_balance: 1800, open_positions: 2, connected: true, trading_enabled: true },
+        platforms: [{ id: 'binance', connected: true }, { id: 'binance-futures', connected: true }],
+        trades: [
+          { symbol: 'BTC/USDT', entry: 63540, exit: 64200, pnl_usdt: 132.1 },
+          { symbol: 'ETH/USDT', entry: 3050, exit: 2996, pnl_usdt: -58.3 },
+          { symbol: 'SOL/USDT', entry: 148.4, exit: 152.8, pnl_usdt: 77.5 }
+        ],
+        decisions: [
+          { symbol: 'BTC/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'إغلاق فوق EMA20 بعد تراجع، والاتجاه فوق EMA200', created_at: '2026-11-04T12:10:00Z' },
+          { symbol: 'ETH/USDT', strategy: 'donchian_breakout', signal: 'long', outcome: 'blocked', reason: 'إغلاق فوق قمة 20 شمعة، وBTC اليومي فوق EMA200', created_at: '2026-11-04T11:50:00Z' },
+          { symbol: 'SOL/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'ارتداد مع الاتجاه على 4 ساعات', created_at: '2026-11-04T10:35:00Z' }
+        ],
+        news: {
+          enabled: true,
+          blocked: false,
+          reason: 'لا توجد أحداث عالية الخطورة في الوقت الحالي',
+          headlines: [
+            { source: 'Reuters', title: 'أسواق العملات الرقمية تستعيد الزخم مع ارتفاع السيولة' },
+            { source: 'Bloomberg', title: 'تقارير المؤسسات تدعم استمرار الاتجاه الصاعد' },
+            { source: 'CNBC', title: 'الأسعار تعكس تحسن معنويات المضاربين' }
+          ]
+        }
+      };
+
+      function money(v, digits = 2) {
+        if (v == null || Number.isNaN(Number(v))) return '$0.00';
+        const n = Number(v);
+        return '$' + n.toLocaleString('en-US', {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits
+        });
+      }
+
+      function pct(v, digits = 1) {
+        if (v == null || Number.isNaN(Number(v))) return '0%';
+        return Number(v).toLocaleString('en-US', {
+          minimumFractionDigits: digits,
+          maximumFractionDigits: digits
+        }) + '%';
+      }
+
+      function safeNum(v, def = 0) {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : def;
+      }
+
+      function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+      }
+
+      function renderMarkets(markets) {
+        const grid = document.getElementById('marketGrid');
+        if (!grid) return;
+
+        const list = Array.isArray(markets) ? markets.slice(0, 6) : [];
+
+        grid.innerHTML = list.map((m) => {
+          const strength = Math.max(0, Math.min(100, safeNum(m.signal_strength, 0)));
+          const badge = m.signal ? 'chip green' : 'chip cyan';
+          const label = m.signal ? (m.direction === 'short' ? 'شورت' : 'لونغ') : 'مراقبة';
+          const price = safeNum(m.price, 0);
+          return `
+            <div class="market-tile">
+              <div class="market-row">
+                <div class="coin-tag"><span class="coin-icon">${String(m.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span><span>${m.symbol || '—'}</span></div>
+                <span class="${badge}">${label}</span>
+              </div>
+              <div class="price">${money(price, price < 1 ? 4 : 2)}</div>
+              <div class="delta">قوة الإشارة: ${pct(strength, 0)}</div>
+              <div class="signal-bar" style="margin-top: 10px;">
+                <div class="signal-fill" style="width: ${strength}%"></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderPositions(positions) {
+        const tbody = document.getElementById('positionsBody');
+        if (!tbody) return;
+
+        const list = Array.isArray(positions) ? positions : [];
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="muted">لا توجد مراكز مفتوحة</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map((pos) => {
+          const side = pos.side === 'short' ? 'شورت' : 'لونغ';
+          const pnl = safeNum(pos.pnl_usdt, 0);
+          return `
+            <tr>
+              <td><span class="symbol"><span class="coin-icon">${String(pos.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span>${pos.symbol || '—'}</span></td>
+              <td><span class="chip ${pnl >= 0 ? 'green' : 'red'}">${side}</span></td>
+              <td>${money(pos.entry, 2)}</td>
+              <td>${money(pos.price, 2)}</td>
+              <td class="${pnl >= 0 ? 'up' : 'down'}">${money(pnl, 2)}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function renderTrades(trades) {
+        const tbody = document.getElementById('tradeBody');
+        if (!tbody) return;
+
+        const list = Array.isArray(trades) ? trades.slice(0, 6) : [];
+        if (!list.length) {
+          tbody.innerHTML = '<tr><td colspan="4" class="muted">لا توجد صفقات مغلقة</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = list.map((t) => {
+          const pnl = safeNum(t.pnl_usdt, 0);
+          return `
+            <tr>
+              <td><span class="symbol"><span class="coin-icon">${String(t.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span>${t.symbol || '—'}</span></td>
+              <td>${money(t.entry, 2)}</td>
+              <td>${money(t.exit, 2)}</td>
+              <td class="${pnl >= 0 ? 'up' : 'down'}">${money(pnl, 2)}</td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function renderDecisions(decisions) {
+        const holder = document.getElementById('decisionList');
+        if (!holder) return;
+
+        const list = Array.isArray(decisions) ? decisions.slice(0, 4) : [];
+
+        holder.innerHTML = list.map((d) => {
+          const outcomeClass = /executed|filled|opened|success/i.test(String(d.outcome || '')) ? 'green' : 'orange';
+          const direction = d.signal === 'short' ? 'بيع' : 'شراء';
+          return `
+            <div class="decision">
+              <div class="decision-head">
+                <span>${d.symbol || '—'}</span>
+                <span class="chip ${outcomeClass}">${d.outcome || '—'}</span>
+              </div>
+              <div class="decision-meta">
+                <div>${stratLabel(d.strategy)} · ${direction}</div>
+                <div>${d.reason || 'لا يوجد سبب'}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderNews(data) {
+        const summary = document.getElementById('newsSummary');
+        const list = document.getElementById('newsList');
+        if (!summary || !list) return;
+
+        const news = data && Array.isArray(data.headlines) ? data.headlines.slice(0, 3) : [];
+        const blocked = !!(data && data.blocked);
+        summary.textContent = blocked ? 'الأخبار محظورة: الدخول مؤقتاً متوقف' : (data && data.reason ? data.reason : 'لا توجد إشعارات رأسمالية عالية');
+
+        list.innerHTML = news.length ? news.map((item) => `
+          <div class="news-item"><strong>${item.source || 'خبر'}</strong><br>${item.title || ''}</div>
+        `).join('') : '<div class="news-item">لا توجد أخبار حديثة.</div>';
+      }
+
+      async function loadState() {
+        try {
+          const response = await fetch('/api/state?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          const data = await response.json();
+          renderDashboard(data);
+        } catch (err) {
+          renderDashboard(fallbackData);
+        }
+      }
+
+      function renderDashboard(data) {
+        const wallet = data.wallet || {};
+        const stats = data.stats || {};
+        const positions = Array.isArray(data.positions) ? data.positions : [];
+        const markets = Array.isArray(data.markets) ? data.markets : [];
+        const trades = Array.isArray(data.trades) ? data.trades : [];
+        const decisions = Array.isArray(data.decisions) ? data.decisions : [];
+        const futures = data.futures || {};
+        const platforms = Array.isArray(data.platforms) ? data.platforms : [];
+        const news = data.news || {};
+
+        const totalWallet = safeNum(wallet.total, 0);
+        const realized = safeNum(stats.realized_total, 0);
+        const unrealized = safeNum(stats.unrealized, 0);
+        const winRate = safeNum(stats.win_rate, 0);
+        const exposure = safeNum(stats.exposure, 0);
+        const openTotal = safeNum(stats.open_trades, positions.length);
+
+        setText('totalWallet', money(totalWallet, 2));
+        setText('walletDelta', `مثبت: ${money(wallet.free || 0, 2)} · نقد: ${money(wallet.cash || 0, 2)}`);
+        setText('realizedPnl', money(realized, 2));
+        setText('realizedMeta', `اليوم ${money(stats.realized_today || 0, 2)}`);
+        setText('unrealizedPnl', money(unrealized, 2));
+        setText('unrealizedMeta', `على ${positions.length} مركز`);
+        setText('openTrades', String(openTotal));
+        setText('openMeta', `Spot ${positions.filter(p => !String(p.symbol).includes(':')).length} · Futures ${safeNum(futures.open_positions, 0)}`);
+        setText('winRate', pct(winRate, 1));
+        setText('winMeta', `${safeNum(stats.wins, 0)} فوز · ${safeNum(stats.losses, 0)} خسارة`);
+        setText('exposurePct', pct(exposure, 1));
+        setText('exposureMeta', exposure > 70 ? 'مرتفع' : exposure > 35 ? 'متوسط' : 'منخفض');
+
+        const spotConnected = !!(platforms.find(p => p && p.id === 'binance') || {}).connected;
+        const futConnected = !!(platforms.find(p => p && p.id === 'binance-futures') || {}).connected;
+        setText('spotState', spotConnected ? 'متصل' : 'غير متصل');
+        setText('futuresState', futConnected ? 'متصل' : 'غير متصل');
+        document.getElementById('spotState').className = 'chip ' + (spotConnected ? 'green' : 'red');
+        document.getElementById('futuresState').className = 'chip ' + (futConnected ? 'cyan' : 'red');
+        setText('spotBalance', money(wallet.total || 0, 2));
+        setText('spotFree', money(wallet.free || 0, 2));
+        setText('spotOpen', String(Math.max(0, positions.length)));
+        setText('spotPnl', money(realized, 2));
+        setText('futuresBalance', money(futures.balance || 0, 2));
+        setText('futuresFree', money(futures.free_balance || 0, 2));
+        setText('futuresOpen', String(safeNum(futures.open_positions, 0)));
+        setText('futuresPnl', money((futures.pnl_usdt || 0), 2));
+        setText('openCountLabel', String(positions.length));
+        setText('tradeCount', String(trades.length));
+        setText('marketCount', `${markets.length} رموز`);
+
+        const status = data.trading_enabled === false ? 'متوقف' : 'يعمل';
+        const mode = (data.env || 'demo').toUpperCase();
+        document.getElementById('statusPill').textContent = status;
+        document.getElementById('statusPill').className = 'pill ' + (data.trading_enabled === false ? 'warn' : 'neutral');
+        document.getElementById('modePill').textContent = 'الوضع: ' + (mode === 'LIVE' ? 'حقيقي' : 'تجريبي');
+        document.getElementById('riskPill').textContent = exposure > 70 ? 'مخاطرة مرتفعة' : 'مستوى مخاطرة مقبول';
+        document.getElementById('riskPill').className = 'pill ' + (exposure > 70 ? 'danger' : 'warn');
+
+        renderMarkets(markets);
+        renderPositions(positions);
+        renderTrades(trades);
+        renderDecisions(decisions);
+        renderNews(news);
+      }
+
+      loadState();
+      setInterval(loadState, 15000);
+    </script>
+  </body>
+</html>
