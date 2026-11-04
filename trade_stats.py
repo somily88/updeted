@@ -22,7 +22,9 @@ def r_multiple(net_pnl_usdt, risk_usdt):
 
 # Spot realized PnL counts only these cost qualities. /api/state and strategy
 # stats both use this set so an unverified row cannot move one total and not the other.
-VERIFIED_SPOT_QUALITIES = ("actual", "estimated")
+# matched_by_time is a fill match with no stored order id. It counts in realized
+# PnL (same as actual/estimated) and is reported separately on the reconcile status.
+VERIFIED_SPOT_QUALITIES = ("actual", "estimated", "matched_by_time")
 
 
 def spot_verified_sql(pnl_col="pnl_usdt", quality_col="cost_quality"):

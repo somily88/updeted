@@ -258,7 +258,7 @@ function renderHistory(ts){
   if(!ts.length){el('trade-history').innerHTML='<div class="empty">لا توجد صفقات مغلقة مسجلة بعد.</div>';return;}
   el('trade-history').innerHTML='<table class="resp"><thead><tr><th>الزوج</th><th>الدخول ← الخروج</th><th>الصافي</th><th>التغير</th><th>الوقت</th></tr></thead><tbody>'+ts.slice(0,40).map(function(t){
     var known=t.pnl_known!==false,c=known?cls(t.pnl_usdt):'flat',f=isFut(t);
-    var q={actual:'رسوم فعلية',estimated:'رسوم مقدرة',simulated:'محاكاة',net_actual_costs:'صافي وتكاليف مسجلة',net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality]||(known?'صافي مسجل':'سجل قديم · غير مؤكد');
+    var q={actual:'رسوم فعلية',estimated:'رسوم مقدرة',matched_by_time:'مطابقة بالوقت',simulated:'محاكاة',net_actual_costs:'صافي وتكاليف مسجلة',net_estimated_costs:'صافي بتكاليف مقدرة'}[t.cost_quality]||(known?'صافي مسجل':'سجل قديم · غير مؤكد');
     var cost=t.gross_pnl_usdt==null?'':'إجمالي '+usd(t.gross_pnl_usdt,2)+' · رسوم '+usd(t.fees_usdt||0,3)+(t.funding_usdt==null?'':' · تمويل '+usd(t.funding_usdt,3));
     return '<tr><td data-l="الزوج"><span class="sym">'+coin(t.symbol)+'<span><span dir="ltr">'+esc(t.symbol)+'</span><small>'+(f?(t.side==='short'?'Futures · شورت':'Futures · لونغ'):'Spot')+' · '+esc(q)+'</small></span></span></td>'+
       '<td data-l="الدخول ← الخروج" class="num">'+px(t.entry)+'<small>'+px(t.exit)+'</small></td>'+

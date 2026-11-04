@@ -1,6 +1,7 @@
 import os
 from execution import place_entry_order
-from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats, spot_unverified_sql, spot_verified_sql
+from trade_stats import (initial_risk_usdt, r_multiple, load_strategy_stats,
+                         spot_unverified_sql, spot_verified_sql, VERIFIED_SPOT_QUALITIES)
 import spot_fill_reconcile
 import spot_rules
 import secrets
@@ -2896,13 +2897,14 @@ def get_performance_report(days=30, limit=5000):
                 WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
         for row in rows:
             quality = row[7] or "legacy_or_unverified"
-            if row[3] is None or quality not in ("actual", "estimated", "simulated"):
+            if row[3] is None or quality not in VERIFIED_SPOT_QUALITIES + ("simulated",):
                 unverified_spot_trades += 1
                 continue
             pnl = float(row[3])
             quality_label = {
                 "actual": "صافي بعد رسوم فعلية",
                 "estimated": "صافي بعد رسوم مقدرة",
+                "matched_by_time": "مطابقة بالوقت من تنفيذات Binance وتُحسب في المحقق",
                 "simulated": "محاكاة برسوم مقدرة",
                 "legacy_or_unverified": "سجل قديم أو تكلفة غير مؤكدة",
                 "unverified": "تكلفة غير مؤكدة",
@@ -3075,7 +3077,7 @@ def api_state():
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
-        'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated')),
+        'pnl_known': (t[7] is not None and t[8] in VERIFIED_SPOT_QUALITIES + ('simulated',)),
         'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None,
         'strategy': t[11] if len(t) > 11 else None, 'market_type': 'Spot'
     } for t in get_recent_trades(limit=50)]

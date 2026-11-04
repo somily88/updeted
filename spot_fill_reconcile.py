@@ -24,6 +24,7 @@ EXIT_OUTCOMES = (
     "تم تنفيذ جني جزئي",
     "إغلاق جزئي؛ المركز ما زال مفتوحًا",
 )
+TIME_MATCH_QUALITY = "matched_by_time"
 REASON_AR = {
     "order_id_missing": "معرف الأمر غير محفوظ",
     "no_fills": "لا تنفيذات",
@@ -31,6 +32,10 @@ REASON_AR = {
     "fee_currency_unpriced": "عمولة بعملة بلا سعر",
     "incomplete_fill": "بيانات تنفيذ ناقصة",
     "ambiguous_order": "أوامر غير محسومة",
+    "ambiguous_match": "أكثر من تنفيذ محتمل",
+    "no_fills_in_window": "لا تنفيذ داخل النافذة",
+    "qty_mismatch": "الكمية لا تطابق النافذة",
+    "history_unavailable": "سجل التنفيذات لا يغطي الصفقة",
 }
 _KNOWN_FEE = ("actual", "estimated", "simulated")
 _SNAPSHOT_FIELDS = (
@@ -89,6 +94,20 @@ def qty_tolerance():
         return 0.005
 
 
+def fallback_enabled():
+    return str(os.getenv("SPOT_RECONCILE_FALLBACK_ENABLED", "true")).strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def fallback_window_sec():
+    """Tight window around the recorded close. Default is three minutes."""
+    try:
+        value = float(str(os.getenv("SPOT_RECONCILE_FALLBACK_WINDOW_SEC", "180")).strip() or "180")
+    except ValueError:
+        value = 180.0
+    return max(1.0, min(value, 86400.0))
+
+
 def append_order_id(existing, order_id):
     text = str(order_id or "").strip()
     if not text or any(ch.isspace() for ch in text) or len(text) > 64:
@@ -125,14 +144,16 @@ def closed_spot_quality(simulated, entry_quality, exit_quality):
     return combine_fee_quality(entry_quality, exit_quality)
 
 
-def warning_ar(unverified, matched, unmatched, reasons, exchange_unavailable=False):
+def warning_ar(unverified, matched, unmatched, reasons, exchange_unavailable=False, matched_by_time=0):
+    """matched is order-id matches. matched_by_time also counts in realized PnL."""
     parts = []
     if unverified:
         parts.append(
             "تنبيه: {} صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.".format(int(unverified))
         )
-    if unverified or matched or unmatched:
-        text = "{} طُوبقت، {} لم تُطابق".format(int(matched), int(unmatched))
+    if unverified or matched or unmatched or matched_by_time:
+        text = "{} طُوبقت برقم الأمر، {} طُوبقت بالوقت وتُحسب في المحقق، {} لم تُطابق".format(
+            int(matched), int(matched_by_time), int(unmatched))
         labels = []
         for key, count in sorted((reasons or {}).items()):
             if not count:
@@ -619,7 +640,7 @@ def reconcile_closed_spot_trades(db_path, exchange, pause_sec=None, qty_toleranc
         conn.close()
     warning = warning_ar(
         snapshot["unmatched"], snapshot["matched"], snapshot["unmatched"],
-        snapshot["reasons"], exchange_down,
+        snapshot["reasons"], exchange_down, snapshot.get("matched_by_time", 0),
     )
     if exchange_down:
         summary = "تعذر الاتصال بـ Binance أثناء مطابقة السبوت؛ ستُعاد المحاولة لاحقًا ({} طُوبقت في هذه الجولة).".format(
@@ -631,6 +652,8 @@ def reconcile_closed_spot_trades(db_path, exchange, pause_sec=None, qty_toleranc
         "ok": not exchange_down,
         "exchange_unavailable": exchange_down,
         "matched": snapshot["matched"],
+        "matched_by_time": snapshot.get("matched_by_time", 0),
+        "matched_by_time_in_realized": True,
         "matched_this_run": matched_this_run,
         "unmatched": snapshot["unmatched"],
         "reasons": snapshot["reasons"],
@@ -638,6 +661,231 @@ def reconcile_closed_spot_trades(db_path, exchange, pause_sec=None, qty_toleranc
         "warning_ar": warning,
         "summary_ar": summary,
     }
+
+
+def expected_base_qty(row):
+    """Base quantity implied by the stored close. None when the row cannot support a qty check."""
+    try:
+        entry = float(row["entry_price"] or 0.0)
+        exit_price = float(row["exit_price"] or 0.0)
+    except (TypeError, ValueError, KeyError):
+        return None
+    gross = row["gross_pnl_usdt"] if "gross_pnl_usdt" in row.keys() else None
+    if entry > 0 and exit_price > 0 and exit_price != entry and gross is not None:
+        try:
+            qty = float(gross) / (exit_price - entry)
+        except (TypeError, ValueError, ZeroDivisionError):
+            qty = 0.0
+        if qty > 0:
+            return qty
+    try:
+        pnl = row["pnl_usdt"]
+        pct = row["pnl_pct"]
+    except (KeyError, IndexError):
+        return None
+    if pnl is None or pct in (None, 0, 0.0) or entry <= 0:
+        return None
+    try:
+        basis = float(pnl) / (float(pct) / 100.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    if basis <= 0:
+        return None
+    return basis / entry
+
+
+def aggregate_orders(fills, symbol, quote_price_fn):
+    """Sum partial fills that share an order id. Orders that cannot be priced are kept as invalid."""
+    grouped = _index_by_order(fills)
+    orders = []
+    for order_id, group in grouped.items():
+        side = ""
+        times = []
+        for fill in group:
+            side = _side(fill) or side
+            if fill.get("timestamp") is not None:
+                times.append(int(fill["timestamp"]))
+        if side not in ("buy", "sell"):
+            continue
+        summary, reason = summarize_leg(group, symbol, side, quote_price_fn)
+        orders.append({
+            "order_id": str(order_id),
+            "side": side,
+            "summary": summary,
+            "invalid": None if summary is not None else (reason or "incomplete_fill"),
+            "net_qty": summary["net_qty"] if summary else 0.0,
+            "first_ms": min(times) if times else 0,
+            "last_ms": max(times) if times else 0,
+        })
+    return orders
+
+
+def _order_overlaps_window(order, start_ms, end_ms):
+    return not (order["last_ms"] < start_ms or order["first_ms"] > end_ms)
+
+
+def _contested(order, trade_id, windows, reserved_ids):
+    if order["order_id"] in reserved_ids:
+        return True
+    for other_id, start_ms, end_ms in windows:
+        if int(other_id) == int(trade_id):
+            continue
+        if _order_overlaps_window(order, start_ms, end_ms):
+            return True
+    return False
+
+
+def candidate_order_pairs(orders, qty, tolerance, start_ms, end_ms):
+    """One buy order and one sell order, each already aggregated, both fully inside the window."""
+    inside = [
+        order for order in orders
+        if order.get("summary") and order["first_ms"] >= start_ms and order["last_ms"] <= end_ms
+    ]
+    buys = [order for order in inside if order["side"] == "buy" and quantities_match(order["net_qty"], qty, tolerance)]
+    sells = [order for order in inside if order["side"] == "sell" and quantities_match(order["net_qty"], qty, tolerance)]
+    pairs = [(buy, sell) for buy in buys for sell in sells if buy["last_ms"] <= sell["last_ms"]]
+    return inside, pairs
+
+
+def plan_time_matches(trades, orders, windows, reserved_ids, window_sec, tolerance, history_gap):
+    """Return {trade_id: {"status": "matched", "buy", "sell"} | {"status": "unmatched", "reason"}}."""
+    plans = {}
+    proposals = {}
+    for row in trades:
+        trade_id = int(row["id"])
+        moment = _parse_ts(row["timestamp"])
+        qty = expected_base_qty(row)
+        if moment is None or qty is None:
+            plans[trade_id] = {"status": "unmatched", "reason": "qty_mismatch"}
+            continue
+        start_ms = int((moment - float(window_sec)) * 1000)
+        end_ms = int((moment + float(window_sec)) * 1000)
+        _inside, pairs = candidate_order_pairs(orders, qty, tolerance, start_ms, end_ms)
+        if len(pairs) > 1:
+            plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+            continue
+        if len(pairs) == 1 and (_contested(pairs[0][0], trade_id, windows, reserved_ids)
+                                or _contested(pairs[0][1], trade_id, windows, reserved_ids)):
+            plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+            continue
+        if len(pairs) == 1:
+            proposals[trade_id] = pairs[0]
+            continue
+        if history_gap and not _inside:
+            plans[trade_id] = {"status": "unmatched", "reason": "history_unavailable"}
+        elif not _inside:
+            plans[trade_id] = {"status": "unmatched", "reason": "no_fills_in_window"}
+        else:
+            plans[trade_id] = {"status": "unmatched", "reason": "qty_mismatch"}
+    claimed = {}
+    for trade_id, (buy, sell) in proposals.items():
+        for order in (buy, sell):
+            claimed.setdefault(order["order_id"], []).append(trade_id)
+    shared = {order_id for order_id, trade_ids in claimed.items() if len(trade_ids) > 1}
+    for trade_id, (buy, sell) in proposals.items():
+        if buy["order_id"] in shared or sell["order_id"] in shared:
+            plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+        else:
+            plans[trade_id] = {"status": "matched", "buy": buy, "sell": sell}
+    return plans
+
+
+def _symbol_windows(conn, symbol, window_sec):
+    reserved_ids = set()
+    windows = []
+    if "trades" not in {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+        return reserved_ids, windows
+    for row in conn.execute(
+        "SELECT id, timestamp, entry_order_ids, exit_order_ids, cost_quality FROM trades WHERE symbol=?",
+        (symbol,),
+    ):
+        if str(row["cost_quality"] or "") == "simulated":
+            continue
+        for order_id in split_order_ids(row["entry_order_ids"]) + split_order_ids(row["exit_order_ids"]):
+            reserved_ids.add(order_id)
+        moment = _parse_ts(row["timestamp"])
+        if moment is None:
+            continue
+        windows.append((
+            int(row["id"]),
+            int((moment - float(window_sec)) * 1000),
+            int((moment + float(window_sec)) * 1000),
+        ))
+    return reserved_ids, windows
+
+
+def _history_gap(client, symbol, window_end_ms, fetched, pause, sleeper):
+    """True when the exchange has no fill old enough to cover this window."""
+    if fetched:
+        return False
+    earliest = _read(client.fetch_my_trades, symbol, 0, 1, {}) or []
+    sleeper(pause)
+    if not earliest:
+        return True
+    oldest = min(int(item.get("timestamp") or 0) for item in earliest)
+    return oldest > int(window_end_ms)
+
+
+def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, action):
+    risk = row["risk_usdt"] if "risk_usdt" in row.keys() else None
+    try:
+        risk_value = float(risk) if risk is not None else None
+    except (TypeError, ValueError):
+        risk_value = None
+    r_value = r_multiple(reconciled["pnl_usdt"], risk_value) if risk_value and risk_value > 0 else None
+    conn.execute(
+        """UPDATE trades SET entry_price=?, exit_price=?, pnl_pct=?, pnl_usdt=?, status=?,
+           cost_quality=?, gross_pnl_usdt=?, fees_usdt=?, r_multiple=COALESCE(?, r_multiple),
+           entry_order_ids=?, exit_order_ids=?, reconcile_status='matched', reconcile_reason=NULL,
+           reconciled_at=?
+           WHERE id=?""",
+        (reconciled["entry_price"], reconciled["exit_price"], reconciled["pnl_pct"], reconciled["pnl_usdt"],
+         reconciled["status"], reconciled["cost_quality"], reconciled["gross_pnl_usdt"], reconciled["fees_usdt"],
+         r_value, ",".join(entry_ids), ",".join(exit_ids), now, int(row["id"])),
+    )
+    _write_audit(conn, int(row["id"]), action, None, snapshot, reconciled, now)
+    conn.commit()
+
+
+def _time_fallback_symbol(conn, client, rows, pause, sleeper, tolerance, window_sec, page_limit, price_cache, now):
+    symbol = rows[0]["symbol"]
+    moments = [moment for moment in (_parse_ts(row["timestamp"]) for row in rows) if moment is not None]
+    if not moments:
+        for row in rows:
+            snapshot = _snapshot(row)
+            _capture_original(conn, int(row["id"]), snapshot, now)
+            _mark_unmatched(conn, row, snapshot, "qty_mismatch", [], [], now)
+        return 0
+    window_start = int((min(moments) - float(window_sec)) * 1000)
+    window_end = int((max(moments) + float(window_sec)) * 1000)
+    fetched = fetch_symbol_trades(
+        client, symbol, window_start, window_end, pause, sleeper, page_limit=page_limit)
+    gap = _history_gap(client, symbol, window_end, fetched, pause, sleeper)
+    lookup = _quote_price_fn(client, price_cache, pause, sleeper)
+    orders = aggregate_orders(fetched, symbol, lookup)
+    reserved_ids, windows = _symbol_windows(conn, symbol, window_sec)
+    plans = plan_time_matches(rows, orders, windows, reserved_ids, window_sec, tolerance, gap)
+    matched = 0
+    for row in rows:
+        trade_id = int(row["id"])
+        plan = plans[trade_id]
+        snapshot = _snapshot(row)
+        _capture_original(conn, trade_id, snapshot, now)
+        if plan["status"] != "matched":
+            _mark_unmatched(conn, row, snapshot, plan["reason"], [], [], now)
+            continue
+        buy, sell = plan["buy"]["summary"], plan["sell"]["summary"]
+        reconciled = build_reconciliation(buy, sell)
+        if reconciled is None:
+            _mark_unmatched(conn, row, snapshot, "incomplete_fill", [], [], now)
+            continue
+        reconciled["cost_quality"] = TIME_MATCH_QUALITY
+        _apply_verified(
+            conn, row, snapshot, reconciled,
+            [plan["buy"]["order_id"]], [plan["sell"]["order_id"]], now, "matched_by_time",
+        )
+        matched += 1
+    return matched
 
 
 def _reconcile_candidates(conn, client, pause, tolerance, min_age_sec, page_limit, sleeper, now):
@@ -668,12 +916,20 @@ def _reconcile_candidates(conn, client, pause, tolerance, min_age_sec, page_limi
             trades = fetch_symbol_trades(client, symbol, since_ms, until_ms, pause, sleeper, page_limit=page_limit)
             cache = _index_by_order(trades)
             sleeper(pause)
+        fallback_rows = []
         for row, entry_ids, exit_ids in prepared:
             outcome = _reconcile_one(
                 conn, client, row, entry_ids, exit_ids, cache, price_cache, pause, sleeper, tolerance, now
             )
             if outcome == "matched":
                 matched += 1
+            elif outcome == "fallback":
+                fallback_rows.append(row)
+        if fallback_rows:
+            matched += _time_fallback_symbol(
+                conn, client, fallback_rows, pause, sleeper, tolerance,
+                fallback_window_sec(), page_limit, price_cache, now,
+            )
     return matched
 
 
@@ -685,11 +941,15 @@ def _quote_price_fn(client, cache, pause, sleeper):
 
 def _reconcile_one(conn, client, row, entry_ids, exit_ids, cache, price_cache, pause, sleeper, tolerance, now):
     trade_id = int(row["id"])
-    snapshot = _snapshot(row)
-    _capture_original(conn, trade_id, snapshot, now)
     if not entry_ids or not exit_ids:
+        if fallback_enabled():
+            return "fallback"
+        snapshot = _snapshot(row)
+        _capture_original(conn, trade_id, snapshot, now)
         _mark_unmatched(conn, row, snapshot, "order_id_missing", entry_ids, exit_ids, now)
         return "unmatched"
+    snapshot = _snapshot(row)
+    _capture_original(conn, trade_id, snapshot, now)
     try:
         entry_fills = _fills_for_orders(client, row["symbol"], entry_ids, cache, pause, sleeper)
         exit_fills = _fills_for_orders(client, row["symbol"], exit_ids, cache, pause, sleeper)
@@ -712,24 +972,7 @@ def _reconcile_one(conn, client, row, entry_ids, exit_ids, cache, price_cache, p
     if reconciled is None:
         _mark_unmatched(conn, row, snapshot, "incomplete_fill", entry_ids, exit_ids, now)
         return "unmatched"
-    risk = row["risk_usdt"] if "risk_usdt" in row.keys() else None
-    try:
-        risk_value = float(risk) if risk is not None else None
-    except (TypeError, ValueError):
-        risk_value = None
-    r_value = r_multiple(reconciled["pnl_usdt"], risk_value) if risk_value and risk_value > 0 else None
-    conn.execute(
-        """UPDATE trades SET entry_price=?, exit_price=?, pnl_pct=?, pnl_usdt=?, status=?,
-           cost_quality=?, gross_pnl_usdt=?, fees_usdt=?, r_multiple=COALESCE(?, r_multiple),
-           entry_order_ids=?, exit_order_ids=?, reconcile_status='matched', reconcile_reason=NULL,
-           reconciled_at=?
-           WHERE id=?""",
-        (reconciled["entry_price"], reconciled["exit_price"], reconciled["pnl_pct"], reconciled["pnl_usdt"],
-         reconciled["status"], reconciled["cost_quality"], reconciled["gross_pnl_usdt"], reconciled["fees_usdt"],
-         r_value, ",".join(entry_ids), ",".join(exit_ids), now, trade_id),
-    )
-    _write_audit(conn, trade_id, "matched", None, snapshot, reconciled, now)
-    conn.commit()
+    _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, "matched")
     return "matched"
 
 
@@ -747,11 +990,17 @@ def _mark_unmatched(conn, row, snapshot, reason, entry_ids, exit_ids, now):
 
 
 def _live_counts(conn):
+    empty = {"matched": 0, "matched_by_time": 0, "unmatched": 0, "reasons": {}}
     if not _columns(conn, "trades"):
-        return {"matched": 0, "unmatched": 0, "reasons": {}}
-    matched = conn.execute(
+        return empty
+    matched_by_time = conn.execute(
+        "SELECT COUNT(*) FROM trades WHERE cost_quality=?", (TIME_MATCH_QUALITY,)
+    ).fetchone()[0]
+    matched_rows = conn.execute(
         "SELECT COUNT(*) FROM trades WHERE reconcile_status='matched'"
     ).fetchone()[0]
+    # Order-id matches only. Time matches stay in matched_by_time and still count as realized.
+    matched = int(matched_rows or 0) - int(matched_by_time or 0)
     unmatched = conn.execute(
         "SELECT COUNT(*) FROM trades WHERE " + spot_unverified_sql()
     ).fetchone()[0]
@@ -763,7 +1012,12 @@ def _live_counts(conn):
         ):
             if row["reconcile_reason"]:
                 reasons[row["reconcile_reason"]] = int(row["n"])
-    return {"matched": int(matched or 0), "unmatched": int(unmatched or 0), "reasons": reasons}
+    return {
+        "matched": max(matched, 0),
+        "matched_by_time": int(matched_by_time or 0),
+        "unmatched": int(unmatched or 0),
+        "reasons": reasons,
+    }
 
 
 def _save_state(conn, now, snapshot, exchange_down, r_count):
@@ -788,11 +1042,15 @@ def status_snapshot(db_path, unverified_count=None):
         "last_run_at": None,
         "last_error": None,
         "matched": 0,
+        "matched_by_time": 0,
+        "matched_by_time_in_realized": True,
         "unmatched": int(unverified_count or 0),
         "reasons": {},
         "exchange_unavailable": False,
         "r_backfilled": 0,
-        "warning_ar": warning_ar(int(unverified_count or 0), 0, int(unverified_count or 0), {}, False),
+        "fallback_enabled": fallback_enabled(),
+        "fallback_window_sec": fallback_window_sec(),
+        "warning_ar": warning_ar(int(unverified_count or 0), 0, int(unverified_count or 0), {}, False, 0),
     }
     try:
         conn = _connect(db_path)
@@ -814,16 +1072,21 @@ def status_snapshot(db_path, unverified_count=None):
     else:
         unmatched = live["unmatched"]
     exchange_down = bool(state["exchange_unavailable"]) if state else False
-    warning = warning_ar(unmatched, live["matched"], unmatched, live["reasons"], exchange_down)
+    warning = warning_ar(
+        unmatched, live["matched"], unmatched, live["reasons"], exchange_down, live["matched_by_time"])
     return {
         "enabled": enabled(),
         "interval_min": interval_minutes(),
         "last_run_at": state["updated_at"] if state else None,
         "last_error": state["last_error"] if state else None,
         "matched": live["matched"],
+        "matched_by_time": live["matched_by_time"],
+        "matched_by_time_in_realized": True,
         "unmatched": unmatched,
         "reasons": live["reasons"],
         "exchange_unavailable": exchange_down,
         "r_backfilled": int(state["r_backfilled"] or 0) if state else 0,
+        "fallback_enabled": fallback_enabled(),
+        "fallback_window_sec": fallback_window_sec(),
         "warning_ar": warning,
     }

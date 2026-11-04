@@ -279,7 +279,8 @@ def test_no_fills_keeps_stored_prices(tmp_path):
     assert row["cost_quality"] == "legacy_or_unverified"
 
 
-def test_missing_order_id_does_not_call_exchange(tmp_path):
+def test_missing_order_id_does_not_call_exchange(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPOT_RECONCILE_FALLBACK_ENABLED", "false")
     path = make_db(tmp_path)
     trade_id = add_trade(path, entry_price=5, exit_price=6)
     ex = FakeExchange(trades=quote_pair())
@@ -448,10 +449,11 @@ def test_strategy_stats_use_the_same_verified_pnl(tmp_path):
 
 
 def test_warning_mentions_unverified_count_and_match_totals():
-    text = rec.warning_ar(118, 0, 118, {"order_id_missing": 118})
+    text = rec.warning_ar(118, 0, 118, {"order_id_missing": 100, "no_fills_in_window": 18}, matched_by_time=4)
     assert text.startswith("تنبيه: 118 صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.")
-    assert "0 طُوبقت، 118 لم تُطابق" in text
-    assert "118 معرف الأمر غير محفوظ" in text
+    assert "0 طُوبقت برقم الأمر، 4 طُوبقت بالوقت وتُحسب في المحقق، 118 لم تُطابق" in text
+    assert "100 معرف الأمر غير محفوظ" in text
+    assert "18 لا تنفيذ داخل النافذة" in text
 
 
 def test_repeated_unmatched_does_not_duplicate_the_audit(tmp_path):
@@ -513,6 +515,125 @@ def test_api_state_and_strategy_stats_share_realized_pnl(app_module, monkeypatch
     assert payload["spot_realized_usdt"] == pytest.approx(body["stats"]["realized_total"])
     spot_rows = [row for row in payload["strategies"] if row["market"] == "spot"]
     assert sum(row["net_pnl_usdt"] for row in spot_rows) == pytest.approx(-56.59)
+
+
+def _qty_trade(path, **overrides):
+    """Stored gross implies base qty 1.0 from entry 50 and exit 60."""
+    fields = dict(entry_price=50.0, exit_price=60.0, gross_pnl_usdt=10.0, pnl_usdt=-4.0,
+                  pnl_pct=-1.0, entry_order_ids=None, exit_order_ids=None)
+    fields.update(overrides)
+    return add_trade(path, **fields)
+
+
+def test_time_fallback_unique_match_counts_in_realized(tmp_path):
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.1, "USDT", ts - 1000),
+        fill("22", "sell", 1.0, 110.0, 0.11, "USDT", ts),
+    ])
+    result = run(path, ex)
+    row = trade_row(path, trade_id)
+    assert result["matched_by_time"] == 1
+    assert result["matched_by_time_in_realized"] is True
+    assert row["cost_quality"] == "matched_by_time"
+    assert row["entry_price"] == pytest.approx(100)
+    assert row["exit_price"] == pytest.approx(110)
+    assert row["pnl_usdt"] == pytest.approx(9.79)
+    assert row["entry_order_ids"] == "11" and row["exit_order_ids"] == "22"
+    assert not ex.created
+    assert "1 طُوبقت بالوقت وتُحسب في المحقق" in result["warning_ar"]
+    with rec._connect(path) as conn:
+        original = json.loads(conn.execute(
+            "SELECT original_json FROM spot_reconcile_original WHERE trade_id=?", (trade_id,)
+        ).fetchone()[0])
+    assert original["entry_price"] == 50.0
+    assert original["cost_quality"] == "legacy_or_unverified"
+    realized = trade_stats.load_strategy_stats(path)
+    assert realized[0]["net_pnl_usdt"] == pytest.approx(9.79)
+    again = run(path, ex)
+    assert again["matched_this_run"] == 0
+    assert trade_row(path, trade_id)["pnl_usdt"] == pytest.approx(9.79)
+
+
+def test_time_fallback_partial_fills_aggregate_per_order(tmp_path):
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 0.4, 40.0, 0.0, "USDT", ts - 2000),
+        fill("11", "buy", 0.6, 60.0, 0.0, "USDT", ts - 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["cost_quality"] == "matched_by_time"
+    assert row["entry_price"] == pytest.approx(100)
+    assert row["pnl_usdt"] == pytest.approx(110 - 100)
+
+
+def test_time_fallback_ambiguous_match_stays_unverified(tmp_path):
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path, entry_price=9, exit_price=10, gross_pnl_usdt=1.0)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", ts - 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts),
+        fill("33", "sell", 1.0, 111.0, 0.0, "USDT", ts + 500),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "ambiguous_match"
+    assert row["cost_quality"] == "legacy_or_unverified"
+    assert row["entry_price"] == 9 and row["exit_price"] == 10
+
+
+def test_time_fallback_does_not_assign_one_fill_to_two_trades(tmp_path):
+    path = make_db(tmp_path)
+    first = _qty_trade(path)
+    second = _qty_trade(path)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", ts - 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts),
+    ])
+    run(path, ex)
+    assert trade_row(path, first)["reconcile_reason"] == "ambiguous_match"
+    assert trade_row(path, second)["reconcile_reason"] == "ambiguous_match"
+    assert trade_row(path, first)["cost_quality"] == "legacy_or_unverified"
+    assert trade_row(path, second)["entry_price"] == 50.0
+
+
+def test_time_fallback_out_of_window_is_not_verified(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPOT_RECONCILE_FALLBACK_WINDOW_SEC", "180")
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path, entry_price=4, exit_price=5, gross_pnl_usdt=1.0)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("1", "buy", 0.01, 1.0, 0.0, "USDT", ts - 86400 * 1000),
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", ts + 600 * 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts + 600 * 1000 + 1000),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "no_fills_in_window"
+    assert row["entry_price"] == 4 and row["exit_price"] == 5
+    assert row["cost_quality"] == "legacy_or_unverified"
+
+
+def test_time_fallback_history_does_not_reach_the_trade(tmp_path):
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path, timestamp="2020-01-01 00:00:00", entry_price=4, exit_price=5, gross_pnl_usdt=1.0)
+    future = trade_ts("2024-06-01 12:00:00")
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", future),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", future + 1000),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "history_unavailable"
+    assert row["entry_price"] == 4
 
 
 def test_record_closed_keeps_known_fees_and_order_ids(app_module):
