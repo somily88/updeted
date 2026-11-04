@@ -40,6 +40,23 @@ MAX_PORTFOLIO_OPEN_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_OPEN_RISK_PCT", "8.
 MAX_CORRELATED_CLUSTER_RISK_PCT = float(os.getenv("MAX_CORRELATED_CLUSTER_RISK_PCT", "4.0"))
 
 
+def portfolio_open_risk_cap():
+    """Stricter of the legacy 8% cap and PORTFOLIO_MAX_OPEN_RISK_PCT (default 4).
+
+    Read on each call. A value stored in bot_settings is not consulted, so the
+    4% default applies on deploy even when an older environment still sets
+    MAX_PORTFOLIO_OPEN_RISK_PCT=8.
+    """
+    hard = float(MAX_PORTFOLIO_OPEN_RISK_PCT)
+    raw = os.getenv("PORTFOLIO_MAX_OPEN_RISK_PCT", "").strip()
+    soft = float(raw) if raw else 4.0
+    if not 0.0 < soft <= 20.0:
+        raise ValueError("PORTFOLIO_MAX_OPEN_RISK_PCT must be in (0, 20]")
+    if hard <= 0:
+        raise ValueError("MAX_PORTFOLIO_OPEN_RISK_PCT must be positive")
+    return min(hard, soft)
+
+
 def risk_cluster(symbol):
     """Conservative coarse groups for correlated open-risk limits."""
     base = str(symbol or "").split("/")[0].split(":")[0].upper()
@@ -67,7 +84,7 @@ def portfolio_risk_status(open_risks, candidate, total_equity,
     position limits cannot hide correlated exposure across accounts.
     """
     equity = float(total_equity or 0.0)
-    total_limit = float(max_total_pct or MAX_PORTFOLIO_OPEN_RISK_PCT)
+    total_limit = portfolio_open_risk_cap() if max_total_pct is None else float(max_total_pct)
     cluster_limit = float(max_cluster_pct or MAX_CORRELATED_CLUSTER_RISK_PCT)
     candidate_risk = float((candidate or {}).get("risk_usdt") or 0.0)
     if equity <= 0 or candidate_risk <= 0 or total_limit <= 0 or cluster_limit <= 0:

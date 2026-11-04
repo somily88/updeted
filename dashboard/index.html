@@ -592,6 +592,29 @@
     </div>
 
     <script>
+      const STRAT_AR = {
+        trend_pullback: 'ارتداد مع الاتجاه',
+        donchian_breakout: 'اختراق دونشيان',
+        trend: 'تتبّع الاتجاه',
+        breakout: 'الاختراق',
+        bounce: 'الارتداد',
+        macro_momentum_hybrid: 'هجين الزخم الكلي',
+        algorithmic_discretionary_hybrid: 'خوارزمي مع سياق الأخبار',
+        volume_profile_range: 'نطاق حجم التداول',
+        volatility_breakout_hedge: 'اختراق تقلب مع تحوّط',
+        donchian_trend: 'اتجاه دونشيان متعدد الفترات',
+        forced_test: 'اختبار Futures',
+        test: 'اختبار Spot',
+        wait: 'انتظار',
+        unknown: 'غير معروفة'
+      };
+
+      function stratLabel(id) {
+        const key = String(id == null ? '' : id).trim();
+        if (!key) return 'استراتيجية';
+        return Object.prototype.hasOwnProperty.call(STRAT_AR, key) ? STRAT_AR[key] : key;
+      }
+
       const fallbackData = {
         env: 'demo',
         trading_enabled: true,
@@ -628,9 +651,9 @@
           { symbol: 'SOL/USDT', entry: 148.4, exit: 152.8, pnl_usdt: 77.5 }
         ],
         decisions: [
-          { symbol: 'BTC/USDT', strategy: 'trend', signal: 'long', outcome: 'executed', reason: 'اختراق فوق EMA50 مع دعم قوي', created_at: '2026-11-04T12:10:00Z' },
-          { symbol: 'ETH/USDT', strategy: 'breakout', signal: 'short', outcome: 'blocked', reason: 'تجمّع إخباري + تذبذب عالي', created_at: '2026-11-04T11:50:00Z' },
-          { symbol: 'SOL/USDT', strategy: 'bounce', signal: 'long', outcome: 'executed', reason: 'ارتداد عند متوسطات متحركة', created_at: '2026-11-04T10:35:00Z' }
+          { symbol: 'BTC/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'إغلاق فوق EMA20 بعد تراجع، والاتجاه فوق EMA200', created_at: '2026-11-04T12:10:00Z' },
+          { symbol: 'ETH/USDT', strategy: 'donchian_breakout', signal: 'long', outcome: 'blocked', reason: 'إغلاق فوق قمة 20 شمعة، وBTC اليومي فوق EMA200', created_at: '2026-11-04T11:50:00Z' },
+          { symbol: 'SOL/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'ارتداد مع الاتجاه على 4 ساعات', created_at: '2026-11-04T10:35:00Z' }
         ],
         news: {
           enabled: true,
@@ -762,7 +785,7 @@
                 <span class="chip ${outcomeClass}">${d.outcome || '—'}</span>
               </div>
               <div class="decision-meta">
-                <div>${d.strategy || 'استراتيجية'} · ${direction}</div>
+                <div>${stratLabel(d.strategy)} · ${direction}</div>
                 <div>${d.reason || 'لا يوجد سبب'}</div>
               </div>
             </div>

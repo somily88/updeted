@@ -22,6 +22,7 @@ from risk_controls import daily_loss_status, portfolio_risk_status
 from database import get_db_connection
 import rl_bandit
 import capital_allocator
+import core_strategies
 from strategy_engine import volatility_risk_scale
 
 HEDGE_ONLY_IDS = {
@@ -1276,11 +1277,11 @@ class BinanceFuturesDemo:
                 direction = -1.0 if pos.get("side") == "short" else 1.0
                 equity += direction * (price - float(pos["entry_price"])) * float(pos["contracts"]) * multiplier
             self.daily_risk_state = daily_loss_status(
-                self.db_path, "futures", equity, MAX_DAILY_LOSS_PCT)
+                self.db_path, "futures", equity, core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT))
         except Exception as exc:
             self.daily_risk_state = {"market": "futures", "blocked": True,
                 "equity": 0.0, "baseline": None, "loss_pct": None,
-                "limit_pct": MAX_DAILY_LOSS_PCT,
+                "limit_pct": core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT),
                 "reason": "تعذر التحقق من حد خسارة Futures اليومي ({})".format(type(exc).__name__)}
         if self.daily_risk_state.get("blocked"):
             if not self._daily_risk_block_reported:
@@ -1345,6 +1346,19 @@ class BinanceFuturesDemo:
                 if not setup or not setup.get("signal"):
                     self.on_decision('Futures Demo', symbol, setup, price, 'مراقبة',
                                      (setup or {}).get('reason') or 'لا توجد إشارة مكتملة',
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                # Open futures positions were already managed above. New entries
+                # stay off unless FUTURES_NEW_ENTRIES_ENABLED=true. The spot
+                # strategies are long-only and do not use leverage.
+                if not core_strategies.futures_new_entries_enabled():
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',
+                                     'دخول Futures الجديد متوقف (FUTURES_NEW_ENTRIES_ENABLED=false)؛ المراكز المفتوحة تبقى تحت الإدارة',
+                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
+                if core_strategies.kill_switch.blocks_entries():
+                    self.on_decision('Futures Demo', symbol, setup, price, 'مرفوض',
+                                     core_strategies.kill_switch.reason or 'مفتاح الإيقاف يوقف الدخول الجديد',
                                      order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
                 if not positions_monitor_ok and (

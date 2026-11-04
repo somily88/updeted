@@ -41,6 +41,7 @@ from risk_controls import (daily_loss_status, portfolio_risk_status,
 import database
 import rl_bandit
 import capital_allocator
+import core_strategies
 import finnhub_client
 import massive_client
 from database import get_db_connection, open_db_connection
@@ -294,6 +295,13 @@ def load_runtime_settings():
         TRADE_AMOUNT_USDT = stored_amount
         SPOT_ENTRIES_PAUSED = values.get('spot_entries_paused') == '1'
         FUTURES_ENTRIES_PAUSED = values.get('futures_entries_paused') == '1'
+        # Strategy selection, daily-loss default, position cap and futures entry
+        # flag are environment/code defaults. Stored copies are ignored so a new
+        # deploy is not pinned to bounce/breakout by an old bot_settings row.
+        ignored = core_strategies.ignored_db_strategy_settings(values)
+        if ignored:
+            logger.info("Ignoring bot_settings strategy keys (env/code defaults win): %s",
+                        ",".join(sorted(ignored)))
         for setting_key, env_name, global_name, current_value in [
             ('spot_max_concurrent_trades', 'MAX_SPOT_CONCURRENT_TRADES', 'spot', MAX_SPOT_CONCURRENT_TRADES),
             ('futures_max_concurrent_trades', 'MAX_FUTURES_CONCURRENT_TRADES', 'futures', MAX_FUTURES_CONCURRENT_TRADES),
@@ -342,12 +350,12 @@ def r_multiple_target(entry_price, stop_price, r_multiple=None):
 
 
 def spot_exit_reason(reason, partial_taken=False, trail_armed=False):
-    """Normalize a spot close reason to TP/SL/breakeven/trailing/TEST/manual."""
+    """Normalize a spot close reason to TP/SL/breakeven/trailing/TEST/CHANNEL/manual."""
     if reason == 'SL':
         if trail_armed:
             return 'trailing'
         return 'breakeven' if partial_taken else 'SL'
-    return reason if reason in ('TP', 'TEST') else 'manual'
+    return reason if reason in ('TP', 'TEST', 'CHANNEL') else 'manual'
 
 
 def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
@@ -546,6 +554,12 @@ init_db()
 load_runtime_settings()
 print("⚙️ [SETTINGS] Max concurrent trades: Spot={} Futures={}".format(
     MAX_SPOT_CONCURRENT_TRADES, MAX_FUTURES_CONCURRENT_TRADES))
+print("⚙️ [STRATEGY] mode={} active={} futures_new_entries={} daily_loss_limit={}% max_positions={}".format(
+    core_strategies.strategy_mode(),
+    ",".join(core_strategies.active_strategy_names()),
+    core_strategies.futures_new_entries_enabled(),
+    core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT),
+    core_strategies.max_open_positions()))
 saved_binance_credentials = load_saved_binance_credentials()
 if saved_binance_credentials:
     BINANCE_API_KEY, BINANCE_SECRET_KEY = saved_binance_credentials
@@ -1141,7 +1155,8 @@ def _parse_fill(order, symbol):
     return filled, cost, avg, _fees_in(order, base), _fees_in(order, quote)
 
 
-def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0, notional_override=None):
+def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0, notional_override=None,
+              entry_mode=None):
     """Buy at the configured notional cap, reduced when ATR risk sizing requires it."""
     if TRADING_ENABLED and BINANCE_ENV != 'demo':
         raise RuntimeError('هذا المسار مقفل على Binance Demo ولا يرسل أوامر إلى بيئة حية')
@@ -1177,7 +1192,7 @@ def place_buy(symbol, ref_price, stop_distance=None, size_multiplier=1.0, notion
         raise ValueError("الرصيد المتاح {:.2f} USDT أقل من قيمة الصفقة مع هامش العمولة {:.2f} USDT".format(free_usdt, required_usdt))
 
     amount = float(exchange.amount_to_precision(symbol, amount_usdt / ref_price))
-    order = place_entry_order(exchange, symbol, 'buy', amount, reference_price=ref_price)
+    order = place_entry_order(exchange, symbol, 'buy', amount, mode=entry_mode, reference_price=ref_price)
     order = _complete_order(order, symbol)
     filled, cost, avg, base_fee, _quote_fee = _parse_fill(order, symbol)
     fee_quote, fee_quality = _fees_quote_equivalent(order, symbol, avg)
@@ -1999,13 +2014,26 @@ def check_and_close_positions():
 
             target = pos.get('target_price')
             initial_stop = pos.get('stop_price') or entry_price * (1 - INITIAL_SL_PCT / 100)
-            if not pos.get('partial_taken') and target is None:
+            core_method = (core_strategies.exit_method_for(pos.get('strategy'))
+                           if pos.get('strategy') in core_strategies.CORE_STRATEGY_NAMES else None)
+            # Older positions with no stored target still use the 2R target.
+            # Channel and trailing exits of the new strategies must not gain one.
+            if (not pos.get('partial_taken') and target is None
+                    and core_method not in ('channel', 'trail', 'atr_trail')):
                 target = r_multiple_target(entry_price, initial_stop)
             risk_dist_for_trail = float(pos.get('risk_distance') or max(entry_price - initial_stop, 0.0))
             trailing_distance = float(pos.get('trailing_distance') or spot_rules.legacy_trail_distance(
                 entry_price, risk_dist_for_trail, TRAILING_SL_PCT))
             trail_armed = spot_rules.trail_armed(entry_price, highest_price, risk_dist_for_trail,
                                                  pos.get('partial_taken'), TRAILING_ACTIVATION_PCT)
+            if core_method == 'tp_2r':
+                trail_armed = False
+            elif core_method in ('trail', 'atr_trail'):
+                trail_armed = True
+                target = None
+            elif core_method == 'channel':
+                trail_armed = False
+                target = None
             active_stop = max(initial_stop, highest_price - trailing_distance) if trail_armed else initial_stop
 
             reason = 'SL' if sale is not None else None
@@ -2028,8 +2056,21 @@ def check_and_close_positions():
                     send_telegram_message("⚠️ <b>حارس الوقف Spot</b>\n🪙 {}\nالسعر {} تخطى الوقف {} بفارق {:.2f}%؛ إغلاق فوري".format(
                         symbol, current_price, active_stop, gap_pct))
                 reason = "SL"
+            if reason is None and core_method == 'channel' and not pos.get('test'):
+                try:
+                    raw_4h = retry_api_read(exchange.fetch_ohlcv, symbol, timeframe='4h', limit=40)
+                    closed_4h = core_strategies.closed_candles(
+                        raw_4h, core_strategies.TF_4H_MS, int(time.time() * 1000))
+                    if core_strategies.donchian_channel_exit(closed_4h):
+                        reason = 'CHANNEL'
+                except Exception as exc:
+                    core_strategies.kill_switch.trip(
+                        'channel exit data {}: {}'.format(symbol, type(exc).__name__))
+                    log_event('WARN', 'تعذر فحص خروج قناة {}؛ الوقف الثابت يبقى فعالاً'.format(symbol))
 
-            if not reason and not pos.get('test') and not pos.get('partial_taken') and not pos.get('partial_attempted'):
+            if (not reason and not pos.get('test') and not pos.get('partial_taken')
+                    and not pos.get('partial_attempted')
+                    and pos.get('strategy') not in core_strategies.CORE_STRATEGY_NAMES):
                 risk_distance = float(pos.get('risk_distance') or max(entry_price - initial_stop, entry_price * 0.0005))
                 if risk_distance > 0 and current_price >= entry_price + risk_distance * PARTIAL_TP_R:
                     try:
@@ -2142,10 +2183,11 @@ def check_and_close_positions():
             pnl_basis = float(pos.get('initial_cost') or (cost_sold + pos['cost']) or 0.0)
             realized_pnl = (total_pnl / pnl_basis * 100.0) if pnl_basis else 0.0
             status = "WIN" if total_pnl > 0 else "LOSS"
-            title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار"}.get(reason, "🛑 إغلاق بوقف الخسارة")
+            title = {"TP": "🎯 تم تحقيق الهدف", "TEST": "🧪 إغلاق صفقة الاختبار",
+                     "CHANNEL": "📉 خروج قناة دونشيان"}.get(reason, "🛑 إغلاق بوقف الخسارة")
             print("{} [{}] {} | PnL: {:+.2f}% | {} ({})".format(
                 title, status, symbol, realized_pnl, pos.get('strategy', 'trend'), pos.get('timeframe', '1h')))
-            log_event({"TP": "TP", "TEST": "TEST"}.get(reason, "SL"),
+            log_event({"TP": "TP", "TEST": "TEST", "CHANNEL": "CHANNEL"}.get(reason, "SL"),
                       "{} {:+.2f}% · {}".format(symbol, realized_pnl, pos.get('strategy', 'trend')))
             fees_total = float(pos.get('fees_usdt') or 0.0)
             exit_reason = spot_exit_reason(reason, pos.get('partial_taken'), trail_armed)
@@ -2184,15 +2226,18 @@ def automated_market_scan():
             'last_error': None,
         })
         scan_succeeded = False
-        print("🔄 [SCANNER] فحص الاستراتيجيات الفنية والهجينة ({} | Demo-only safety)...".format(BINANCE_ENV))
+        core_strategies.kill_switch.begin_scan()
+        print("🔄 [SCANNER] فحص الاستراتيجيات ({}) active={} ...".format(
+            BINANCE_ENV, ",".join(core_strategies.active_strategy_names())))
         position_monitor_ok = check_and_close_positions()
         try:
             _, spot_equity = get_binance_balance(ttl=0)
-            update_daily_risk_state('spot', daily_loss_status(DB_NAME, 'spot', spot_equity, MAX_DAILY_LOSS_PCT))
+            update_daily_risk_state('spot', daily_loss_status(
+                DB_NAME, 'spot', spot_equity, core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT)))
         except Exception as exc:
             update_daily_risk_state('spot', {'market': 'spot', 'blocked': True,
                 'equity': 0.0, 'baseline': None, 'loss_pct': None,
-                'limit_pct': MAX_DAILY_LOSS_PCT,
+                'limit_pct': core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT),
                 'reason': 'تعذر التحقق من حد الخسارة اليومية؛ أُوقف فتح الصفقات ({})'.format(type(exc).__name__)})
 
         try:
@@ -2230,6 +2275,11 @@ def automated_market_scan():
                                     'أُوقف الدخول لأن متابعة مركز Spot مفتوح واجهت خطأ', rule='monitor_error',
                                     order_status='لم يُرسل', price_updated_at=price_updated_at)
                     continue
+                if setup.get('signal') and core_strategies.kill_switch.blocks_entries():
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    core_strategies.kill_switch.reason or 'مفتاح الإيقاف يوقف الدخول بعد خطأ في البيانات',
+                                    rule='kill_switch', order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if setup.get('signal') and SPOT_ENTRIES_PAUSED:
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
                                     'التداول موقوف يدوياً من لوحة التحكم؛ المراكز المفتوحة تبقى محمية', rule='entries_paused',
@@ -2248,6 +2298,11 @@ def automated_market_scan():
                 spot_open_slots = sum(max(1, int(p.get('entries', 1))) for p in active_positions.values())
                 spot_open_slots += sum(1 for p in active_positions.values()
                                        if p.get('add_attempted') and int(p.get('entries', 1)) < 2)
+                if setup.get('signal') and len(active_positions) >= core_strategies.max_open_positions():
+                    record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                    'بلغ حد المراكز المفتوحة ({})'.format(core_strategies.max_open_positions()),
+                                    rule='max_open_positions', order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if setup.get('signal') and not capital_allocator.concurrency_allows(spot_open_slots, MAX_SPOT_CONCURRENT_TRADES):
                     record_decision('Spot', symbol, setup, current_price, 'مرفوض',
                                     'بلغت المراكز حد الصفقات المفتوحة في Spot', rule='max_open_trades',
@@ -2336,6 +2391,13 @@ def automated_market_scan():
 
                 pos = active_positions.get(symbol)
                 is_add = pos is not None
+                if is_add and (core_strategies.strategy_mode() != 'legacy'
+                               or setup.get('strategy') in core_strategies.CORE_STRATEGY_NAMES
+                               or (pos or {}).get('strategy') in core_strategies.CORE_STRATEGY_NAMES):
+                    record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
+                                    'لا إضافة على مركز مفتوح (لا متوسط ولا مضاعفة)',
+                                    rule='no_add_open_position', order_status='لم يُرسل', price_updated_at=price_updated_at)
+                    continue
                 if is_add and capital_allocator.enabled():
                     record_decision('Spot', symbol, setup, current_price, 'تجاهل الإضافة',
                                     '[no_add_open_position] ' + capital_allocator.RULE_LABELS_AR['no_add_open_position'],
@@ -2547,8 +2609,27 @@ def automated_market_scan():
                                 'اجتازت الإشارة فلاتر المخاطر والسيولة والأخبار',
                                 order_status='جارٍ الإرسال', price_updated_at=price_updated_at)
                 entry_atr = max(float(setup.get('atr') or 0.0), current_price * 0.0005)
-                entry_stop_distance = spot_rules.stop_distance(
-                    setup['strategy'], current_price, entry_atr, STRATEGY_RISK[setup['strategy']]['stop_atr'])
+                if setup['strategy'] in core_strategies.CORE_STRATEGY_NAMES:
+                    entry_stop_distance = entry_atr * core_strategies.STOP_ATR
+                    _, _core_equity = get_binance_balance(ttl=10)
+                    _sized = core_strategies.size_position(
+                        _core_equity, current_price, entry_stop_distance, setup['strategy'])
+                    if not _sized['allowed']:
+                        record_decision('Spot', symbol, setup, current_price, 'مرفوض',
+                                        _sized['reason'] or 'حجم الصفقة غير صالح',
+                                        rule='sizing', order_status='لم يُرسل', price_updated_at=price_updated_at)
+                        continue
+                    # RL may only shrink. The allocator notional, when present, already
+                    # includes that shrink, so it is not applied a second time.
+                    _rl_mult = min(1.0, max(0.0, float(rl_decision.get('applied_multiplier', 1.0))))
+                    _core_notional = _sized['notional'] * _rl_mult
+                    alloc_notional = (_core_notional if alloc_notional is None
+                                      else min(float(alloc_notional), _core_notional))
+                    _buy_mult = 1.0
+                else:
+                    entry_stop_distance = spot_rules.stop_distance(
+                        setup['strategy'], current_price, entry_atr, STRATEGY_RISK[setup['strategy']]['stop_atr'])
+                    _buy_mult = rl_decision.get('applied_multiplier', 1.0)
                 if TRADING_ENABLED:
                     risk_check = _check_sized_spot_risk(symbol, current_price, entry_stop_distance, alloc_notional)
                     if not risk_check.get('allowed'):
@@ -2558,8 +2639,11 @@ def automated_market_scan():
                         continue
                 try:
                     capital_allocator.assert_no_increase(active_positions, symbol)
+                    _entry_mode = (core_strategies.entry_order_mode()
+                                   if setup['strategy'] in core_strategies.CORE_STRATEGY_NAMES else None)
                     fill = place_buy(symbol, current_price, entry_stop_distance,
-                                     rl_decision.get('applied_multiplier', 1.0), notional_override=alloc_notional)
+                                     _buy_mult, notional_override=alloc_notional,
+                                     entry_mode=_entry_mode)
                 except Exception as e:
                     record_decision('Spot', symbol, setup, current_price, 'فشل أو لم يتأكد أمر الشراء',
                                     'لا تعاد المحاولة تلقائيًا؛ راجع سجل Binance',
@@ -2574,8 +2658,24 @@ def automated_market_scan():
                 atr = max(float(setup.get('atr') or 0.0), entry * 0.0005)
                 risk = STRATEGY_RISK[setup['strategy']]
                 stop_price = entry - spot_rules.stop_distance(setup['strategy'], entry, atr, risk['stop_atr'])
-                target_price = entry + atr * risk['target_atr']
-                trailing_distance = spot_rules.trail_distance(atr, risk['trail_atr'])
+                if setup['strategy'] in core_strategies.CORE_STRATEGY_NAMES:
+                    # These names are not in SPOT_TREND_STRATEGIES, so the line
+                    # above is entry - 2*ATR. Target depends on the one active exit.
+                    _method = core_strategies.exit_method_for(setup['strategy'])
+                    risk_dist = entry - stop_price
+                    if _method == 'tp_2r':
+                        target_price = entry + core_strategies.tp_r_multiple() * risk_dist
+                    else:
+                        target_price = None
+                    if _method == 'trail':
+                        trailing_distance = atr * core_strategies.tp_trail_atr()
+                    elif _method == 'atr_trail':
+                        trailing_distance = atr * core_strategies.donchian_trail_atr()
+                    else:
+                        trailing_distance = spot_rules.trail_distance(atr, risk['trail_atr'])
+                else:
+                    target_price = entry + atr * risk['target_atr']
+                    trailing_distance = spot_rules.trail_distance(atr, risk['trail_atr'])
                 pos = {
                     'entry_price': entry, 'amount': fill['amount'], 'cost': fill['cost'],
                     'highest_price': entry, 'time': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2614,8 +2714,10 @@ def automated_market_scan():
                         "\n🧪 محاكاة" if fill['simulated'] else ""))
 
             except Exception as e:
+                core_strategies.kill_switch.trip('scan {}: {}'.format(symbol, type(e).__name__))
                 record_decision('Spot', symbol, setup, current_price, 'خطأ في فحص السوق',
-                                'تعذر إكمال تقييم الزوج', order_status='لم يُرسل',
+                                'تعذر إكمال تقييم الزوج؛ أُوقف الدخول الجديد حتى فحص سليم',
+                                order_status='لم يُرسل',
                                 api_message=e, price_updated_at=price_updated_at)
                 log_event('ERR', 'فحص Spot {}: {}'.format(symbol, type(e).__name__))
                 print("Error scanning {}: {}".format(symbol, e))
@@ -2636,6 +2738,9 @@ def automated_market_scan():
         print("Error in automated market scan: {}".format(type(e).__name__))
         scanner_state['last_error'] = type(e).__name__
     finally:
+        if not scan_succeeded:
+            core_strategies.kill_switch.trip('market scan failed')
+        core_strategies.kill_switch.finish_scan()
         scanner_state.update({
             'status': 'idle' if scan_succeeded else 'error',
             'last_completed_at': datetime.datetime.now(datetime.timezone.utc).isoformat() if scan_succeeded else scanner_state.get('last_completed_at'),
@@ -2996,8 +3101,11 @@ def api_state():
                         if total_usdt + float(future_state.get('balance') or 0.0) > 0 else 0.0
         },
         'params': {
-            'timeframe': 'auto', 'strategy_mode': 'automatic',
-            'strategies': ['trend', 'breakout', 'bounce'],
+            'timeframe': '4h', 'strategy_mode': core_strategies.strategy_mode(),
+            'strategies': list(core_strategies.active_strategy_names()),
+            'futures_new_entries': core_strategies.futures_new_entries_enabled(),
+            'daily_loss_limit_pct': core_strategies.daily_loss_limit_pct(MAX_DAILY_LOSS_PCT),
+            'max_open_positions': core_strategies.max_open_positions(),
             'ema_period': EMA_PERIOD, 'rsi_max': RSI_MAX_ENTRY,
             'require_macd': REQUIRE_MACD, 'macd_tolerance_pct': MACD_HIST_TOLERANCE_PCT, 'tp_usdt': None, 'tp_r_multiple': TP_R_MULTIPLE, 'sl': INITIAL_SL_PCT,
             'trail': TRAILING_SL_PCT, 'news_severity': NEWS_BLOCK_SEVERITY,

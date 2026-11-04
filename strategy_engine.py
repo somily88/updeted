@@ -185,6 +185,10 @@ STRATEGY_RISK = {
     "volume_profile_range": {"stop_atr": 0.9, "target_atr": 1.4, "trail_atr": 0.7},
     "volatility_breakout_hedge": {"stop_atr": 1.1, "target_atr": 2.0, "trail_atr": 1.0},
     "donchian_trend": {"stop_atr": 2.0, "target_atr": 6.0, "trail_atr": 2.0},
+    # New spot strategies. Stop is 2*ATR. trend_pullback targets 2R (4*ATR at
+    # the default TP_R_MULTIPLE); the live exit method can replace that target.
+    "trend_pullback": {"stop_atr": 2.0, "target_atr": 4.0, "trail_atr": 2.0},
+    "donchian_breakout": {"stop_atr": 2.0, "target_atr": 4.0, "trail_atr": 3.0},
 }
 STRATEGY_LABELS = {
     "trend": "تتبّع الاتجاه", "breakout": "الاختراق", "bounce": "الارتداد",
@@ -193,6 +197,8 @@ STRATEGY_LABELS = {
     "volume_profile_range": "نطاق حجم التداول",
     "volatility_breakout_hedge": "اختراق تقلب مع تحوّط",
     "donchian_trend": "اتجاه دونشيان متعدد الفترات",
+    "trend_pullback": "ارتداد مع الاتجاه",
+    "donchian_breakout": "اختراق دونشيان",
 }
 
 
@@ -693,14 +699,88 @@ def _regime_direction_ok(exchange, symbol, cache, direction):
     return (v["ema20"] > v["ema50"]) == (direction == "long")
 
 
+def _core_spread_pct(exchange, symbol):
+    """Live spread in percent. Missing bid/ask is left for the liquidity check."""
+    import core_strategies
+    try:
+        ticker = fetch_fresh_ticker(exchange, symbol)
+    except TimeoutError as exc:
+        raise core_strategies.DataFault("stale", str(exc))
+    except Exception as exc:
+        raise core_strategies.DataFault("fetch", type(exc).__name__)
+    bid = float(ticker.get("bid") or 0.0)
+    ask = float(ticker.get("ask") or 0.0)
+    if bid <= 0 or ask <= 0 or ask < bid:
+        return None
+    return (ask - bid) / ((ask + bid) / 2.0) * 100.0
+
+
+def _core_signal_dicts(exchange, symbol, now_ms):
+    """Closed-candle signals for the two spot strategies. Raises DataFault."""
+    import core_strategies as cs
+    if not cs.core_entries_enabled() or not cs.symbol_allowed(symbol):
+        return []
+    try:
+        raw_4h = retry_api_read(exchange.fetch_ohlcv, symbol, timeframe="4h", limit=500)
+    except cs.DataFault:
+        raise
+    except Exception as exc:
+        raise cs.DataFault("fetch", "4h {}: {}".format(symbol, type(exc).__name__))
+    closed_4h = cs.closed_candles(raw_4h, cs.TF_4H_MS, now_ms)
+    if len(closed_4h) < cs.MIN_4H_BARS:
+        return []
+    cs.validate_candles(closed_4h)
+    cs.assert_fresh(closed_4h, cs.TF_4H_MS, now_ms, cs.max_candle_age_s())
+    btc_daily = None
+    if "donchian_breakout" in cs.active_strategy_names():
+        btc = cs.btc_symbol()
+        try:
+            raw_daily = retry_api_read(exchange.fetch_ohlcv, btc, timeframe="1d", limit=500)
+        except Exception as exc:
+            raise cs.DataFault("fetch", "1d {}: {}".format(btc, type(exc).__name__))
+        btc_daily = cs.closed_candles(raw_daily, cs.TF_1D_MS, now_ms)
+        if len(btc_daily) >= 30:
+            cs.validate_candles(btc_daily)
+            cs.assert_fresh(btc_daily, cs.TF_1D_MS, now_ms, cs.max_daily_age_s())
+        else:
+            btc_daily = None
+    spread = _core_spread_pct(exchange, symbol)
+    return cs.signals_for_symbol(symbol, closed_4h, btc_daily, spread)
+
+
 def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                     enable_hybrids=True, allowed_strategies=None, cache=None):
-    """Evaluate established and hybrid strategies using closed candles only."""
+    """Evaluate active entry strategies using closed candles only.
+
+    Default active set is trend_pullback and donchian_breakout. Legacy
+    strategies still live in this module and run only when STRATEGY_MODE or
+    ACTIVE_STRATEGIES names them.
+    """
+    import core_strategies
     context = context or {}
     directions = ("long", "short") if allow_short else ("long",)
     cache = dict(cache) if cache else {}
     candidates = []
     _adx_memo = {}
+    active_names = set(core_strategies.active_strategy_names())
+    run_legacy = core_strategies.legacy_entries_enabled()
+    if core_strategies.core_entries_enabled():
+        try:
+            now_ms = int(time.time() * 1000)
+            for sig in _core_signal_dicts(exchange, symbol, now_ms):
+                if sig.get("strategy") not in active_names:
+                    continue
+                view = {
+                    "atr": sig["atr"], "rsi": sig.get("rsi", 50.0),
+                    "ema50": sig.get("ema50") or sig["ref_close"],
+                    "hist": 0.0, "ref_close": sig["ref_close"],
+                    "candles": [[sig["candle_ts"], sig["ref_close"], sig["ref_close"],
+                                 sig["ref_close"], sig["ref_close"], 0.0]],
+                }
+                candidates.append(_candidate(
+                    sig["strategy"], "4h", view, sig["reason"], "long", sig.get("strength", 70.0)))
+        except core_strategies.DataFault as exc:
+            core_strategies.kill_switch.trip("{}: {}".format(symbol, exc))
 
     def adx_4h():
         if "4h" not in _adx_memo:
@@ -708,6 +788,8 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
         return _adx_memo["4h"]
 
     for timeframe in ("1h", "15m"):
+        if not run_legacy:
+            break
         for direction in directions:
             found = _breakout_candidate(exchange, symbol, timeframe, cache, direction)
             if found and (_higher_timeframe_confirms(exchange, symbol, cache, direction)
@@ -716,6 +798,8 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                 candidates.append(found)
 
     for timeframe in ("1d", "4h"):
+        if not run_legacy:
+            break
         for direction in directions:
             found = _trend_candidate(exchange, symbol, timeframe, cache, direction)
             if found and REGIME_FILTER == "adx" and (_tf_adx(exchange, symbol, timeframe, cache) or 0) < ADX_TREND_MIN:
@@ -731,12 +815,12 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                 if found:
                     candidates.append(found)
 
-    range_view = _view(_load(exchange, symbol, "4h", cache))
-    range_regime = _range_ok(range_view)
+    range_view = _view(_load(exchange, symbol, "4h", cache)) if run_legacy else None
+    range_regime = _range_ok(range_view) if run_legacy else False
     if REGIME_FILTER == "adx":
         adx_value = adx_4h()
         range_regime = adx_value is not None and adx_value < ADX_RANGE_MAX
-    if range_regime:
+    if run_legacy and range_regime:
         for timeframe in BOUNCE_TIMEFRAMES:
             for direction in directions:
                 found = _bounce_candidate(exchange, symbol, timeframe, cache, direction)
@@ -748,7 +832,7 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                 if found:
                     candidates.append(found)
 
-    if enable_hybrids:
+    if run_legacy and enable_hybrids:
         for direction in directions:
             found = _macro_momentum_candidate(exchange, symbol, cache, context, direction)
             if found:
@@ -762,7 +846,9 @@ def evaluate_symbol(exchange, symbol, allow_short=False, context=None,
                 candidates.append(found)
 
     candidates = [item for item in candidates
-                  if item.get("strategy") not in DISABLED_STRATEGIES and target_covers_costs(item)]
+                  if item.get("strategy") in active_names
+                  and item.get("strategy") not in DISABLED_STRATEGIES
+                  and target_covers_costs(item)]
     if allowed_strategies is not None:
         candidates = [item for item in candidates if item.get("strategy") in allowed_strategies]
     selected = _select_best(candidates)

@@ -200,7 +200,7 @@ function pill(n,t,s){n.textContent=t;n.className='pill '+(s||'');}
 function set(id,t,c){var n=el(id);n.textContent=t;if(c!=null)n.className=c;}
 function toast(t){var n=el('toast');n.textContent=t;n.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(function(){n.style.display='none';},3500);}
 var isFut=function(x){return x.market_type==='Futures Demo';};
-var stratLabels={trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',forced_test:'اختبار Futures',test:'اختبار Spot',wait:'انتظار'};
+var stratLabels={trend_pullback:'ارتداد مع الاتجاه',donchian_breakout:'اختراق دونشيان',trend:'تتبّع الاتجاه',breakout:'الاختراق',bounce:'الارتداد',macro_momentum_hybrid:'هجين الزخم الكلي',algorithmic_discretionary_hybrid:'خوارزمي مع سياق الأخبار',volume_profile_range:'نطاق حجم التداول',volatility_breakout_hedge:'اختراق تقلب مع تحوّط',donchian_trend:'اتجاه دونشيان متعدد الفترات',forced_test:'اختبار Futures',test:'اختبار Spot',wait:'انتظار'};
 
 /* theme */
 el('theme-btn').addEventListener('click',function(){var r=document.documentElement,t=r.dataset.theme==='dark'?'light':'dark';r.dataset.theme=t;try{localStorage.setItem('theme',t);}catch(e){}drawChart();});
