@@ -22,12 +22,19 @@
         --radius: 22px;
       }
 
+      @font-face {
+        font-family: Cairo;
+        src: url("/fonts/Cairo.ttf") format("truetype");
+        font-display: swap;
+      }
+
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; }
+      body { overflow-x: hidden; }
       body {
         margin: 0;
         min-height: 100vh;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        font-family: Cairo, "Segoe UI", Tahoma, "Noto Sans Arabic", sans-serif;
         background:
           radial-gradient(circle at top left, rgba(124, 92, 255, 0.2), transparent 28%),
           radial-gradient(circle at top right, rgba(34, 197, 94, 0.16), transparent 25%),
@@ -416,10 +423,224 @@
 
       .muted { color: var(--muted); }
       .tiny { font-size: 0.7rem; }
+      .table-wrap { overflow-x: auto; }
+
+      .offline-banner {
+        display: none;
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid rgba(245, 158, 11, 0.55);
+        background: rgba(120, 53, 15, 0.55);
+        color: #fde68a;
+        font-weight: 700;
+        line-height: 1.6;
+      }
+      .offline-banner.show { display: block; }
+
+      .decision.dim { opacity: 0.55; }
+      .decision-time { color: var(--muted); }
+
+      .risk-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .risk-item {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.02);
+      }
+      .risk-item span { display: block; color: var(--muted); font-size: 0.75rem; margin-bottom: 4px; }
+      .risk-item b { display: block; line-height: 1.45; font-size: 0.92rem; }
+      .risk-note {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(245, 158, 11, 0.14);
+        color: #fcd34d;
+        line-height: 1.6;
+      }
+
+      .rl-kpis {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin: 12px 0;
+      }
+      .rl-kpis div {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px 12px;
+        background: rgba(255,255,255,0.03);
+      }
+      .rl-kpis span { display: block; color: var(--muted); font-size: 0.75rem; }
+      .rl-kpis b { display: block; margin-top: 4px; }
+
+      .neural {
+        padding: 0;
+        border-color: rgba(90, 180, 255, 0.35);
+        background:
+          radial-gradient(120% 80% at 50% 30%, rgba(18, 60, 140, 0.55), transparent 46%),
+          linear-gradient(180deg, #07101f 0%, #040712 100%);
+      }
+      .neural-head, .neural-metrics, .neural-timeline, .neural-ticker { position: relative; z-index: 2; }
+      .neural-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-end;
+        padding: 18px 18px 0;
+      }
+      .neural-head h2 { margin: 0; font-size: 1.2rem; color: #eaf6ff; text-shadow: 0 0 18px rgba(80, 190, 255, 0.45); }
+      .neural-head p { margin: 6px 0 0; color: #9ec4e4; font-size: 0.82rem; }
+      .neural-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px 14px 0;
+      }
+      .neural-metrics div {
+        border: 1px solid rgba(120, 190, 255, 0.22);
+        border-radius: 12px;
+        padding: 7px 8px;
+        background: rgba(4, 12, 28, 0.55);
+        min-width: 0;
+      }
+      .neural-metrics span { display: block; color: #8fb4d6; font-size: 0.68rem; }
+      .neural-metrics b { display: block; margin-top: 2px; color: #f3fbff; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .neural-stage {
+        position: relative;
+        direction: ltr;
+        height: 640px;
+        margin-top: 10px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% 42%, rgba(150, 210, 255, 0.28), transparent 28%),
+          radial-gradient(circle at 50% 78%, rgba(20, 60, 140, 0.35), transparent 42%),
+          #030712;
+      }
+      #neuralGl, #neuralFlat {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        direction: ltr;
+      }
+      #neuralGl { z-index: 1; }
+      #neuralFlat { z-index: 0; }
+      .neural-ring {
+        position: absolute;
+        left: 50%;
+        top: 47%;
+        width: min(78%, 860px);
+        height: min(70%, 480px);
+        transform: translate(-50%, -50%);
+        border: 1px solid rgba(120, 190, 255, 0.22);
+        border-radius: 50%;
+        box-shadow: 0 0 40px rgba(40, 140, 255, 0.12);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .neural-scan {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2;
+        background: repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 3px);
+        mix-blend-mode: overlay;
+        opacity: 0.35;
+      }
+      .neural-orbit { position: absolute; inset: 0; z-index: 3; direction: ltr; }
+      .agent {
+        position: absolute;
+        width: 76px;
+        height: 76px;
+        margin: -38px 0 0 -38px;
+        border-radius: 50%;
+        border: 1px solid rgba(140, 210, 255, 0.75);
+        background: radial-gradient(circle at 50% 40%, rgba(18, 42, 84, 0.35), rgba(4, 10, 24, 0.88));
+        box-shadow: 0 0 18px rgba(56, 189, 248, 0.35), inset 0 0 12px rgba(80, 180, 255, 0.28);
+        color: #e7f6ff;
+        cursor: pointer;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        padding: 6px;
+        line-height: 1.2;
+      }
+      .agent { direction: rtl; }
+      .agent strong { font-size: 11px; }
+      .agent small { display: block; color: #9ad7ff; font-size: 9px; margin-top: 2px; }
+      .agent.on { box-shadow: 0 0 22px rgba(80, 220, 255, 0.7); }
+      .agent.off { opacity: 0.62; }
+      .agent.kind-rl { border-color: #d38bff; box-shadow: 0 0 16px rgba(190, 120, 255, 0.45); }
+      .agent.kind-filter { border-color: #ff7ad9; }
+      .agent-panel {
+        position: absolute;
+        z-index: 6;
+        width: 270px;
+        max-height: 46%;
+        overflow: auto;
+        background: rgba(6, 12, 28, 0.9);
+        border: 1px solid rgba(120, 210, 255, 0.5);
+        border-radius: 16px;
+        padding: 12px 14px;
+        color: #e7f4ff;
+        box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 24px rgba(40, 140, 255, 0.22);
+        backdrop-filter: blur(8px);
+      }
+      .agent-panel[hidden] { display: none !important; }
+      .agent-panel h3 { margin: 0 0 6px; font-size: 0.95rem; }
+      .agent-panel .row { display: flex; justify-content: space-between; gap: 8px; font-size: 0.75rem; padding: 3px 0; color: #b7d4ea; }
+      .agent-panel .row b { color: #fff; text-align: left; }
+      .agent-panel ul { margin: 8px 0 0; padding: 0 16px 0 0; font-size: 0.72rem; color: #d5e8f8; }
+      .agent-panel li { margin: 4px 0; white-space: normal; overflow-wrap: anywhere; }
+      .strength { height: 6px; border-radius: 99px; background: rgba(255,255,255,0.08); margin-top: 8px; overflow: hidden; }
+      .strength i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #d38bff); }
+      .neural-timeline {
+        display: flex;
+        gap: 14px;
+        overflow-x: auto;
+        padding: 8px 14px 4px;
+        border-top: 1px solid rgba(80, 160, 255, 0.2);
+      }
+      .tick { min-width: 92px; text-align: center; font-size: 11px; color: #c5e4ff; }
+      .tick i { display: block; width: 8px; height: 8px; border-radius: 50%; margin: 0 auto 4px; background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
+      .tick.green i { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+      .tick.red i { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+      .tick.orange i { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+      .tick small { display: block; color: #8fb4d4; }
+      .neural-ticker {
+        position: relative;
+        overflow: hidden;
+        height: 36px;
+        border-top: 1px solid rgba(80, 160, 255, 0.25);
+        contain: inline-size;
+      }
+      .ticker-track {
+        position: absolute;
+        top: 0;
+        right: 0;
+        display: flex;
+        gap: 28px;
+        width: max-content;
+        padding: 8px 0;
+        animation: marquee 42s linear infinite;
+        direction: rtl;
+      }
+      .ticker-track span { color: #d7ecff; font-size: 12px; white-space: nowrap; }
+      @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(50%); } }
+      html.tab-hidden .ticker-track { animation-play-state: paused; }
 
       @media (max-width: 1100px) {
         .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         .two-col, .three-col { grid-template-columns: 1fr; }
+        .neural-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        .risk-grid, .rl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
 
       @media (max-width: 760px) {
@@ -427,6 +648,16 @@
         .header-meta { justify-content: flex-start; }
         .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .market-grid { grid-template-columns: 1fr; }
+        .neural-stage { height: 540px; }
+        .neural-metrics, .risk-grid, .rl-kpis { grid-template-columns: 1fr 1fr; }
+        .neural-metrics b { white-space: normal; }
+        .agent { width: 58px; height: 58px; margin: -29px 0 0 -29px; }
+        .agent strong { font-size: 10px; }
+        .neural-head { flex-direction: column; align-items: flex-start; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .ticker-track { animation: none; flex-wrap: wrap; width: auto; padding-inline: 12px; }
       }
 
       @media (max-width: 520px) {
@@ -438,6 +669,7 @@
   </head>
   <body>
     <div class="shell">
+      <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite"></div>
       <header class="topbar">
         <div class="brand">
           <div class="logo">S</div>
@@ -460,20 +692,20 @@
           <article class="card stat-card hero">
             <div class="label-row">
               <span>قيمة المحفظة</span>
-              <span class="chip cyan" id="walletBadge">محدث</span>
+              <span class="chip cyan" id="walletBadge">سبوت + فيوتشرز</span>
             </div>
             <div class="value" id="totalWallet">$0.00</div>
             <div class="delta" id="walletDelta">تحديث...</div>
           </article>
 
           <article class="card stat-card">
-            <div class="label-row"><span>الربح المحقق</span></div>
+            <div class="label-row"><span>الربح المحقق · الإجمالي</span></div>
             <div class="value up" id="realizedPnl">$0.00</div>
             <div class="delta" id="realizedMeta">...</div>
           </article>
 
           <article class="card stat-card">
-            <div class="label-row"><span>الربح غير المحقق</span></div>
+            <div class="label-row"><span>الربح غير المحقق · سبوت + فيوتشرز</span></div>
             <div class="value neutral" id="unrealizedPnl">$0.00</div>
             <div class="delta" id="unrealizedMeta">...</div>
           </article>
@@ -485,13 +717,13 @@
           </article>
 
           <article class="card stat-card">
-            <div class="label-row"><span>نسبة الفوز</span></div>
+            <div class="label-row"><span>نسبة الفوز · سبوت</span></div>
             <div class="value" id="winRate">0%</div>
             <div class="delta" id="winMeta">...</div>
           </article>
 
           <article class="card stat-card">
-            <div class="label-row"><span>التعرّض</span></div>
+            <div class="label-row"><span>التعرّض · سبوت + فيوتشرز</span></div>
             <div class="value" id="exposurePct">0%</div>
             <div class="delta" id="exposureMeta">منخفض</div>
           </article>
@@ -540,6 +772,84 @@
           </article>
         </section>
 
+        <section>
+          <article class="card panel" id="riskCard">
+            <div class="panel-header">
+              <h2>الاستراتيجيات والمخاطر</h2>
+              <span class="chip cyan" id="strategyModeChip">—</span>
+            </div>
+            <div id="riskBody"><div class="muted">بانتظار أول قراءة من الخادم.</div></div>
+          </article>
+        </section>
+
+        <section>
+          <article class="card neural" id="neuralCard">
+            <div class="neural-head">
+              <div>
+                <h2>الخلية العصبية</h2>
+                <p>هذه الحلقة بلا مفتاح إيقاف. النواة تربط الاستراتيجيات والفلاتر والتعلم المعزز والعملات ببيانات حية.</p>
+              </div>
+              <span class="chip cyan" id="neuralLive">بانتظار البيانات</span>
+            </div>
+            <div class="neural-metrics" id="neuralMetrics"></div>
+            <div class="neural-stage" id="neuralStage">
+              <canvas id="neuralFlat" aria-hidden="true"></canvas>
+              <canvas id="neuralGl" aria-hidden="true"></canvas>
+              <div class="neural-ring"></div>
+              <div class="neural-scan"></div>
+              <div class="neural-orbit" id="neuralOrbit"></div>
+              <div class="agent-panel" id="agentPanel" hidden></div>
+            </div>
+            <div class="neural-timeline" id="neuralTimeline"></div>
+            <div class="neural-ticker" id="neuralTicker"><div class="ticker-track" id="tickerTrack"></div></div>
+          </article>
+        </section>
+
+        <section>
+          <article class="card panel" id="rlPanel">
+            <div class="panel-header">
+              <h2>التعلم المعزز</h2>
+              <span class="chip cyan" id="rlMode">جارٍ التحميل</span>
+            </div>
+            <p class="tiny muted" id="rlIntro">طبقة تتعلّم من نتيجة كل صفقة مغلقة (بالـ R بعد الرسوم) وتقرّر: تخطي، أو نصف الحجم، أو الحجم الكامل. لا ترفع الحجم أبدًا فوق قواعد المخاطرة. تُضبط عبر متغيرات RL_MODE وRL_MIN_SAMPLES.</p>
+            <div class="rl-kpis" id="rlKpis"></div>
+            <div class="tiny muted" id="rlNote"></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>السياق</th>
+                    <th>العينات</th>
+                    <th>متوسط R</th>
+                    <th>R المتوقع</th>
+                    <th>احتمال الربح</th>
+                    <th>القرار</th>
+                    <th>الجاهزية</th>
+                  </tr>
+                </thead>
+                <tbody id="rlArms"></tbody>
+              </table>
+            </div>
+            <div class="table-wrap" style="margin-top:14px">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الوقت</th>
+                    <th>الزوج</th>
+                    <th>السياق</th>
+                    <th>القرار</th>
+                    <th>المطبّق</th>
+                    <th>R المتوقع</th>
+                    <th>الحالة</th>
+                    <th>R الفعلي</th>
+                  </tr>
+                </thead>
+                <tbody id="rlRecent"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
         <section class="three-col">
           <article class="card panel">
             <div class="panel-header">
@@ -551,8 +861,10 @@
                 <thead>
                   <tr>
                     <th>الرمز</th>
+                    <th>السوق</th>
+                    <th>الاستراتيجية</th>
                     <th>الاتجاه</th>
-                    <th>الإدخال</th>
+                    <th>الدخول</th>
                     <th>السعر</th>
                     <th>الربح</th>
                   </tr>
@@ -566,6 +878,7 @@
             <div class="panel-header">
               <h2>آخر القرارات</h2>
             </div>
+            <div class="tiny muted" id="decisionHint"></div>
             <div class="timeline" id="decisionList"></div>
           </article>
         </section>
@@ -581,6 +894,9 @@
                 <thead>
                   <tr>
                     <th>الزوج</th>
+                    <th>السوق</th>
+                    <th>الاستراتيجية</th>
+                    <th>الوقت</th>
                     <th>الدخول</th>
                     <th>الخروج</th>
                     <th>صافي الربح</th>
@@ -628,57 +944,19 @@
         return Object.prototype.hasOwnProperty.call(STRAT_AR, key) ? STRAT_AR[key] : key;
       }
 
-      const fallbackData = {
-        env: 'demo',
-        trading_enabled: true,
-        wallet: { total: 12540.75, free: 3800.45, cash: 1500.4, positions_value: 7240.3 },
-        stats: {
-          realized_total: 1820.4,
-          realized_today: 245.1,
-          unrealized: 462.7,
-          win_rate: 58.3,
-          wins: 14,
-          losses: 10,
-          total: 24,
-          exposure: 37.5,
-          open_trades: 3
-        },
-        positions: [
-          { symbol: 'BTC/USDT', side: 'long', entry: 64320, price: 64680, pnl_usdt: 214.8 },
-          { symbol: 'ETH/USDT', side: 'short', entry: 3120, price: 3084, pnl_usdt: 126.4 },
-          { symbol: 'SOL/USDT', side: 'long', entry: 156.2, price: 160.8, pnl_usdt: 88.1 }
-        ],
-        markets: [
-          { symbol: 'BTC/USDT', price: 64680, signal_strength: 76, signal: true, direction: 'long' },
-          { symbol: 'ETH/USDT', price: 3118.4, signal_strength: 68, signal: true, direction: 'short' },
-          { symbol: 'SOL/USDT', price: 160.5, signal_strength: 63, signal: true, direction: 'long' },
-          { symbol: 'BNB/USDT', price: 602.7, signal_strength: 52, signal: false, direction: 'long' },
-          { symbol: 'XRP/USDT', price: 0.61, signal_strength: 47, signal: false, direction: 'short' },
-          { symbol: 'ADA/USDT', price: 0.82, signal_strength: 44, signal: false, direction: 'long' }
-        ],
-        futures: { balance: 3200.5, free_balance: 1800, open_positions: 2, connected: true, trading_enabled: true },
-        platforms: [{ id: 'binance', connected: true }, { id: 'binance-futures', connected: true }],
-        trades: [
-          { symbol: 'BTC/USDT', entry: 63540, exit: 64200, pnl_usdt: 132.1 },
-          { symbol: 'ETH/USDT', entry: 3050, exit: 2996, pnl_usdt: -58.3 },
-          { symbol: 'SOL/USDT', entry: 148.4, exit: 152.8, pnl_usdt: 77.5 }
-        ],
-        decisions: [
-          { symbol: 'BTC/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'إغلاق فوق EMA20 بعد تراجع، والاتجاه فوق EMA200', created_at: '2026-11-04T12:10:00Z' },
-          { symbol: 'ETH/USDT', strategy: 'donchian_breakout', signal: 'long', outcome: 'blocked', reason: 'إغلاق فوق قمة 20 شمعة، وBTC اليومي فوق EMA200', created_at: '2026-11-04T11:50:00Z' },
-          { symbol: 'SOL/USDT', strategy: 'trend_pullback', signal: 'long', outcome: 'executed', reason: 'ارتداد مع الاتجاه على 4 ساعات', created_at: '2026-11-04T10:35:00Z' }
-        ],
-        news: {
-          enabled: true,
-          blocked: false,
-          reason: 'لا توجد أحداث عالية الخطورة في الوقت الحالي',
-          headlines: [
-            { source: 'Reuters', title: 'أسواق العملات الرقمية تستعيد الزخم مع ارتفاع السيولة' },
-            { source: 'Bloomberg', title: 'تقارير المؤسسات تدعم استمرار الاتجاه الصاعد' },
-            { source: 'CNBC', title: 'الأسعار تعكس تحسن معنويات المضاربين' }
-          ]
-        }
-      };
+      window.__SOBHI = window.__SOBHI || { nodeCount: 0, visualReady: false };
+      let lastGood = null;
+      let lastGoodAt = null;
+      let linkMode = 'empty';
+      let rlCache = null;
+      let rlStale = false;
+      let orbitSig = '';
+      let orbitNodes = [];
+      let openNodeId = null;
+      const RL_ACT = { skip: 'تخطي', half: 'نصف الحجم', full: 'الحجم الكامل' };
+      const RL_ST = { pending: 'لم تُفتح', opened: 'مفتوحة', closed: 'مغلقة', superseded: 'مستبدلة' };
+      const MODE_AR = { core: 'أساسي', legacy: 'قديم', all: 'الكل' };
+      const SCAN_AR = { waiting: 'بانتظار أول فحص', running: 'يفحص الآن', idle: 'اكتمل آخر فحص', error: 'خطأ في الفحص' };
 
       function money(v, digits = 2) {
         if (v == null || Number.isNaN(Number(v))) return '$0.00';
@@ -707,102 +985,199 @@
         if (el) el.textContent = value;
       }
 
+      function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[c]));
+      }
+
+      function pnlClass(n) {
+        return n > 0 ? 'up' : n < 0 ? 'down' : 'neutral';
+      }
+
+      function isFuturesSymbol(symbol, marketType) {
+        return /future|فيوتشر/i.test(String(marketType || '')) || String(symbol || '').includes(':');
+      }
+
+      function isFuturesDecision(d) {
+        return /future|فيوتشر/i.test(String((d && d.market) || '')) || isFuturesSymbol(d && d.symbol, d && d.market_type);
+      }
+
+      function isNoneSignal(d) {
+        const s = String(d && d.signal != null ? d.signal : '').trim().toLowerCase();
+        return !s || s === 'none' || s === 'flat' || s === 'wait' || s === 'null';
+      }
+
+      function signalText(signal) {
+        const s = String(signal == null ? '' : signal).trim().toLowerCase();
+        if (s === 'short' || s === 'sell') return 'بيع';
+        if (s === 'long' || s === 'buy') return 'شراء';
+        return 'لا إشارة';
+      }
+
+      function outcomeTone(outcome) {
+        const s = String(outcome || '');
+        if (/مرفوض|رفض|فشل|خطأ|blocked|reject/i.test(s)) return 'red';
+        if (/تم فتح|تم تنفيذ|مؤكد|نُفّذ|منفّذ|executed|filled|opened|success/i.test(s)) return 'green';
+        if (/انتظار|مراقبة|تجاهل|wait/i.test(s)) return 'orange';
+        return 'cyan';
+      }
+
+      function riyadhTime(iso) {
+        if (!iso) return '—';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return String(iso);
+        const opts = { timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' };
+        try {
+          return new Intl.DateTimeFormat('ar-SA-u-nu-latn', opts).format(d);
+        } catch (err) {
+          return d.toLocaleString('en-GB', opts);
+        }
+      }
+
+      function tradeTime(raw) {
+        const text = String(raw || '');
+        if (!text) return '—';
+        if (/[zZ]|[+-]\d\d:?\d\d|T/.test(text)) return riyadhTime(text);
+        return text.replace('T', ' ').slice(0, 16);
+      }
+
+      function ageText(iso) {
+        if (!iso) return 'لم يكتمل بعد';
+        const t = new Date(iso).getTime();
+        if (!Number.isFinite(t)) return '—';
+        const sec = Math.max(0, (Date.now() - t) / 1000);
+        if (sec < 90) return 'منذ ' + Math.round(sec) + ' ث';
+        if (sec < 3600) return 'منذ ' + Math.round(sec / 60) + ' د';
+        return 'منذ ' + Math.round(sec / 3600) + ' س';
+      }
+
+      function priceFmt(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return money(n, Math.abs(n) < 1 ? 4 : 2);
+      }
+
+      function coinMark(symbol) {
+        return esc(String(symbol || '').split('/')[0].slice(0, 3).toUpperCase() || '—');
+      }
+
+      function modeLabel(mode) {
+        return MODE_AR[mode] || (mode ? String(mode) : '—');
+      }
+
+      function rankDecision(d, futuresOff) {
+        const none = isNoneSignal(d);
+        const fut = isFuturesDecision(d);
+        const strategy = String((d && d.strategy) || '');
+        const outcome = String((d && d.outcome) || '');
+        const core = /trend_pullback|donchian_breakout|ارتداد مع الاتجاه|اختراق دونشيان|donchian_trend|اتجاه دونشيان/.test(strategy);
+        const meaningful = /تم فتح|تم تنفيذ|مرفوض|فشل|إرسال|إضافة|تخط/.test(outcome);
+        const waitish = /انتظار|مراقبة/.test(outcome) || strategy === 'انتظار' || strategy === 'wait';
+        if (fut && futuresOff && (none || waitish) && !meaningful) return -1;
+        let score = 0;
+        if (core) score += 60;
+        if (/تم فتح|تم تنفيذ|إرسال/.test(outcome)) score += 40;
+        else if (meaningful) score += 24;
+        if (!none) score += 20;
+        if (none && !meaningful) score -= 50;
+        if (fut && futuresOff) score -= 8;
+        return score;
+      }
+
+      function pickDecisions(decisions, futuresOff) {
+        const ranked = (Array.isArray(decisions) ? decisions : []).map((d, i) => ({ d, i, score: rankDecision(d, futuresOff) }));
+        const visible = ranked.filter((r) => r.score >= 0).sort((a, b) => b.score - a.score || a.i - b.i);
+        const strong = visible.filter((r) => r.score >= 20);
+        if (strong.length) return strong.slice(0, 4);
+        if (visible.length) return visible.slice(0, 4);
+        return ranked.filter((r) => r.score !== -1).sort((a, b) => b.score - a.score || a.i - b.i).slice(0, 4);
+      }
+
       function renderMarkets(markets) {
         const grid = document.getElementById('marketGrid');
         if (!grid) return;
-
         const list = Array.isArray(markets) ? markets.slice(0, 6) : [];
-
+        if (!list.length) {
+          grid.innerHTML = '<div class="muted">لا توجد أسواق في هذه القراءة.</div>';
+          return;
+        }
         grid.innerHTML = list.map((m) => {
           const strength = Math.max(0, Math.min(100, safeNum(m.signal_strength, 0)));
           const badge = m.signal ? 'chip green' : 'chip cyan';
-          const label = m.signal ? (m.direction === 'short' ? 'شورت' : 'لونغ') : 'مراقبة';
+          const label = m.signal ? signalText(m.direction || 'long') : 'مراقبة';
           const price = safeNum(m.price, 0);
-          return `
-            <div class="market-tile">
-              <div class="market-row">
-                <div class="coin-tag"><span class="coin-icon">${String(m.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span><span>${m.symbol || '—'}</span></div>
-                <span class="${badge}">${label}</span>
-              </div>
-              <div class="price">${money(price, price < 1 ? 4 : 2)}</div>
-              <div class="delta">قوة الإشارة: ${pct(strength, 0)}</div>
-              <div class="signal-bar" style="margin-top: 10px;">
-                <div class="signal-fill" style="width: ${strength}%"></div>
-              </div>
-            </div>
-          `;
+          return '<div class="market-tile"><div class="market-row"><div class="coin-tag"><span class="coin-icon">' +
+            coinMark(m.symbol) + '</span><span>' + esc(m.symbol || '—') + '</span></div><span class="' + badge + '">' +
+            esc(label) + '</span></div><div class="price">' + priceFmt(price) + '</div><div class="delta">' +
+            esc(stratLabel(m.strategy)) + ' · قوة الإشارة ' + pct(strength, 0) +
+            '</div><div class="signal-bar" style="margin-top:10px"><div class="signal-fill" style="width:' +
+            strength + '%"></div></div></div>';
         }).join('');
       }
 
       function renderPositions(positions) {
         const tbody = document.getElementById('positionsBody');
         if (!tbody) return;
-
         const list = Array.isArray(positions) ? positions : [];
         if (!list.length) {
-          tbody.innerHTML = '<tr><td colspan="5" class="muted">لا توجد مراكز مفتوحة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="muted">لا توجد مراكز مفتوحة</td></tr>';
           return;
         }
-
         tbody.innerHTML = list.map((pos) => {
-          const side = pos.side === 'short' ? 'شورت' : 'لونغ';
+          const short = pos.side === 'short';
           const pnl = safeNum(pos.pnl_usdt, 0);
-          return `
-            <tr>
-              <td><span class="symbol"><span class="coin-icon">${String(pos.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span>${pos.symbol || '—'}</span></td>
-              <td><span class="chip ${pnl >= 0 ? 'green' : 'red'}">${side}</span></td>
-              <td>${money(pos.entry, 2)}</td>
-              <td>${money(pos.price, 2)}</td>
-              <td class="${pnl >= 0 ? 'up' : 'down'}">${money(pnl, 2)}</td>
-            </tr>
-          `;
+          const market = isFuturesSymbol(pos.symbol, pos.market_type) ? 'فيوتشرز' : 'سبوت';
+          return '<tr><td><span class="symbol"><span class="coin-icon">' + coinMark(pos.symbol) + '</span>' + esc(pos.symbol || '—') +
+            '</span></td><td>' + market + '</td><td>' + esc(pos.strategy ? stratLabel(pos.strategy) : '—') +
+            '</td><td><span class="chip ' + (short ? 'red' : 'green') + '">' + (short ? 'شورت' : 'لونغ') +
+            '</span></td><td>' + priceFmt(pos.entry) + '</td><td>' + priceFmt(pos.price) +
+            '</td><td class="' + pnlClass(pnl) + '">' + money(pnl, 2) + '</td></tr>';
         }).join('');
       }
 
       function renderTrades(trades) {
         const tbody = document.getElementById('tradeBody');
         if (!tbody) return;
-
-        const list = Array.isArray(trades) ? trades.slice(0, 6) : [];
+        const list = Array.isArray(trades) ? trades.slice(0, 8) : [];
         if (!list.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="muted">لا توجد صفقات مغلقة</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="muted">لا توجد صفقات مغلقة</td></tr>';
           return;
         }
-
         tbody.innerHTML = list.map((t) => {
           const pnl = safeNum(t.pnl_usdt, 0);
-          return `
-            <tr>
-              <td><span class="symbol"><span class="coin-icon">${String(t.symbol || '').split('/')[0].slice(0, 3).toUpperCase()}</span>${t.symbol || '—'}</span></td>
-              <td>${money(t.entry, 2)}</td>
-              <td>${money(t.exit, 2)}</td>
-              <td class="${pnl >= 0 ? 'up' : 'down'}">${money(pnl, 2)}</td>
-            </tr>
-          `;
+          const market = isFuturesSymbol(t.symbol, t.market_type) ? 'فيوتشرز' : 'سبوت';
+          return '<tr><td><span class="symbol"><span class="coin-icon">' + coinMark(t.symbol) + '</span>' + esc(t.symbol || '—') +
+            '</span></td><td>' + market + '</td><td>' + esc(t.strategy ? stratLabel(t.strategy) : '—') +
+            '</td><td>' + esc(tradeTime(t.time)) + '</td><td>' + priceFmt(t.entry) + '</td><td>' + priceFmt(t.exit) +
+            '</td><td class="' + pnlClass(pnl) + '">' + money(pnl, 2) + '</td></tr>';
         }).join('');
       }
 
-      function renderDecisions(decisions) {
+      function renderDecisions(decisions, futuresOff) {
         const holder = document.getElementById('decisionList');
+        const hint = document.getElementById('decisionHint');
         if (!holder) return;
-
-        const list = Array.isArray(decisions) ? decisions.slice(0, 4) : [];
-
-        holder.innerHTML = list.map((d) => {
-          const outcomeClass = /executed|filled|opened|success/i.test(String(d.outcome || '')) ? 'green' : 'orange';
-          const direction = d.signal === 'short' ? 'بيع' : 'شراء';
-          return `
-            <div class="decision">
-              <div class="decision-head">
-                <span>${d.symbol || '—'}</span>
-                <span class="chip ${outcomeClass}">${d.outcome || '—'}</span>
-              </div>
-              <div class="decision-meta">
-                <div>${stratLabel(d.strategy)} · ${direction}</div>
-                <div>${d.reason || 'لا يوجد سبب'}</div>
-              </div>
-            </div>
-          `;
+        const all = Array.isArray(decisions) ? decisions : [];
+        const chosen = pickDecisions(all, futuresOff);
+        const hidFuturesWait = futuresOff && all.some((d) => isFuturesDecision(d) && (isNoneSignal(d) || /انتظار|مراقبة/.test(String(d.outcome || '') + String(d.strategy || ''))));
+        if (hint) {
+          hint.textContent = !chosen.length && hidFuturesWait
+            ? 'لا قرارات قابلة للتنفيذ. دخول فيوتشرز الجديد متوقف وإشارات الانتظار مخفية.'
+            : (hidFuturesWait ? 'إشارات الانتظار الفارغة في فيوتشرز مخفية لأن الدخول الجديد متوقف.' : '');
+        }
+        if (!chosen.length) {
+          holder.innerHTML = '<div class="muted">لا توجد قرارات بعد</div>';
+          return;
+        }
+        holder.innerHTML = chosen.map((row) => {
+          const d = row.d;
+          const dim = isNoneSignal(d) || row.score < 20;
+          return '<div class="decision' + (dim ? ' dim' : '') + '"><div class="decision-head"><span>' + esc(d.symbol || '—') +
+            '</span><span class="chip ' + outcomeTone(d.outcome) + '">' + esc(d.outcome || '—') +
+            '</span></div><div class="decision-meta"><div>' + esc(stratLabel(d.strategy)) + ' · ' + esc(signalText(d.signal)) +
+            ' · <span class="decision-time">' + esc(riyadhTime(d.created_at)) + '</span></div><div>' +
+            esc(d.reason || 'لا يوجد سبب') + '</div></div></div>';
         }).join('');
       }
 
@@ -815,20 +1190,427 @@
         const blocked = !!(data && data.blocked);
         summary.textContent = blocked ? 'الأخبار محظورة: الدخول مؤقتاً متوقف' : (data && data.reason ? data.reason : 'لا توجد إشعارات رأسمالية عالية');
 
-        list.innerHTML = news.length ? news.map((item) => `
-          <div class="news-item"><strong>${item.source || 'خبر'}</strong><br>${item.title || ''}</div>
-        `).join('') : '<div class="news-item">لا توجد أخبار حديثة.</div>';
+        list.innerHTML = news.length ? news.map((item) =>
+          '<div class="news-item"><strong>' + esc(item.source || 'خبر') + '</strong><br>' + esc(item.title_ar || item.title || '') + '</div>'
+        ).join('') : '<div class="news-item">لا توجد أخبار حديثة.</div>';
       }
 
-      async function loadState() {
-        try {
-          const response = await fetch('/api/state?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' });
-          if (!response.ok) throw new Error('HTTP ' + response.status);
-          const data = await response.json();
-          renderDashboard(data);
-        } catch (err) {
-          renderDashboard(fallbackData);
+      function dailyText(block) {
+        if (!block) return 'غير متاح';
+        const loss = block.loss_pct == null ? '—' : pct(block.loss_pct, 2);
+        const limit = block.limit_pct == null ? '—' : pct(block.limit_pct, 1);
+        return loss + ' من ' + limit + (block.blocked ? ' · متوقف' : ' · ضمن الحد');
+      }
+
+      function allocText(block) {
+        if (!block) return 'غير متاح';
+        return money(block.open_risk, 2) + ' · ' + pct(block.open_risk_pct, 2) + ' من سقف ' + pct(block.max_open_risk_pct, 1);
+      }
+
+      function scannerText(scanner) {
+        const sc = scanner || {};
+        const label = SCAN_AR[sc.status] || sc.status || '—';
+        const age = ageText(sc.last_completed_at || sc.last_started_at);
+        const dur = sc.duration_seconds != null ? ' · ' + sc.duration_seconds + ' ث' : '';
+        const err = sc.last_error ? ' · ' + sc.last_error : '';
+        return label + ' · ' + age + dur + err;
+      }
+
+      function renderRisk(data) {
+        const body = document.getElementById('riskBody');
+        if (!body) return;
+        const params = data.params || {};
+        const stats = data.stats || {};
+        const names = (Array.isArray(params.strategies) ? params.strategies : []).map(stratLabel);
+        const daily = data.daily_risk || {};
+        const alloc = data.allocator || {};
+        const cfg = alloc.config || {};
+        const items = [
+          ['وضع الاستراتيجية', modeLabel(params.strategy_mode)],
+          ['الاستراتيجيات المفعّلة', names.length ? names.join('، ') : '—'],
+          ['أقصى المراكز المفتوحة', params.max_open_positions == null ? '—' : String(params.max_open_positions)],
+          ['دخول فيوتشرز جديد', params.futures_new_entries ? 'مفعّل' : 'متوقف'],
+          ['خسارة اليوم · سبوت', dailyText(daily.spot)],
+          ['خسارة اليوم · فيوتشرز', dailyText(daily.futures)],
+          ['مخاطرة الموزّع · سبوت', allocText(alloc.spot)],
+          ['مخاطرة الموزّع · فيوتشرز', allocText(alloc.futures)],
+          ['الماسح', scannerText(data.scanner)],
+          ['حالة الموزّع', cfg.enabled === false ? 'متوقف (الأرقام للعرض)' : (cfg.enabled ? 'مفعّل · سقف ' + pct(cfg.max_open_risk_pct, 1) : '—')]
+        ];
+        const unverified = safeNum(stats.unverified_spot_trades, 0);
+        body.innerHTML = '<div class="risk-grid">' + items.map((item) =>
+          '<div class="risk-item"><span>' + esc(item[0]) + '</span><b>' + esc(item[1]) + '</b></div>'
+        ).join('') + '</div>' + (unverified > 0
+          ? '<div class="risk-note">تنبيه: ' + esc(String(unverified)) + ' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.</div>'
+          : '');
+        const chip = document.getElementById('strategyModeChip');
+        if (chip) chip.textContent = modeLabel(params.strategy_mode);
+      }
+
+      function shortStrat(id) {
+        if (id === 'trend_pullback') return 'ارتداد';
+        if (id === 'donchian_breakout' || id === 'donchian_trend') return 'دونشيان';
+        const label = stratLabel(id);
+        return label.length > 10 ? label.slice(0, 9) + '…' : label;
+      }
+
+      function buildNodes(data, rl) {
+        const params = (data && data.params) || {};
+        const active = new Set((params.strategies || []).map(String));
+        const waiting = !data;
+        const mobile = window.matchMedia('(max-width: 760px)').matches;
+        const nodes = [];
+        const stratIds = ['trend_pullback', 'donchian_breakout'];
+        (params.strategies || []).forEach((id) => {
+          if (id && stratIds.indexOf(String(id)) < 0) stratIds.push(String(id));
+        });
+        stratIds.slice(0, mobile ? 2 : 4).forEach((id) => {
+          const on = active.has(id);
+          nodes.push({
+            id: 's:' + id, kind: 'strategy', strategy: id, short: shortStrat(id), title: stratLabel(id),
+            on: on, status: waiting ? 'بانتظار' : (on ? 'مفعّلة' : 'متوقفة')
+          });
+        });
+        const rlMode = rl && rl.mode;
+        nodes.push({
+          id: 'rl', kind: 'rl', short: 'تعلّم', title: 'التعلم المعزز',
+          on: !!(rlMode && rlMode !== 'off'),
+          status: !rl ? 'بانتظار' : (rl.mode_label || rlMode || 'متوقف')
+        });
+        const news = data && data.news;
+        nodes.push({
+          id: 'news', kind: 'filter', short: 'أخبار', title: 'فلتر الأخبار',
+          on: !(news && news.blocked), status: !news ? 'بانتظار' : (news.blocked ? 'حظر' : 'مسموح')
+        });
+        if (!mobile) {
+          nodes.push({
+            id: 'risk', kind: 'filter', short: 'مخاطر', title: 'سقوف المخاطرة',
+            on: true, status: waiting ? 'بانتظار' : 'ضمن الحد'
+          });
         }
+        const markets = ((data && data.markets) || []).filter((m) => m && m.symbol && !isFuturesSymbol(m.symbol, m.market_type));
+        markets.sort((a, b) => (b.signal ? 1 : 0) - (a.signal ? 1 : 0) || safeNum(b.signal_strength) - safeNum(a.signal_strength));
+        markets.slice(0, mobile ? 2 : 4).forEach((m) => {
+          const base = String(m.symbol).split('/')[0];
+          nodes.push({
+            id: 'c:' + m.symbol, kind: 'coin', symbol: m.symbol, short: base, title: m.symbol,
+            on: !!m.signal, status: m.signal ? signalText(m.direction || 'long') : 'مراقبة'
+          });
+        });
+        return nodes;
+      }
+
+      function relatedDecisions(node, data) {
+        const decisions = (data && data.decisions) || [];
+        const rows = decisions.filter((d) => {
+          if (node.kind === 'coin') {
+            return d.symbol === node.symbol || String(d.symbol || '').split('/')[0] === node.short;
+          }
+          if (node.kind === 'strategy') {
+            const label = stratLabel(node.strategy);
+            const s = String(d.strategy || '');
+            return s === node.strategy || s === label;
+          }
+          if (node.kind === 'rl') return /معزز|تعلّم/.test(String(d.outcome || '') + String(d.reason || ''));
+          return !isNoneSignal(d);
+        }).slice(0, 3);
+        return rows.length ? rows : decisions.slice(0, 3);
+      }
+
+      function panelHTML(node, data, rl) {
+        const events = data ? relatedDecisions(node, data) : [];
+        let rows = '';
+        if (node.kind === 'strategy') {
+          const on = node.on;
+          const open = ((data && data.positions) || []).filter((p) => p.strategy === node.strategy || stratLabel(p.strategy) === node.title).length;
+          rows = '<div class="row"><span>الحالة</span><b>' + (on ? 'مفعّلة' : 'غير مفعّلة') + '</b></div>' +
+            '<div class="row"><span>المحاذاة</span><b>' + (on ? 'ضمن الوضع الحالي' : 'خارج قائمة الدخول') + '</b></div>' +
+            '<div class="row"><span>مراكز بهذه الاستراتيجية</span><b>' + open + '</b></div>';
+        } else if (node.kind === 'rl') {
+          const cmp = (rl && rl.comparison) || {};
+          rows = '<div class="row"><span>الحالة</span><b>' + esc((rl && (rl.mode_label || rl.mode)) || '—') + '</b></div>' +
+            '<div class="row"><span>المحاذاة</span><b>' + esc(rl && rl.mode === 'live' ? 'يطبّق الحجم' : 'لا يغيّر الحجم') + '</b></div>' +
+            '<div class="row"><span>صفقات تعلّم</span><b>' + esc(cmp.closed_trades == null ? '—' : String(cmp.closed_trades)) + '</b></div>' +
+            '<div class="row"><span>الحد الأدنى</span><b>' + esc(rl && rl.min_samples != null ? String(rl.min_samples) : '30') + '</b></div>';
+        } else if (node.kind === 'coin') {
+          const market = ((data && data.markets) || []).find((m) => m.symbol === node.symbol) || {};
+          const pos = ((data && data.positions) || []).find((p) => p.symbol === node.symbol);
+          const strength = Math.max(0, Math.min(100, safeNum(market.signal_strength, 0)));
+          rows = '<div class="row"><span>الحالة</span><b>' + esc(node.status) + '</b></div>' +
+            '<div class="row"><span>السعر</span><b>' + priceFmt(market.price) + '</b></div>' +
+            '<div class="row"><span>المحاذاة</span><b>' + pct(strength, 0) + '</b></div>' +
+            '<div class="row"><span>الاستراتيجية</span><b>' + esc(stratLabel(market.strategy_label || market.strategy)) + '</b></div>' +
+            (pos ? '<div class="row"><span>ربح المركز</span><b>' + money(pos.pnl_usdt, 2) + '</b></div>' : '') +
+            '<div class="strength"><i style="width:' + strength + '%"></i></div>';
+        } else if (node.id === 'news') {
+          const news = (data && data.news) || {};
+          rows = '<div class="row"><span>الحالة</span><b>' + (news.blocked ? 'حظر الدخول' : 'مسموح') + '</b></div>' +
+            '<div class="row"><span>المحاذاة</span><b>' + esc(news.severity == null ? '—' : String(news.severity)) + '</b></div>' +
+            '<div class="row"><span>السبب</span><b>' + esc(news.reason || '—') + '</b></div>';
+        } else {
+          const daily = (data && data.daily_risk) || {};
+          const alloc = (data && data.allocator) || {};
+          const params = (data && data.params) || {};
+          rows = '<div class="row"><span>سبوت</span><b>' + esc(dailyText(daily.spot)) + '</b></div>' +
+            '<div class="row"><span>فيوتشرز</span><b>' + esc(dailyText(daily.futures)) + '</b></div>' +
+            '<div class="row"><span>موزّع سبوت</span><b>' + esc(allocText(alloc.spot)) + '</b></div>' +
+            '<div class="row"><span>دخول فيوتشرز</span><b>' + (params.futures_new_entries ? 'مفعّل' : 'متوقف') + '</b></div>' +
+            '<div class="row"><span>سقف المراكز</span><b>' + esc(params.max_open_positions == null ? '—' : String(params.max_open_positions)) + '</b></div>';
+        }
+        const list = events.length
+          ? '<ul>' + events.map((d) => '<li>' + esc(String(d.symbol || '').split('/')[0]) + ' · ' + esc(signalText(d.signal)) + ' · ' + esc(d.outcome || '') + ' · ' + esc(riyadhTime(d.created_at)) + '</li>').join('') + '</ul>'
+          : '<ul><li>لا أحداث بعد</li></ul>';
+        return '<h3>' + esc(node.title) + '</h3>' + rows + '<div class="tiny muted" style="margin-top:8px">آخر الأحداث</div>' + list;
+      }
+
+      function hidePanel() {
+        const panel = document.getElementById('agentPanel');
+        if (panel) panel.hidden = true;
+        openNodeId = null;
+      }
+
+      function openPanel(id, btn, refresh) {
+        const node = orbitNodes.find((n) => n.id === id);
+        const panel = document.getElementById('agentPanel');
+        if (!node || !panel || !btn) return;
+        if (!refresh && openNodeId === id && !panel.hidden) return;
+        openNodeId = id;
+        panel.hidden = false;
+        panel.innerHTML = panelHTML(node, lastGood, rlCache);
+        const stage = document.getElementById('neuralStage');
+        const sr = stage.getBoundingClientRect();
+        const br = btn.getBoundingClientRect();
+        if (sr.width < 760) {
+          panel.style.left = '8px';
+          panel.style.right = '8px';
+          panel.style.top = 'auto';
+          panel.style.bottom = '8px';
+          panel.style.width = 'auto';
+          return;
+        }
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        const margin = 12;
+        const width = Math.min(280, sr.width - margin * 2);
+        panel.style.width = width + 'px';
+        const cx = br.left + br.width / 2 - sr.left;
+        let left = cx < sr.width / 2 ? cx + 36 : cx - width - 36;
+        left = Math.max(margin, Math.min(left, sr.width - width - margin));
+        let top = br.top - sr.top - 6;
+        const ph = panel.offsetHeight || 200;
+        top = Math.max(margin, Math.min(top, sr.height - ph - margin));
+        panel.style.left = left + 'px';
+        panel.style.top = top + 'px';
+      }
+
+      function renderOrbit(data, rl) {
+        const root = document.getElementById('neuralOrbit');
+        if (!root) return;
+        const nodes = buildNodes(data, rl);
+        orbitNodes = nodes;
+        window.__SOBHI.nodeCount = nodes.length;
+        const sig = nodes.map((n) => n.id + (n.on ? 1 : 0) + n.status).join('|') + (window.innerWidth < 760 ? 'm' : 'd');
+        if (sig !== orbitSig) {
+          orbitSig = sig;
+          const mobile = window.matchMedia('(max-width: 760px)').matches;
+          const rx = mobile ? 34 : 32;
+          const ry = mobile ? 28 : 27;
+          root.innerHTML = nodes.map((n, i) => {
+            const angle = -Math.PI / 2 + (i / nodes.length) * Math.PI * 2;
+            const left = 50 + Math.cos(angle) * rx;
+            const top = 47 + Math.sin(angle) * ry;
+            return '<button type="button" class="agent ' + (n.on ? 'on' : 'off') + ' kind-' + n.kind + '" data-id="' + esc(n.id) +
+              '" style="left:' + left.toFixed(2) + '%;top:' + top.toFixed(2) + '%"><strong>' + esc(n.short) + '</strong><small>' + esc(n.status) + '</small></button>';
+          }).join('');
+        }
+        if (openNodeId) {
+          const btn = root.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(openNodeId) : openNodeId) + '"]');
+          if (btn) openPanel(openNodeId, btn, true);
+          else hidePanel();
+        }
+      }
+
+      function renderMetrics(data) {
+        const el = document.getElementById('neuralMetrics');
+        const live = document.getElementById('neuralLive');
+        if (!el) return;
+        if (!data) {
+          el.innerHTML = '<div><span>الحالة</span><b>بانتظار الاتصال</b></div>';
+          if (live) { live.textContent = 'غير متصل'; live.className = 'chip red'; }
+          return;
+        }
+        const markets = data.markets || [];
+        const strengths = markets.map((m) => Number(m.signal_strength)).filter(Number.isFinite);
+        const conviction = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length : 0;
+        const stats = data.stats || {};
+        const params = data.params || {};
+        const items = [
+          ['مباشر', data.trading_enabled === false ? 'متوقف' : 'يعمل'],
+          ['الفحص', ageText((data.scanner || {}).last_completed_at)],
+          ['الوضع', modeLabel(params.strategy_mode)],
+          ['العقد', String(window.__SOBHI.nodeCount || 0)],
+          ['القرارات', String((data.decisions || []).length)],
+          ['القناعة', pct(conviction, 0)],
+          ['دقة سبوت', pct(stats.win_rate, 0)],
+          ['التعرّض', pct(stats.exposure, 0)]
+        ];
+        el.innerHTML = items.map((item) => '<div><span>' + esc(item[0]) + '</span><b>' + esc(item[1]) + '</b></div>').join('');
+        if (live) {
+          live.textContent = linkMode === 'stale' ? 'قراءة قديمة' : 'مباشر';
+          live.className = 'chip ' + (linkMode === 'stale' ? 'orange' : 'green');
+        }
+      }
+
+      function renderTimeline(decisions) {
+        const el = document.getElementById('neuralTimeline');
+        if (!el) return;
+        const rows = Array.isArray(decisions) ? decisions.slice(0, 8) : [];
+        el.innerHTML = rows.length ? rows.map((d) =>
+          '<div class="tick ' + outcomeTone(d.outcome) + '"><i></i><b>' + esc(String(d.symbol || '').split('/')[0] || '—') +
+          '</b><small>' + esc(signalText(d.signal)) + ' · ' + esc(riyadhTime(d.created_at)) + '</small></div>'
+        ).join('') : '<span class="muted">لا أحداث بعد</span>';
+      }
+
+      function renderTicker(decisions) {
+        const el = document.getElementById('tickerTrack');
+        if (!el) return;
+        const rows = Array.isArray(decisions) ? decisions.slice(0, 12) : [];
+        const parts = rows.length ? rows.map((d) =>
+          esc(String(d.symbol || '').split('/')[0]) + ' · ' + esc(stratLabel(d.strategy)) + ' · ' + esc(signalText(d.signal)) + ' · ' + esc(d.outcome || '') + ' · ' + esc(riyadhTime(d.created_at))
+        ) : ['لا قرارات بعد'];
+        const text = parts.concat(parts).map((item) => '<span>' + item + '</span>').join('');
+        if (el.dataset.sig !== text) {
+          el.dataset.sig = text;
+          el.innerHTML = text;
+        }
+      }
+
+      function paintNeural(data, rl) {
+        renderOrbit(data, rl);
+        renderMetrics(data);
+        renderTimeline(data && data.decisions);
+        renderTicker(data && data.decisions);
+      }
+
+      function rText(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return '—';
+        return (n >= 0 ? '+' : '') + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + 'R';
+      }
+
+      function rlCtx(c) {
+        if (!c) return '—';
+        const a = String(c).split('|');
+        const volMap = { 'vol:low': 'تذبذب منخفض', 'vol:mid': 'تذبذب متوسط', 'vol:high': 'تذبذب عالٍ', 'vol:na': '—' };
+        const market = a[0] === 'futures' ? 'فيوتشرز' : 'سبوت';
+        const dir = a[2] === 'short' ? 'بيع' : (a[2] === 'long' ? 'شراء' : 'لا إشارة');
+        return market + ' · ' + stratLabel(a[1] || '') + ' · ' + dir + (a[3] ? ' · ' + a[3] : '') + (volMap[a[4]] ? ' · ' + volMap[a[4]] : '');
+      }
+
+      function renderRL() {
+        const modeEl = document.getElementById('rlMode');
+        const kpis = document.getElementById('rlKpis');
+        const armsBody = document.getElementById('rlArms');
+        const recentBody = document.getElementById('rlRecent');
+        const note = document.getElementById('rlNote');
+        if (!kpis || !armsBody || !recentBody) return;
+        if (!rlCache) {
+          if (modeEl) { modeEl.textContent = rlStale ? 'تعذّر التحميل' : 'جارٍ التحميل'; modeEl.className = 'chip orange'; }
+          if (note) note.textContent = rlStale ? 'تعذّر قراءة /api/rl. لا تُعرض أرقام تعلم تجريبية.' : '';
+          armsBody.innerHTML = '<tr><td colspan="7" class="muted">' + (rlStale ? 'لا توجد قراءة محفوظة' : 'جارٍ التحميل…') + '</td></tr>';
+          recentBody.innerHTML = '<tr><td colspan="8" class="muted">—</td></tr>';
+          return;
+        }
+        const r = rlCache;
+        const mode = r.mode || 'off';
+        if (modeEl) {
+          modeEl.textContent = r.mode_label || mode;
+          modeEl.className = 'chip ' + (mode === 'live' ? 'green' : mode === 'shadow' ? 'orange' : 'cyan');
+        }
+        if (note) note.textContent = rlStale ? 'تعذّر تحديث التعلم المعزز. الجدول آخر قراءة محفوظة وليس أرقاماً تجريبية.' : (r.error ? 'تعذّر جزء من القراءة.' : '');
+        const cmp = r.comparison || {};
+        const arms = Array.isArray(r.arms) ? r.arms : [];
+        const ms = r.min_samples || 30;
+        const cards = [
+          ['الوضع', r.mode_label || mode || '—'],
+          ['صفقات تعلّم', String(cmp.closed_trades || 0)],
+          ['R الفعلي', rText(cmp.actual_r)],
+          ['R لو طُبّق التعلم', rText(cmp.rl_r)]
+        ];
+        kpis.innerHTML = cards.map((c) => '<div><span>' + esc(c[0]) + '</span><b>' + esc(c[1]) + '</b></div>').join('');
+        armsBody.innerHTML = arms.length ? arms.slice(0, 12).map((a) => {
+          const act = RL_ACT[a.preferred_action] || '—';
+          const tone = a.preferred_action === 'full' ? 'green' : a.preferred_action === 'half' ? 'orange' : 'red';
+          return '<tr><td>' + esc(rlCtx(a.context)) + (a.level === 'parent' ? ' · مجمّع' : '') + '</td><td>' + esc(a.samples || 0) +
+            '</td><td class="' + pnlClass(a.avg_r || 0) + '">' + esc(rText(a.avg_r)) + '</td><td>' + esc(rText(a.expected_r)) +
+            '</td><td>' + pct((a.prob_positive || 0) * 100, 0) + '</td><td><span class="chip ' + tone + '">' + esc(act) +
+            '</span></td><td>' + (a.ready ? 'جاهز' : esc((a.samples || 0) + ' / ' + ms)) + '</td></tr>';
+        }).join('') : '<tr><td colspan="7" class="muted">لم يتعلّم من أي صفقة بعد. RL_MODE=shadow يبدأ التسجيل دون تغيير التداول.</td></tr>';
+        const recent = Array.isArray(r.recent) ? r.recent : [];
+        recentBody.innerHTML = recent.length ? recent.slice(0, 8).map((d) => {
+          const tone = d.action === 'full' ? 'green' : d.action === 'half' ? 'orange' : 'red';
+          return '<tr><td>' + esc(riyadhTime(d.created_at)) + '</td><td>' + esc(d.symbol || '—') + '</td><td>' + esc(rlCtx(d.context)) +
+            '</td><td><span class="chip ' + tone + '">' + esc(RL_ACT[d.action] || '—') + '</span></td><td>×' +
+            esc(Number(d.applied_multiplier == null ? 1 : d.applied_multiplier).toFixed(1)) + '</td><td>' + esc(rText(d.expected_r)) +
+            '</td><td>' + esc(RL_ST[d.status] || d.status || '—') + '</td><td class="' + pnlClass(d.r_multiple || 0) + '">' + esc(rText(d.r_multiple)) + '</td></tr>';
+        }).join('') : '<tr><td colspan="8" class="muted">لا توجد قرارات تعلم بعد</td></tr>';
+      }
+
+      function markConnection(mode) {
+        linkMode = mode;
+        const banner = document.getElementById('offlineBanner');
+        const pill = document.getElementById('statusPill');
+        if (!banner || !pill) return;
+        if (mode === 'live') {
+          banner.classList.remove('show');
+          banner.textContent = '';
+          return;
+        }
+        banner.classList.add('show');
+        if (mode === 'stale' && lastGoodAt) {
+          banner.textContent = 'انقطع الاتصال بالخادم. الأرقام أدناه آخر قراءة ناجحة (' + riyadhTime(lastGoodAt.toISOString()) + ') وليست بيانات تجريبية.';
+          pill.textContent = 'بيانات قديمة';
+          pill.className = 'pill warn';
+        } else {
+          banner.textContent = 'تعذّر الاتصال بالخادم. لا توجد قراءة سابقة، ولن تُعرض أرقام تجريبية على أنها حيّة.';
+          pill.textContent = 'غير متصل';
+          pill.className = 'pill danger';
+        }
+      }
+
+      function renderDisconnected() {
+        ['totalWallet', 'realizedPnl', 'unrealizedPnl', 'openTrades', 'winRate', 'exposurePct', 'spotBalance', 'spotFree', 'spotOpen', 'spotPnl', 'futuresBalance', 'futuresFree', 'futuresOpen', 'futuresPnl'].forEach((id) => setText(id, '—'));
+        setText('walletDelta', 'لا توجد قراءة محفوظة');
+        setText('realizedMeta', 'سبوت — · فيوتشرز —');
+        setText('unrealizedMeta', '—');
+        setText('openMeta', 'سبوت — · فيوتشرز —');
+        setText('winMeta', 'سبوت — · فيوتشرز —');
+        setText('exposureMeta', '—');
+        setText('spotState', 'غير متصل');
+        setText('futuresState', 'غير متصل');
+        setText('marketCount', '0 رموز');
+        setText('openCountLabel', '0');
+        setText('tradeCount', '0');
+        const warnEl = document.getElementById('spotReconcileWarning');
+        if (warnEl) {
+          warnEl.hidden = true;
+          warnEl.textContent = '';
+        }
+        const spotState = document.getElementById('spotState');
+        const futState = document.getElementById('futuresState');
+        if (spotState) spotState.className = 'chip red';
+        if (futState) futState.className = 'chip red';
+        const grid = document.getElementById('marketGrid');
+        if (grid) grid.innerHTML = '<div class="muted">لا توجد بيانات حية.</div>';
+        const positions = document.getElementById('positionsBody');
+        if (positions) positions.innerHTML = '<tr><td colspan="7" class="muted">لا توجد قراءة من الخادم</td></tr>';
+        const trades = document.getElementById('tradeBody');
+        if (trades) trades.innerHTML = '<tr><td colspan="7" class="muted">لا توجد قراءة من الخادم</td></tr>';
+        const decisions = document.getElementById('decisionList');
+        if (decisions) decisions.innerHTML = '<div class="muted">لا توجد قرارات بدون اتصال</div>';
+        const risk = document.getElementById('riskBody');
+        if (risk) risk.innerHTML = '<div class="muted">لا توجد بيانات مخاطر بدون اتصال.</div>';
+        paintNeural(null, rlCache);
       }
 
       function renderDashboard(data) {
@@ -841,72 +1623,432 @@
         const futures = data.futures || {};
         const platforms = Array.isArray(data.platforms) ? data.platforms : [];
         const news = data.news || {};
-
-        const totalWallet = safeNum(wallet.total, 0);
-        const realized = safeNum(stats.realized_total, 0);
+        const params = data.params || {};
+        const spotPositions = positions.filter((p) => !isFuturesSymbol(p.symbol, p.market_type));
+        const futCount = safeNum(futures.open_positions, positions.length - spotPositions.length);
+        const spotTotal = safeNum(wallet.total, 0);
+        const futBal = safeNum(futures.balance, 0);
+        const spotRealized = safeNum(stats.realized_total, 0);
+        const futRealized = safeNum(futures.realized_pnl, 0);
+        const totalRealized = spotRealized + futRealized;
         const unrealized = safeNum(stats.unrealized, 0);
-        const winRate = safeNum(stats.win_rate, 0);
         const exposure = safeNum(stats.exposure, 0);
-        const openTotal = safeNum(stats.open_trades, positions.length);
+        const futClosed = safeNum(futures.closed, 0);
+        const futWins = safeNum(futures.wins, 0);
 
-        setText('totalWallet', money(totalWallet, 2));
-        setText('walletDelta', `مثبت: ${money(wallet.free || 0, 2)} · نقد: ${money(wallet.cash || 0, 2)}`);
-        setText('realizedPnl', money(realized, 2));
+        setText('totalWallet', money(spotTotal + futBal, 2));
+        setText('walletDelta', 'سبوت ' + money(spotTotal, 2) + ' · فيوتشرز ' + money(futBal, 2) + ' · متاح ' + money(safeNum(wallet.free, 0), 2) + ' · متاح فيوتشرز ' + money(safeNum(futures.free_balance, 0), 2));
+        setText('realizedPnl', money(totalRealized, 2));
+        const realizedEl = document.getElementById('realizedPnl');
+        if (realizedEl) realizedEl.className = 'value ' + pnlClass(totalRealized);
         const reconcile = stats.spot_reconcile || {};
         const unverified = safeNum(stats.unverified_spot_trades, 0);
         const warning = reconcile.warning_ar || (unverified
-          ? `تنبيه: ${unverified} صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.`
+          ? 'تنبيه: ' + unverified + ' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.'
           : '');
         const warnEl = document.getElementById('spotReconcileWarning');
         if (warnEl) {
           warnEl.hidden = !warning;
           warnEl.textContent = warning;
         }
-        setText('realizedMeta', `اليوم ${money(stats.realized_today || 0, 2)}` + (unverified ? ` · ${unverified} صفقة غير موثّقة` : ''));
+        setText('realizedMeta', 'سبوت ' + money(spotRealized, 2) + ' · فيوتشرز ' + money(futRealized, 2) + ' · اليوم سبوت ' + money(stats.realized_today || 0, 2) + (unverified ? ' · ' + unverified + ' صفقة غير موثّقة' : ''));
         setText('unrealizedPnl', money(unrealized, 2));
-        setText('unrealizedMeta', `على ${positions.length} مركز`);
-        setText('openTrades', String(openTotal));
-        setText('openMeta', `Spot ${positions.filter(p => !String(p.symbol).includes(':')).length} · Futures ${safeNum(futures.open_positions, 0)}`);
-        setText('winRate', pct(winRate, 1));
-        setText('winMeta', `${safeNum(stats.wins, 0)} فوز · ${safeNum(stats.losses, 0)} خسارة`);
+        const unrealEl = document.getElementById('unrealizedPnl');
+        if (unrealEl) unrealEl.className = 'value ' + pnlClass(unrealized);
+        setText('unrealizedMeta', 'سبوت ' + spotPositions.length + ' · فيوتشرز ' + futCount);
+        setText('openTrades', String(spotPositions.length + futCount));
+        setText('openMeta', 'سبوت ' + spotPositions.length + ' · فيوتشرز ' + futCount);
+        setText('winRate', pct(safeNum(stats.win_rate, 0), 1));
+        setText('winMeta', 'سبوت ' + safeNum(stats.wins, 0) + ' فوز · ' + safeNum(stats.losses, 0) + ' خسارة · فيوتشرز ' +
+          (futClosed > 0 ? pct(futWins / futClosed * 100, 1) + ' (' + futWins + '/' + futClosed + ')' : '—'));
         setText('exposurePct', pct(exposure, 1));
-        setText('exposureMeta', exposure > 70 ? 'مرتفع' : exposure > 35 ? 'متوسط' : 'منخفض');
+        setText('exposureMeta', (exposure > 70 ? 'مرتفع' : exposure > 35 ? 'متوسط' : 'منخفض') + ' · سبوت + فيوتشرز');
 
-        const spotConnected = !!(platforms.find(p => p && p.id === 'binance') || {}).connected;
-        const futConnected = !!(platforms.find(p => p && p.id === 'binance-futures') || {}).connected;
+        const spotPlatform = platforms.find((p) => p && p.id === 'binance');
+        const futPlatform = platforms.find((p) => p && (p.id === 'binance_futures' || p.id === 'binance-futures'));
+        const spotConnected = !!(spotPlatform && spotPlatform.connected);
+        const futConnected = futPlatform ? !!futPlatform.connected : futures.connected === true;
         setText('spotState', spotConnected ? 'متصل' : 'غير متصل');
         setText('futuresState', futConnected ? 'متصل' : 'غير متصل');
-        document.getElementById('spotState').className = 'chip ' + (spotConnected ? 'green' : 'red');
-        document.getElementById('futuresState').className = 'chip ' + (futConnected ? 'cyan' : 'red');
-        setText('spotBalance', money(wallet.total || 0, 2));
+        const spotState = document.getElementById('spotState');
+        const futState = document.getElementById('futuresState');
+        if (spotState) spotState.className = 'chip ' + (spotConnected ? 'green' : 'red');
+        if (futState) futState.className = 'chip ' + (futConnected ? 'green' : 'red');
+        setText('spotBalance', money(spotTotal, 2));
         setText('spotFree', money(wallet.free || 0, 2));
-        setText('spotOpen', String(Math.max(0, positions.length)));
-        setText('spotPnl', money(realized, 2));
-        setText('futuresBalance', money(futures.balance || 0, 2));
+        setText('spotOpen', String(spotPositions.length));
+        setText('spotPnl', money(spotRealized, 2));
+        const spotPnl = document.getElementById('spotPnl');
+        if (spotPnl) spotPnl.className = pnlClass(spotRealized);
+        setText('futuresBalance', money(futBal, 2));
         setText('futuresFree', money(futures.free_balance || 0, 2));
-        setText('futuresOpen', String(safeNum(futures.open_positions, 0)));
-        setText('futuresPnl', money((futures.pnl_usdt || 0), 2));
+        setText('futuresOpen', String(futCount));
+        setText('futuresPnl', money(futRealized, 2));
+        const futPnl = document.getElementById('futuresPnl');
+        if (futPnl) futPnl.className = pnlClass(futRealized);
         setText('openCountLabel', String(positions.length));
         setText('tradeCount', String(trades.length));
-        setText('marketCount', `${markets.length} رموز`);
+        setText('marketCount', markets.length + ' رموز');
 
         const status = data.trading_enabled === false ? 'متوقف' : 'يعمل';
-        const mode = (data.env || 'demo').toUpperCase();
-        document.getElementById('statusPill').textContent = status;
-        document.getElementById('statusPill').className = 'pill ' + (data.trading_enabled === false ? 'warn' : 'neutral');
-        document.getElementById('modePill').textContent = 'الوضع: ' + (mode === 'LIVE' ? 'حقيقي' : 'تجريبي');
-        document.getElementById('riskPill').textContent = exposure > 70 ? 'مخاطرة مرتفعة' : 'مستوى مخاطرة مقبول';
-        document.getElementById('riskPill').className = 'pill ' + (exposure > 70 ? 'danger' : 'warn');
+        const mode = String(data.env || 'demo').toUpperCase();
+        const pill = document.getElementById('statusPill');
+        if (pill) {
+          pill.textContent = status;
+          pill.className = 'pill ' + (data.trading_enabled === false ? 'warn' : 'live');
+        }
+        setText('modePill', 'الوضع: ' + (mode === 'LIVE' ? 'حقيقي' : 'تجريبي'));
+        const riskPill = document.getElementById('riskPill');
+        if (riskPill) {
+          riskPill.textContent = exposure > 70 ? 'مخاطرة مرتفعة' : 'مستوى مخاطرة مقبول';
+          riskPill.className = 'pill ' + (exposure > 70 ? 'danger' : 'warn');
+        }
 
         renderMarkets(markets);
         renderPositions(positions);
         renderTrades(trades);
-        renderDecisions(decisions);
+        renderDecisions(decisions, params.futures_new_entries === false);
         renderNews(news);
+        renderRisk(data);
+        paintNeural(data, rlCache);
       }
+
+      async function loadState() {
+        let state = null;
+        try {
+          const response = await fetch('/api/state?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          state = await response.json();
+        } catch (err) {
+          state = null;
+        }
+        try {
+          const response = await fetch('/api/rl?_=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          rlCache = await response.json();
+          rlStale = false;
+        } catch (err) {
+          rlStale = true;
+        }
+        if (state) {
+          lastGood = state;
+          lastGoodAt = new Date();
+          linkMode = 'live';
+          renderDashboard(state);
+          markConnection('live');
+        } else if (lastGood) {
+          linkMode = 'stale';
+          renderDashboard(lastGood);
+          markConnection('stale');
+        } else {
+          linkMode = 'empty';
+          renderDisconnected();
+          markConnection('empty');
+        }
+        renderRL();
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        document.documentElement.classList.toggle('tab-hidden', document.hidden);
+      });
+      const orbit = document.getElementById('neuralOrbit');
+      const stage = document.getElementById('neuralStage');
+      if (orbit) {
+        orbit.addEventListener('click', (event) => {
+          const btn = event.target.closest('.agent');
+          if (!btn) return;
+          event.stopPropagation();
+          openPanel(btn.getAttribute('data-id'), btn, true);
+        });
+        orbit.addEventListener('mousemove', (event) => {
+          if (window.matchMedia('(max-width: 760px)').matches) return;
+          const btn = event.target.closest('.agent');
+          if (btn) openPanel(btn.getAttribute('data-id'), btn, false);
+        });
+      }
+      if (stage) {
+        stage.addEventListener('click', (event) => {
+          if (event.target.closest('.agent') || event.target.closest('.agent-panel')) return;
+          hidePanel();
+        });
+      }
+      window.addEventListener('resize', () => { orbitSig = ''; if (lastGood || linkMode === 'empty') renderOrbit(lastGood, rlCache); });
 
       loadState();
       setInterval(loadState, 15000);
+    </script>
+    <script type="module">
+      const bus = window.__SOBHI || (window.__SOBHI = {});
+      const stage = document.getElementById('neuralStage');
+      const flat = document.getElementById('neuralFlat');
+      const glCanvas = document.getElementById('neuralGl');
+      if (!stage || !flat || !glCanvas) throw new Error('neural stage missing');
+
+      const mobileQuery = () => stage.clientWidth < 760;
+      let flatRaf = 0;
+      let flatStop = false;
+      let glRaf = 0;
+      let glVisible = true;
+
+      function resizeFlat(ctx) {
+        const dpr = Math.min(window.devicePixelRatio || 1, mobileQuery() ? 1.25 : 1.5);
+        const w = Math.max(1, stage.clientWidth);
+        const h = Math.max(1, stage.clientHeight);
+        flat.width = Math.floor(w * dpr);
+        flat.height = Math.floor(h * dpr);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { w, h };
+      }
+
+      function startFlat() {
+        const ctx = flat.getContext('2d');
+        const count = mobileQuery() ? 26 : 52;
+        const strands = Array.from({ length: count }, (_, i) => ({
+          phase: i * 0.55,
+          amp: 26 + (i % 8) * 18,
+          freq: 1.4 + (i % 5) * 0.42,
+          width: i % 11 === 0 ? 2.2 : 1.05,
+          color: i % 11 === 0 ? 'rgba(255,70,210,' : (i % 7 === 0 ? 'rgba(190,140,255,' : 'rgba(170,220,255,'),
+          speed: 0.18 + (i % 5) * 0.06,
+          particles: [Math.random(), Math.random(), Math.random()]
+        }));
+        let t = 0;
+        function frame() {
+          flatRaf = 0;
+          if (flatStop || document.hidden || flat.style.display === 'none') return;
+          const box = resizeFlat(ctx);
+          const w = box.w;
+          const h = box.h;
+          t += 0.008;
+          ctx.clearRect(0, 0, w, h);
+          const floor = h * 0.74;
+          ctx.strokeStyle = 'rgba(50,130,210,0.2)';
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 11; i++) {
+            const y = floor + Math.pow(i / 11, 1.5) * (h - floor);
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(w, y);
+            ctx.stroke();
+          }
+          for (let i = -8; i <= 8; i++) {
+            ctx.beginPath();
+            ctx.moveTo(w / 2 + i * 26, floor);
+            ctx.lineTo(w / 2 + i * w * 0.11, h);
+            ctx.stroke();
+          }
+          const cx = w * 0.5;
+          const top = h * 0.08;
+          const bot = h * 0.76;
+          ctx.globalCompositeOperation = 'lighter';
+          strands.forEach((s) => {
+            ctx.beginPath();
+            for (let k = 0; k <= 30; k++) {
+              const u = k / 30;
+              const y = top + (bot - top) * u;
+              const bulge = Math.sin(u * Math.PI);
+              const x = cx + Math.sin(s.phase + u * s.freq * Math.PI * 2 + t * s.speed) * s.amp * bulge;
+              if (k === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.strokeStyle = s.color + '0.9)';
+            ctx.lineWidth = s.width;
+            ctx.stroke();
+            s.particles.forEach((p, index) => {
+              const next = (p + 0.005 * s.speed) % 1;
+              s.particles[index] = next;
+              const bulge = Math.sin(next * Math.PI);
+              const x = cx + Math.sin(s.phase + next * s.freq * Math.PI * 2 + t * s.speed) * s.amp * bulge;
+              const y = top + (bot - top) * next;
+              const g = ctx.createRadialGradient(x, y, 0, x, y, 6);
+              g.addColorStop(0, '#fff');
+              g.addColorStop(0.45, s.color + '0.9)');
+              g.addColorStop(1, 'rgba(0,0,0,0)');
+              ctx.fillStyle = g;
+              ctx.beginPath();
+              ctx.arc(x, y, 6, 0, 7);
+              ctx.fill();
+            });
+          });
+          const glow = ctx.createRadialGradient(cx, h * 0.42, 0, cx, h * 0.42, Math.min(w, h) * 0.34);
+          glow.addColorStop(0, 'rgba(255,255,255,0.92)');
+          glow.addColorStop(0.12, 'rgba(210,240,255,0.55)');
+          glow.addColorStop(0.32, 'rgba(80,160,255,0.22)');
+          glow.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = glow;
+          ctx.fillRect(0, 0, w, h);
+          ctx.globalCompositeOperation = 'source-over';
+          flatRaf = requestAnimationFrame(frame);
+        }
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden && !flatStop && flat.style.display !== 'none' && !flatRaf) flatRaf = requestAnimationFrame(frame);
+        });
+        flatStop = false;
+        if (!flatRaf) flatRaf = requestAnimationFrame(frame);
+      }
+
+      function brainPoint(v, side) {
+        let x = v.x;
+        let y = v.y;
+        let z = v.z;
+        const d = 1 + 0.06 * Math.sin(11 * x + 4 * Math.sin(6 * y + 2 * z)) * Math.sin(10 * y + 6 * z + 2 * Math.sin(5 * x))
+          + 0.045 * Math.abs(Math.sin(17 * x + 3 * y)) * Math.sin(15 * y - 4 * z)
+          - 0.03 * Math.abs(Math.sin(26 * x - 9 * y + 5 * z));
+        x *= d; y *= d; z *= d;
+        if (z * side < 0) z *= 0.18;
+        z += side * 0.66;
+        return [x, y + 0.15, z];
+      }
+
+      function vortexCurve(THREE, i, total) {
+        const pts = [];
+        const turns = 1.7 + (i % 6) * 0.16;
+        const radius = 0.22 + (i / total) * 1.25;
+        const phase = (i / total) * Math.PI * 2;
+        for (let s = 0; s <= 26; s++) {
+          const t = s / 26;
+          const y = (t - 0.5) * 5.8;
+          const a = phase + t * turns * Math.PI * 2;
+          const bulge = 0.2 + 0.8 * Math.sin(t * Math.PI);
+          const r = radius * bulge;
+          pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
+        }
+        return new THREE.CatmullRomCurve3(pts);
+      }
+
+      async function startGL() {
+        let THREE;
+        try {
+          THREE = await import('/three/three.module.js');
+        } catch (err) {
+          return false;
+        }
+        let renderer;
+        try {
+          renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: !mobileQuery(), alpha: true, powerPreference: 'low-power', preserveDrawingBuffer: true });
+        } catch (err) {
+          return false;
+        }
+        renderer.setClearColor(0x000000, 0);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 80);
+        camera.position.set(0, 0.35, mobileQuery() ? 7.4 : 6.2);
+        const group = new THREE.Group();
+        scene.add(group);
+        const grid = new THREE.GridHelper(28, mobileQuery() ? 18 : 32, 0x1c4e86, 0x0d2c52);
+        grid.position.y = -3.05;
+        [].concat(grid.material).forEach((m) => { m.transparent = true; m.opacity = 0.28; });
+        scene.add(grid);
+        const shell = new THREE.IcosahedronGeometry(1, mobileQuery() ? 1 : 2);
+        const pos = shell.attributes.position;
+        const v = new THREE.Vector3();
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i).normalize();
+          const q = brainPoint(v, v.z >= 0 ? 1 : -1);
+          pos.setXYZ(i, q[0] * 0.62, q[1] * 0.78, q[2] * 0.62);
+        }
+        group.add(new THREE.LineSegments(new THREE.WireframeGeometry(shell), new THREE.LineBasicMaterial({
+          color: 0x7ec8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
+        })));
+        const total = mobileQuery() ? 16 : 34;
+        const curves = [];
+        for (let i = 0; i < total; i++) {
+          const curve = vortexCurve(THREE, i, total);
+          curves.push(curve);
+          const color = i % 9 === 0 ? 0xff4ad4 : (i % 6 === 0 ? 0xb388ff : 0x9ad8ff);
+          group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(40)), new THREE.LineBasicMaterial({
+            color, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false
+          })));
+        }
+        const per = mobileQuery() ? 2 : 3;
+        const count = curves.length * per;
+        const positions = new Float32Array(count * 3);
+        const parts = Array.from({ length: count }, (_, i) => ({ curve: curves[i % curves.length], t: Math.random(), s: 0.002 + Math.random() * 0.004 }));
+        const pointsGeo = new THREE.BufferGeometry();
+        pointsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        group.add(new THREE.Points(pointsGeo, new THREE.PointsMaterial({
+          color: 0xf7fbff, size: mobileQuery() ? 0.08 : 0.055, transparent: true, opacity: 0.95,
+          blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+        })));
+        const glowCanvas = document.createElement('canvas');
+        glowCanvas.width = glowCanvas.height = 128;
+        const g = glowCanvas.getContext('2d');
+        const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+        grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+        grd.addColorStop(0.18, 'rgba(190,230,255,0.55)');
+        grd.addColorStop(0.5, 'rgba(40,120,255,0.16)');
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, 128, 128);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+        }));
+        sprite.scale.set(4.2, 5.6, 1);
+        group.add(sprite);
+        scene.add(new THREE.AmbientLight(0x88aaff, 0.6));
+        const pink = new THREE.PointLight(0xff4ad8, 8, 18);
+        pink.position.set(1.2, 0.4, 2);
+        scene.add(pink);
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let clock = 0;
+        const tmp = new THREE.Vector3();
+        function resize() {
+          const w = Math.max(1, stage.clientWidth);
+          const h = Math.max(1, stage.clientHeight);
+          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobileQuery() ? 1.25 : 1.5));
+          renderer.setSize(w, h, false);
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+        }
+        function loop() {
+          glRaf = 0;
+          if (document.hidden || !glVisible) return;
+          clock += 0.016;
+          if (!reduce) group.rotation.y += 0.004;
+          sprite.scale.set(4.1 + Math.sin(clock * 2) * 0.18, 5.5 + Math.sin(clock * 2) * 0.22, 1);
+          parts.forEach((p, i) => {
+            if (!reduce) p.t = (p.t + p.s) % 1;
+            p.curve.getPoint(p.t, tmp);
+            positions[i * 3] = tmp.x;
+            positions[i * 3 + 1] = tmp.y;
+            positions[i * 3 + 2] = tmp.z;
+          });
+          pointsGeo.attributes.position.needsUpdate = true;
+          renderer.render(scene, camera);
+          glRaf = requestAnimationFrame(loop);
+        }
+        resize();
+        renderer.render(scene, camera);
+        const gl = renderer.getContext();
+        if (!gl || !gl.drawingBufferWidth) {
+          renderer.dispose();
+          return false;
+        }
+        window.addEventListener('resize', resize);
+        const io = new IntersectionObserver((entries) => {
+          glVisible = entries.some((e) => e.isIntersecting);
+          if (glVisible && !document.hidden && !glRaf) glRaf = requestAnimationFrame(loop);
+        }, { threshold: 0.02 });
+        io.observe(stage);
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden && glVisible && !glRaf) glRaf = requestAnimationFrame(loop);
+        });
+        glCanvas.addEventListener('webglcontextlost', (event) => {
+          event.preventDefault();
+          glCanvas.style.display = 'none';
+          flat.style.display = 'block';
+          flatStop = false;
+          startFlat();
+        });
+        if (!reduce) glRaf = requestAnimationFrame(loop);
+        return true;
+      }
+
+      startFlat();
+      startGL().then((ok) => {
+        bus.visualReady = true;
+        if (!ok) glCanvas.style.display = 'none';
+      });
     </script>
   </body>
 </html>

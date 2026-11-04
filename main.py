@@ -424,7 +424,7 @@ def get_recent_trades(limit=15):
     try:
         with get_db_connection(DB_NAME) as conn:
             rows = conn.execute("""SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp,
-                pnl_usdt, cost_quality, gross_pnl_usdt, fees_usdt FROM trades ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
+                pnl_usdt, cost_quality, gross_pnl_usdt, fees_usdt, strategy FROM trades ORDER BY id DESC LIMIT ?""", (limit,)).fetchall()
             return [tuple(row) for row in rows]
     except Exception as e:
         print("Get Trades Error: {}".format(type(e).__name__))
@@ -3076,16 +3076,20 @@ def api_state():
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
         'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated')),
-        'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None
+        'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None,
+        'strategy': t[11] if len(t) > 11 else None, 'market_type': 'Spot'
     } for t in get_recent_trades(limit=50)]
     if futures_engine:
         try:
             with futures_engine._connect() as conn:
-                rows = conn.execute('SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, side, cost_quality, gross_pnl_usdt, fees_usdt, funding_usdt FROM futures_trades ORDER BY id DESC LIMIT 50').fetchall()
+                rows = conn.execute('''SELECT id, symbol, entry_price, exit_price, pnl_pct, status, timestamp,
+                    pnl_usdt, side, cost_quality, gross_pnl_usdt, fees_usdt, funding_usdt, strategy
+                    FROM futures_trades ORDER BY id DESC LIMIT 50''').fetchall()
             trades.extend({'id': 'f-' + str(t[0]), 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
                 'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'side': t[8], 'cost_quality': t[9],
                 'pnl_known': t[9] in ('net_actual_costs', 'net_estimated_costs'),
                 'gross_pnl_usdt': t[10], 'fees_usdt': t[11], 'funding_usdt': t[12],
+                'strategy': t[13] if len(t) > 13 else None,
                 'market_type': 'Futures Demo'} for t in rows)
             trades = sorted(trades, key=lambda t: t['time'], reverse=True)[:8]
         except Exception:
