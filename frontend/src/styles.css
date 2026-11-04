@@ -1,0 +1,496 @@
+import { useEffect, useMemo, useState } from 'react'
+
+const API = {
+  state: '/api/state',
+  equity: '/api/equity?range=1d',
+}
+
+const currency = (value, digits = 2) => {
+  const num = Number(value ?? 0)
+  if (!Number.isFinite(num)) return '$0.00'
+  return `$${num.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`
+}
+
+const pct = (value, digits = 1) => `${Number(value ?? 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}%`
+
+const formatTime = (iso) => {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return iso
+  return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max)
+
+const getSignalTone = (signal) => {
+  if (signal === 'long') return 'positive'
+  if (signal === 'short') return 'negative'
+  return 'neutral'
+}
+
+const toChartPath = (points) => {
+  if (!points || points.length < 2) return ''
+  const w = 540
+  const h = 180
+  const min = Math.min(...points)
+  const max = Math.max(...points)
+  const span = max - min || 1
+  return points
+    .map((point, index) => {
+      const x = (index / (points.length - 1)) * w
+      const y = h - ((point - min) / span) * (h - 20) - 10
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`
+    })
+    .join(' ')
+}
+
+const StatCard = ({ label, value, sub, tone = 'neutral', accent = false }) => (
+  <div className={`stat-card ${accent ? 'stat-card--accent' : ''}`}>
+    <div className="stat-card__head">
+      <span>{label}</span>
+      <span className={`badge badge--${tone}`}>{tone === 'positive' ? '▲' : tone === 'negative' ? '▼' : '•'}</span>
+    </div>
+    <div className="stat-card__value">{value}</div>
+    <div className="stat-card__sub">{sub}</div>
+  </div>
+)
+
+function App() {
+  const [state, setState] = useState(null)
+  const [equity, setEquity] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [apiMessage, setApiMessage] = useState('')
+  const [settings, setSettings] = useState({ trade_amount_usdt: '100', spot_max_concurrent_trades: '6', futures_max_concurrent_trades: '6' })
+
+  const fetchDashboard = async () => {
+    try {
+      const response = await fetch(API.state, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setState(data)
+      setSettings({
+        trade_amount_usdt: String(data.trade_amount ?? 100),
+        spot_max_concurrent_trades: String(data.settings?.spot_max_concurrent_trades ?? 6),
+        futures_max_concurrent_trades: String(data.settings?.futures_max_concurrent_trades ?? 6),
+      })
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchEquity = async () => {
+    try {
+      const response = await fetch(API.equity, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+      })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setEquity(Array.isArray(data) ? data : [])
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  useEffect(() => {
+    fetchDashboard()
+    fetchEquity()
+    const interval = setInterval(() => {
+      fetchDashboard()
+      fetchEquity()
+    }, 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const chartPath = useMemo(() => {
+    const values = equity.map((point) => Number(point?.v ?? point?.value ?? 0)).filter(Number.isFinite)
+    return toChartPath(values)
+  }, [equity])
+
+  const wallet = state?.wallet ?? {}
+  const stats = state?.stats ?? {}
+  const markets = state?.markets ?? []
+  const positions = state?.positions ?? []
+  const trades = state?.trades ?? []
+  const news = state?.news ?? {}
+  const futures = state?.futures ?? {}
+  const platforms = state?.platforms ?? []
+
+  const liveMode = state?.trading_enabled ? 'تجريبي / فعال' : 'تجريبي / متوقف'
+
+  const handleSettingsSave = async (event) => {
+    event.preventDefault()
+    setSaving(true)
+    setApiMessage('جارٍ الحفظ...')
+    try {
+      const response = await fetch('/api/settings', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          trade_amount_usdt: Number(settings.trade_amount_usdt),
+          spot_max_concurrent_trades: Number(settings.spot_max_concurrent_trades),
+          futures_max_concurrent_trades: Number(settings.futures_max_concurrent_trades),
+        }),
+      })
+      const json = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(json?.detail || 'فشل الحفظ')
+      setApiMessage('تم حفظ الإعدادات بنجاح')
+      await fetchDashboard()
+    } catch (error) {
+      setApiMessage(error.message || 'خطأ في الحفظ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleCredentialSubmit = async (event, kind) => {
+    event.preventDefault()
+    const form = event.currentTarget
+    const data = Object.fromEntries(new FormData(form).entries())
+    const endpoint = kind === 'spot' ? '/api/platforms/binance/credentials' : '/api/platforms/binance-futures/credentials'
+    const payload = {
+      api_key: String(data.api_key || '').trim(),
+      secret_key: String(data.secret_key || '').trim(),
+    }
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const json = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(json?.detail || 'فشل حفظ المفاتيح')
+      form.reset()
+      setApiMessage(kind === 'spot' ? 'تم حفظ مفاتيح Spot بنجاح' : 'تم حفظ مفاتيح Futures بنجاح')
+      await fetchDashboard()
+    } catch (error) {
+      setApiMessage(error.message || 'خطأ في حفظ المفاتيح')
+    }
+  }
+
+  const handleTradingToggle = async () => {
+    if (!state) return
+    const enabled = !state.trading_enabled
+    try {
+      const response = await fetch('/api/trading', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ enabled, market: 'all' }),
+      })
+      const json = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(json?.detail || 'فشل تغيير الحالة')
+      await fetchDashboard()
+      setApiMessage(enabled ? 'تم تشغيل التداول' : 'تم إيقاف التداول')
+    } catch (error) {
+      setApiMessage(error.message || 'تعذر تغيير الحالة')
+    }
+  }
+
+  const topMarkets = markets.slice(0, 6)
+  const firstPlatform = platforms.find((platform) => platform.id === 'binance') || {}
+  const futuresPlatform = platforms.find((platform) => platform.id === 'binance_futures') || {}
+
+  if (loading || !state) {
+    return <div className="loading-shell">تحميل لوحة التحكم...</div>
+  }
+
+  return (
+    <div className="dashboard-shell">
+      <header className="topbar">
+        <div className="brand-wrap">
+          <div className="brand-logo">S</div>
+          <div>
+            <div className="brand-title">SobhiTrader</div>
+            <small>Crypto scanner dashboard</small>
+          </div>
+        </div>
+
+        <div className="status-pills">
+          <span className="pill pill--green">{state.scanner?.status === 'running' ? 'الفحص يعمل' : 'الفحص متوقف'}</span>
+          <span className="pill pill--green">{liveMode}</span>
+          <span className="pill pill--neutral">{state.env?.toUpperCase() || 'DEMO'}</span>
+        </div>
+
+        <div className="header-actions">
+          <button className="primary-btn" onClick={handleTradingToggle}>{state.trading_enabled ? 'إيقاف التداول' : 'تشغيل التداول'}</button>
+        </div>
+      </header>
+
+      <main className="main-grid">
+        <section className="stats-grid">
+          <StatCard
+            label="قيمة المحفظة"
+            value={currency(wallet.total)}
+            sub={`متاح ${currency(wallet.free)} · نقد ${currency(wallet.cash)}`}
+            tone={wallet.total > 0 ? 'positive' : 'neutral'}
+            accent
+          />
+          <StatCard label="الربح المحقق" value={currency(stats.realized_total)} sub={`اليوم ${currency(stats.realized_today)}`} tone={stats.realized_total >= 0 ? 'positive' : 'negative'} />
+          <StatCard label="الربح غير المحقق" value={currency(stats.unrealized)} sub={`${positions.length} مركز مفتوح`} tone={stats.unrealized >= 0 ? 'positive' : 'negative'} />
+          <StatCard label="الصفقات المفتوحة" value={String(positions.length)} sub={`Spot + Futures`} tone="neutral" />
+          <StatCard label="نسبة الفوز" value={pct(stats.win_rate)} sub={`${stats.wins ?? 0} فوز / ${stats.losses ?? 0} خسارة`} tone={stats.win_rate >= 50 ? 'positive' : 'neutral'} />
+          <StatCard label="التعرض" value={pct(stats.exposure)} sub={stats.exposure > 70 ? 'مرتفع' : stats.exposure > 35 ? 'متوسط' : 'منخفض'} tone={stats.exposure > 70 ? 'negative' : 'positive'} />
+        </section>
+
+        <section className="content-grid content-grid--two">
+          <div className="panel panel--chart">
+            <div className="panel-header">
+              <h2>منحنى المحفظة</h2>
+              <span className="small-badge">1D</span>
+            </div>
+            <svg viewBox="0 0 540 180" className="chart-svg" role="img" aria-label="Equity chart">
+              <defs>
+                <linearGradient id="lineFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(34,197,94,0.35)" />
+                  <stop offset="100%" stopColor="rgba(34,197,94,0.02)" />
+                </linearGradient>
+              </defs>
+              {chartPath ? (
+                <>
+                  <path d={`${chartPath} L 520 170 L 20 170 Z`} fill="url(#lineFill)" opacity="0.9" />
+                  <path d={chartPath} fill="none" stroke="#23d18b" strokeWidth="3" strokeLinecap="round" />
+                </>
+              ) : (
+                <text x="50%" y="50%" textAnchor="middle" fill="#8ca1b9" fontSize="12">لا توجد بيانات</text>
+              )}
+            </svg>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <h2>حالة الحسابات</h2>
+            </div>
+            <div className="account-list">
+              <div className="account-card">
+                <div className="account-head">
+                  <strong>Binance Spot</strong>
+                  <span className={`badge ${firstPlatform.connected ? 'badge--positive' : 'badge--negative'}`}>
+                    {firstPlatform.connected ? 'متصل' : 'غير متصل'}
+                  </span>
+                </div>
+                <div className="mini-grid">
+                  <div><small>الرصيد</small><b>{currency(wallet.total)}</b></div>
+                  <div><small>المتاح</small><b>{currency(wallet.free)}</b></div>
+                  <div><small>المراكز</small><b>{positions.length}</b></div>
+                  <div><small>الربح</small><b>{currency(stats.realized_total)}</b></div>
+                </div>
+              </div>
+
+              <div className="account-card">
+                <div className="account-head">
+                  <strong>Binance Futures Demo</strong>
+                  <span className={`badge ${futuresPlatform.connected ? 'badge--positive' : 'badge--negative'}`}>
+                    {futuresPlatform.connected ? 'متصل' : 'غير متصل'}
+                  </span>
+                </div>
+                <div className="mini-grid">
+                  <div><small>الرصيد</small><b>{currency(futures.balance ?? 0)}</b></div>
+                  <div><small>المتاح</small><b>{currency(futures.free_balance ?? 0)}</b></div>
+                  <div><small>المراكز</small><b>{futures.open_positions ?? 0}</b></div>
+                  <div><small>الربح</small><b>{currency(futures.realized_pnl ?? 0)}</b></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="content-grid content-grid--market">
+          <div className="panel">
+            <div className="panel-header">
+              <h2>الأسواق</h2>
+              <span className="small-badge">{topMarkets.length} رموز</span>
+            </div>
+            <div className="market-grid">
+              {topMarkets.map((market) => (
+                <div className="market-card" key={market.symbol}>
+                  <div className="market-card__head">
+                    <div className="market-symbol">{market.symbol}</div>
+                    <span className={`badge badge--${getSignalTone(market.signal ? market.direction || 'long' : 'neutral')}`}>
+                      {market.signal ? (market.direction === 'short' ? 'شورت' : 'لونغ') : 'مراقبة'}
+                    </span>
+                  </div>
+                  <div className="market-price">{currency(market.price, market.price < 1 ? 4 : 2)}</div>
+                  <div className="market-bar">
+                    <span style={{ width: `${clamp(market.signal_strength || 0, 0, 100)}%` }} />
+                  </div>
+                  <div className="market-meta">قوة الإشارة: {pct(market.signal_strength || 0, 0)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="content-grid content-grid--two">
+          <div className="panel">
+            <div className="panel-header">
+              <h2>المراكز المفتوحة</h2>
+              <span className="small-badge">{positions.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الرمز</th>
+                    <th>الاتجاه</th>
+                    <th>الإدخال</th>
+                    <th>السعر</th>
+                    <th>الربح</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.length ? positions.map((position) => (
+                    <tr key={position.symbol}>
+                      <td>{position.symbol}</td>
+                      <td><span className={`badge ${position.side === 'short' ? 'badge--negative' : 'badge--positive'}`}>{position.side === 'short' ? 'شورت' : 'لونغ'}</span></td>
+                      <td>{currency(position.entry)}</td>
+                      <td>{currency(position.price)}</td>
+                      <td className={Number(position.pnl_usdt ?? 0) >= 0 ? 'positive-text' : 'negative-text'}>{currency(position.pnl_usdt)}</td>
+                    </tr>
+                  )) : <tr><td colSpan="5" className="empty-state">لا توجد مراكز مفتوحة</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <h2>آخر القرارات</h2>
+            </div>
+            <div className="decision-list">
+              {(state.decisions ?? []).slice(0, 4).map((decision, index) => (
+                <div className="decision-item" key={`${decision.symbol}-${index}`}>
+                  <div className="decision-item__head">
+                    <strong>{decision.symbol}</strong>
+                    <span className={`badge ${decision.signal === 'short' ? 'badge--negative' : 'badge--positive'}`}>{decision.signal === 'short' ? 'بيع' : 'شراء'}</span>
+                  </div>
+                  <div className="decision-item__meta">{decision.strategy} · {decision.timeframe}</div>
+                  <div className="decision-item__reason">{decision.reason}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="content-grid content-grid--two">
+          <div className="panel">
+            <div className="panel-header">
+              <h2>آخر الصفقات المغلقة</h2>
+              <span className="small-badge">{trades.length}</span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الزوج</th>
+                    <th>الدخول</th>
+                    <th>الخروج</th>
+                    <th>الصافي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trades.length ? trades.slice(0, 6).map((trade) => (
+                    <tr key={trade.id ?? trade.symbol + trade.time}>
+                      <td>{trade.symbol}</td>
+                      <td>{currency(trade.entry)}</td>
+                      <td>{currency(trade.exit)}</td>
+                      <td className={Number(trade.pnl_usdt ?? 0) >= 0 ? 'positive-text' : 'negative-text'}>{currency(trade.pnl_usdt)}</td>
+                    </tr>
+                  )) : <tr><td colSpan="4" className="empty-state">لا توجد صفقات مغلقة</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <h2>الأخبار وفلتر المخاطر</h2>
+            </div>
+            <div className="news-box">
+              <div className="news-summary">{news.reason || 'لا توجد إشعارات أحادية'}</div>
+              <div className="news-list">
+                {(news.headlines ?? []).slice(0, 4).map((item, idx) => (
+                  <div key={`${item.source}-${idx}`} className="news-item">
+                    <strong>{item.source}</strong>
+                    <span>{item.title}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="content-grid content-grid--two settings-grid">
+          <div className="panel">
+            <div className="panel-header">
+              <h2>إعدادات التداول</h2>
+            </div>
+            <form className="settings-form" onSubmit={handleSettingsSave}>
+              <div className="field-grid">
+                <label>
+                  <span>حجم الصفقة (USDT)</span>
+                  <input value={settings.trade_amount_usdt} onChange={(e) => setSettings((prev) => ({ ...prev, trade_amount_usdt: e.target.value }))} />
+                </label>
+                <label>
+                  <span>حد Spot</span>
+                  <input value={settings.spot_max_concurrent_trades} onChange={(e) => setSettings((prev) => ({ ...prev, spot_max_concurrent_trades: e.target.value }))} />
+                </label>
+                <label>
+                  <span>حد Futures</span>
+                  <input value={settings.futures_max_concurrent_trades} onChange={(e) => setSettings((prev) => ({ ...prev, futures_max_concurrent_trades: e.target.value }))} />
+                </label>
+              </div>
+              <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'جارٍ الحفظ...' : 'حفظ الإعدادات'}</button>
+              <div className="form-message">{apiMessage}</div>
+            </form>
+          </div>
+
+          <div className="panel">
+            <div className="panel-header">
+              <h2>تسجيل Binance</h2>
+            </div>
+            <div className="credentials-box">
+              <form onSubmit={(event) => handleCredentialSubmit(event, 'spot')} className="credential-form">
+                <h3>Spot</h3>
+                <label>
+                  <span>API Key</span>
+                  <input name="api_key" type="text" autoComplete="off" />
+                </label>
+                <label>
+                  <span>Secret Key</span>
+                  <input name="secret_key" type="password" autoComplete="off" />
+                </label>
+                <button type="submit" className="secondary-btn">حفظ Spot</button>
+              </form>
+
+              <form onSubmit={(event) => handleCredentialSubmit(event, 'futures')} className="credential-form">
+                <h3>Futures Demo</h3>
+                <label>
+                  <span>API Key</span>
+                  <input name="api_key" type="text" autoComplete="off" />
+                </label>
+                <label>
+                  <span>Secret Key</span>
+                  <input name="secret_key" type="password" autoComplete="off" />
+                </label>
+                <button type="submit" className="secondary-btn">حفظ Futures</button>
+              </form>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  )
+}
+
+export default App
