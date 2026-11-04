@@ -125,6 +125,18 @@
 
       .pill.live { color: var(--brand-2); }
       .pill.warn { color: var(--brand-3); }
+
+      .reconcile-warn {
+        margin: 0 0 18px;
+        padding: 12px 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.12);
+        color: #fcd34d;
+        font-weight: 700;
+        line-height: 1.7;
+      }
+      .reconcile-warn[hidden] { display: none; }
       .pill.danger { color: var(--danger); }
       .pill.neutral { color: var(--cyan); }
 
@@ -675,6 +687,7 @@
       </header>
 
       <main class="content">
+        <div id="spotReconcileWarning" class="reconcile-warn" hidden></div>
         <section class="stats-grid">
           <article class="card stat-card hero">
             <div class="label-row">
@@ -1578,6 +1591,11 @@
         setText('marketCount', '0 رموز');
         setText('openCountLabel', '0');
         setText('tradeCount', '0');
+        const warnEl = document.getElementById('spotReconcileWarning');
+        if (warnEl) {
+          warnEl.hidden = true;
+          warnEl.textContent = '';
+        }
         const spotState = document.getElementById('spotState');
         const futState = document.getElementById('futuresState');
         if (spotState) spotState.className = 'chip red';
@@ -1623,7 +1641,17 @@
         setText('realizedPnl', money(totalRealized, 2));
         const realizedEl = document.getElementById('realizedPnl');
         if (realizedEl) realizedEl.className = 'value ' + pnlClass(totalRealized);
-        setText('realizedMeta', 'سبوت ' + money(spotRealized, 2) + ' · فيوتشرز ' + money(futRealized, 2) + ' · اليوم سبوت ' + money(stats.realized_today || 0, 2));
+        const reconcile = stats.spot_reconcile || {};
+        const unverified = safeNum(stats.unverified_spot_trades, 0);
+        const warning = reconcile.warning_ar || (unverified
+          ? 'تنبيه: ' + unverified + ' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.'
+          : '');
+        const warnEl = document.getElementById('spotReconcileWarning');
+        if (warnEl) {
+          warnEl.hidden = !warning;
+          warnEl.textContent = warning;
+        }
+        setText('realizedMeta', 'سبوت ' + money(spotRealized, 2) + ' · فيوتشرز ' + money(futRealized, 2) + ' · اليوم سبوت ' + money(stats.realized_today || 0, 2) + (unverified ? ' · ' + unverified + ' صفقة غير موثّقة' : ''));
         setText('unrealizedPnl', money(unrealized, 2));
         const unrealEl = document.getElementById('unrealizedPnl');
         if (unrealEl) unrealEl.className = 'value ' + pnlClass(unrealized);

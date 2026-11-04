@@ -20,6 +20,22 @@ def r_multiple(net_pnl_usdt, risk_usdt):
     return float(net_pnl_usdt) / float(risk_usdt)
 
 
+# Spot realized PnL counts only these cost qualities. /api/state and strategy
+# stats both use this set so an unverified row cannot move one total and not the other.
+VERIFIED_SPOT_QUALITIES = ("actual", "estimated")
+
+
+def spot_verified_sql(pnl_col="pnl_usdt", quality_col="cost_quality"):
+    quoted = ", ".join("'{}'".format(name) for name in VERIFIED_SPOT_QUALITIES)
+    return "{} IS NOT NULL AND {} IN ({})".format(pnl_col, quality_col, quoted)
+
+
+def spot_unverified_sql(pnl_col="pnl_usdt", quality_col="cost_quality"):
+    quoted = ", ".join("'{}'".format(name) for name in VERIFIED_SPOT_QUALITIES + ("simulated",))
+    return "{} IS NULL OR {} IS NULL OR {} NOT IN ({})".format(
+        pnl_col, quality_col, quality_col, quoted)
+
+
 def summarize(rows):
     """rows: iterables of dicts with market, strategy, pnl_usdt, fees_usdt, r_multiple."""
     groups = defaultdict(list)
@@ -64,7 +80,12 @@ def load_strategy_stats(db_path):
             where = " WHERE pnl_usdt IS NOT NULL"
             if "excluded_from_stats" in cols:
                 where += " AND COALESCE(excluded_from_stats, 0) = 0"
-            if "cost_quality" in cols:
+            if table == "trades" and "cost_quality" in cols:
+                # Same verified set as get_realized_stats. Legacy/unverified rows stay out
+                # until a fill reconciliation marks them actual.
+                where += " AND cost_quality IN ({})".format(
+                    ", ".join("'{}'".format(name) for name in VERIFIED_SPOT_QUALITIES))
+            elif "cost_quality" in cols:
                 where += " AND COALESCE(cost_quality, '') != 'simulated'"
             for r in conn.execute("SELECT {} FROM {}{}".format(", ".join(select), table, where)):
                 rows.append(dict(r, market=market))

@@ -64,8 +64,10 @@ def _db(tmp_path):
         c.execute("""CREATE TABLE trades (id INTEGER PRIMARY KEY, symbol TEXT, entry_price REAL,
             exit_price REAL, pnl_pct REAL, status TEXT, timestamp TEXT, pnl_usdt REAL,
             strategy TEXT, fees_usdt REAL, r_multiple REAL, cost_quality TEXT)""")
-        c.executemany("INSERT INTO trades (symbol,entry_price,exit_price,pnl_pct,status,timestamp,pnl_usdt,strategy)"
-                      " VALUES ('X',1,1,0,'LOSS','t',?,?)", [(-1.0, None), (-2.0, ''), (3.0, 'bounce')])
+        c.executemany("""INSERT INTO trades
+            (symbol,entry_price,exit_price,pnl_pct,status,timestamp,pnl_usdt,strategy,cost_quality)
+            VALUES ('X',1,1,0,'LOSS','t',?,?,?)""",
+                      [(-1.0, None, None), (-2.0, '', None), (3.0, 'bounce', 'actual')])
     return path
 
 
