@@ -37,6 +37,7 @@ REASON_AR = {
     "qty_mismatch": "الكمية لا تطابق النافذة",
     "history_unavailable": "سجل التنفيذات لا يغطي الصفقة",
     "open_time_missing": "وقت الفتح غير محفوظ",
+    "entry_price_mismatch": "سعر الدخول لا يطابق التنفيذ",
 }
 _KNOWN_FEE = ("actual", "estimated", "simulated")
 _SNAPSHOT_FIELDS = (
@@ -98,6 +99,24 @@ def qty_tolerance():
 def fallback_enabled():
     return str(os.getenv("SPOT_RECONCILE_FALLBACK_ENABLED", "true")).strip().lower() in (
         "1", "true", "yes", "on")
+
+
+def entry_lookback_days():
+    """How far before the close a buy may be when the open time was not stored."""
+    try:
+        value = float(str(os.getenv("SPOT_RECONCILE_ENTRY_LOOKBACK_DAYS", "30")).strip() or "30")
+    except ValueError:
+        value = 30.0
+    return max(0.0, min(value, 365.0))
+
+
+def entry_price_tol_pct():
+    """Allowed gap between a lookback buy's average price and the stored entry, in percent."""
+    try:
+        value = float(str(os.getenv("SPOT_RECONCILE_ENTRY_PRICE_TOL_PCT", "0.3")).strip() or "0.3")
+    except ValueError:
+        value = 0.3
+    return max(0.0, min(value, 5.0))
 
 
 def fallback_window_sec():
@@ -737,6 +756,67 @@ def _contested(order, trade_id, windows, reserved_ids):
     return False
 
 
+def _price_close(actual, stored, tol_pct):
+    try:
+        actual, stored = float(actual), float(stored)
+    except (TypeError, ValueError):
+        return False
+    if actual <= 0 or stored <= 0:
+        return False
+    return abs(actual - stored) / stored * 100.0 <= float(tol_pct)
+
+
+def _epoch_to_stored(epoch):
+    return datetime.datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _unique_times(values):
+    unique = []
+    for value in values:
+        if not any(abs(value - kept) < 1.0 for kept in unique):
+            unique.append(value)
+    return unique
+
+
+def recover_open_times(rows, decisions, position_times, lookback_days):
+    """Open time from the bot's own records, one unambiguous event per trade.
+
+    decisions are entry outcomes for this symbol. position_times are open-position
+    timestamps for the same symbol. Trades are walked from earliest close so an
+    earlier trade consumes the event that falls in its gap.
+    """
+    ordered = sorted(rows, key=lambda row: (_parse_ts(row["timestamp"]) or 0.0, int(row["id"])))
+    recovered = {}
+    prev_close = None
+    for row in ordered:
+        close = _parse_ts(row["timestamp"]) if "timestamp" in row.keys() else None
+        if trade_open_moment(row) is not None:
+            if close is not None:
+                prev_close = close
+            continue
+        if close is None:
+            continue
+        start = close - float(lookback_days) * 86400.0
+        if prev_close is not None:
+            start = max(start, prev_close)
+        found = []
+        for decision in decisions or []:
+            if str(decision.get("outcome") or "") not in ENTRY_OUTCOMES:
+                continue
+            moment = _parse_ts(decision.get("created_at"))
+            if moment is not None and start < moment <= close:
+                found.append(moment)
+        for moment in position_times or []:
+            if start < moment <= close:
+                found.append(moment)
+        unique = _unique_times(found)
+        if len(unique) == 1:
+            recovered[int(row["id"])] = unique[0]
+        if close is not None:
+            prev_close = close
+    return recovered
+
+
 def trade_open_moment(row):
     """Stored open time. created_at is accepted when opened_at was not the column name."""
     keys = row.keys() if hasattr(row, "keys") else ()
@@ -800,7 +880,7 @@ def plan_time_matches(trades, orders, entry_windows, exit_windows, reserved_ids,
             if contested:
                 plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
             else:
-                proposals[trade_id] = (buy, sell)
+                proposals[trade_id] = (buy, sell, _epoch_to_stored(opened))
             continue
         entry_uncovered = history_floor_ms is None or history_floor_ms > entry_end
         if entry_uncovered and not entry_inside:
@@ -810,15 +890,15 @@ def plan_time_matches(trades, orders, entry_windows, exit_windows, reserved_ids,
         else:
             plans[trade_id] = {"status": "unmatched", "reason": "qty_mismatch"}
     claimed = {}
-    for trade_id, (buy, sell) in proposals.items():
+    for trade_id, (buy, sell, _opened_at) in proposals.items():
         for order in (buy, sell):
             claimed.setdefault(order["order_id"], []).append(trade_id)
     shared = {order_id for order_id, trade_ids in claimed.items() if len(trade_ids) > 1}
-    for trade_id, (buy, sell) in proposals.items():
+    for trade_id, (buy, sell, opened_at) in proposals.items():
         if buy["order_id"] in shared or sell["order_id"] in shared:
             plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
         else:
-            plans[trade_id] = {"status": "matched", "buy": buy, "sell": sell}
+            plans[trade_id] = {"status": "matched", "buy": buy, "sell": sell, "opened_at": opened_at}
     return plans
 
 
@@ -860,7 +940,7 @@ def _history_floor_ms(client, symbol, fetched, pause, sleeper):
     return min(int(item.get("timestamp") or 0) for item in earliest)
 
 
-def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, action):
+def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, action, opened_at=None):
     risk = row["risk_usdt"] if "risk_usdt" in row.keys() else None
     try:
         risk_value = float(risk) if risk is not None else None
@@ -871,17 +951,17 @@ def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, a
         """UPDATE trades SET entry_price=?, exit_price=?, pnl_pct=?, pnl_usdt=?, status=?,
            cost_quality=?, gross_pnl_usdt=?, fees_usdt=?, r_multiple=COALESCE(?, r_multiple),
            entry_order_ids=?, exit_order_ids=?, reconcile_status='matched', reconcile_reason=NULL,
-           reconciled_at=?
+           reconciled_at=?, opened_at=COALESCE(?, opened_at)
            WHERE id=?""",
         (reconciled["entry_price"], reconciled["exit_price"], reconciled["pnl_pct"], reconciled["pnl_usdt"],
          reconciled["status"], reconciled["cost_quality"], reconciled["gross_pnl_usdt"], reconciled["fees_usdt"],
-         r_value, ",".join(entry_ids), ",".join(exit_ids), now, int(row["id"])),
+         r_value, ",".join(entry_ids), ",".join(exit_ids), now, opened_at, int(row["id"])),
     )
     _write_audit(conn, int(row["id"]), action, None, snapshot, reconciled, now)
     conn.commit()
 
 
-def _fallback_span_ms(rows, window_sec):
+def _fallback_span_ms(rows, window_sec, lookback_days):
     starts = []
     ends = []
     for row in rows:
@@ -891,6 +971,8 @@ def _fallback_span_ms(rows, window_sec):
             start, end = _window_ms(opened, window_sec)
             starts.append(start)
             ends.append(end)
+        elif close is not None and lookback_days > 0:
+            starts.append(int((close - float(lookback_days) * 86400.0) * 1000))
         if close is not None:
             start, end = _window_ms(close, window_sec)
             starts.append(start)
@@ -900,15 +982,100 @@ def _fallback_span_ms(rows, window_sec):
     return min(starts), max(ends)
 
 
+def _position_open_times(conn, symbol):
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "open_positions" not in tables:
+        return []
+    cols = _columns(conn, "open_positions")
+    if "opened_at" not in cols or "symbol" not in cols:
+        return []
+    times = []
+    for row in conn.execute("SELECT opened_at FROM open_positions WHERE symbol=?", (symbol,)):
+        moment = _parse_ts(row["opened_at"])
+        if moment is not None:
+            times.append(moment)
+    return times
+
+
+def plan_lookback_matches(trades, orders, exit_windows, reserved_ids, window_sec, tolerance,
+                          price_tol_pct, lookback_days, history_floor_ms, claimed_ids):
+    """One buy before the close whose qty and average price match, plus one sell at the close.
+
+    Trades are claimed from earliest close so a later trade cannot take that buy.
+    """
+    plans = {}
+    used = set(claimed_ids or ())
+    used.update(reserved_ids or ())
+    ordered = sorted(trades, key=lambda row: (_parse_ts(row["timestamp"]) or 0.0, int(row["id"])))
+    for row in ordered:
+        trade_id = int(row["id"])
+        close = _parse_ts(row["timestamp"]) if "timestamp" in row.keys() else None
+        qty = expected_base_qty(row)
+        try:
+            stored_entry = float(row["entry_price"] or 0.0)
+        except (TypeError, ValueError, KeyError):
+            stored_entry = 0.0
+        if close is None or qty is None or stored_entry <= 0 or lookback_days <= 0:
+            plans[trade_id] = {"status": "unmatched", "reason": "open_time_missing"}
+            continue
+        close_ms = int(close * 1000)
+        start_ms = close_ms - int(float(lookback_days) * 86400 * 1000)
+        exit_start, exit_end = _window_ms(close, window_sec)
+        qty_buys = []
+        price_buys = []
+        for order in orders:
+            if not order.get("summary") or order["side"] != "buy":
+                continue
+            if order["order_id"] in used or order["last_ms"] >= close_ms or order["last_ms"] < start_ms:
+                continue
+            if not quantities_match(order["net_qty"], qty, tolerance):
+                continue
+            qty_buys.append(order)
+            if _price_close(order["summary"]["price"], stored_entry, price_tol_pct):
+                price_buys.append(order)
+        _exit_inside, sells = _side_orders(orders, "sell", qty, tolerance, exit_start, exit_end)
+        sells = [order for order in sells
+                 if order["order_id"] not in used and not _contested(order, trade_id, exit_windows, set())]
+        if len(price_buys) > 1 or len(sells) > 1:
+            plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+            continue
+        if len(price_buys) == 1 and len(sells) == 1 and price_buys[0]["last_ms"] <= sells[0]["last_ms"]:
+            buy, sell = price_buys[0], sells[0]
+            used.add(buy["order_id"])
+            used.add(sell["order_id"])
+            plans[trade_id] = {
+                "status": "matched", "buy": buy, "sell": sell,
+                "opened_at": _epoch_to_stored(buy["last_ms"] / 1000.0),
+            }
+            continue
+        if qty_buys and not price_buys:
+            plans[trade_id] = {"status": "unmatched", "reason": "entry_price_mismatch"}
+        elif history_floor_ms is None or history_floor_ms >= close_ms:
+            plans[trade_id] = {"status": "unmatched", "reason": "history_unavailable"}
+        else:
+            plans[trade_id] = {"status": "unmatched", "reason": "no_fills_in_window"}
+    return plans
+
+
+def _with_open(row, epoch):
+    data = _row_dict(row)
+    data["opened_at"] = _epoch_to_stored(epoch)
+    return data
+
+
 def _time_fallback_symbol(conn, client, rows, pause, sleeper, tolerance, window_sec, page_limit, price_cache, now):
     symbol = rows[0]["symbol"]
-    if not any(trade_open_moment(row) is not None for row in rows):
+    lookback_days = entry_lookback_days()
+    decisions = [item for item in _load_decisions(conn, [symbol]) if item.get("symbol") == symbol]
+    recovered = recover_open_times(rows, decisions, _position_open_times(conn, symbol), lookback_days)
+    prepared = [_with_open(row, recovered[int(row["id"])]) if int(row["id"]) in recovered else row for row in rows]
+    span = _fallback_span_ms(prepared, window_sec, lookback_days)
+    if span is None:
         for row in rows:
             snapshot = _snapshot(row)
             _capture_original(conn, int(row["id"]), snapshot, now)
             _mark_unmatched(conn, row, snapshot, "open_time_missing", [], [], now)
         return 0
-    span = _fallback_span_ms(rows, window_sec)
     window_start, window_end = span
     fetched = fetch_symbol_trades(
         client, symbol, window_start, window_end, pause, sleeper, page_limit=page_limit)
@@ -916,8 +1083,25 @@ def _time_fallback_symbol(conn, client, rows, pause, sleeper, tolerance, window_
     lookup = _quote_price_fn(client, price_cache, pause, sleeper)
     orders = aggregate_orders(fetched, symbol, lookup)
     reserved_ids, entry_windows, exit_windows = _symbol_windows(conn, symbol, window_sec)
+    for row in prepared:
+        if int(row["id"]) not in recovered:
+            continue
+        opened = trade_open_moment(row)
+        if opened is not None:
+            entry_windows.append((int(row["id"]),) + _window_ms(opened, window_sec))
+    known = [row for row in prepared if trade_open_moment(row) is not None]
+    unknown = [row for row in prepared if trade_open_moment(row) is None]
     plans = plan_time_matches(
-        rows, orders, entry_windows, exit_windows, reserved_ids, window_sec, tolerance, history_floor)
+        known, orders, entry_windows, exit_windows, reserved_ids, window_sec, tolerance, history_floor)
+    claimed = set(reserved_ids)
+    for plan in plans.values():
+        if plan.get("status") == "matched":
+            claimed.add(plan["buy"]["order_id"])
+            claimed.add(plan["sell"]["order_id"])
+    plans.update(plan_lookback_matches(
+        unknown, orders, exit_windows, reserved_ids, window_sec, tolerance,
+        entry_price_tol_pct(), lookback_days, history_floor, claimed,
+    ))
     matched = 0
     for row in rows:
         trade_id = int(row["id"])
@@ -936,6 +1120,7 @@ def _time_fallback_symbol(conn, client, rows, pause, sleeper, tolerance, window_
         _apply_verified(
             conn, row, snapshot, reconciled,
             [plan["buy"]["order_id"]], [plan["sell"]["order_id"]], now, "matched_by_time",
+            opened_at=plan.get("opened_at"),
         )
         matched += 1
     return matched

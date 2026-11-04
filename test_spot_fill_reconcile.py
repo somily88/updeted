@@ -666,21 +666,89 @@ def test_time_fallback_ambiguous_entry_stays_unverified(tmp_path):
     assert row["entry_price"] == 9 and row["exit_price"] == 10
 
 
-def test_time_fallback_missing_open_time_stays_unverified(tmp_path):
+def _entry_decision(path, created_at, order_id="11"):
+    with rec._connect(path) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS decision_log (
+            id INTEGER PRIMARY KEY, created_at TEXT, market TEXT, symbol TEXT, outcome TEXT, order_id TEXT
+        )""")
+        conn.execute(
+            "INSERT INTO decision_log (created_at, market, symbol, outcome, order_id) VALUES (?, 'Spot', 'BTC/USDT', ?, ?)",
+            (created_at, "تم فتح الصفقة", order_id),
+        )
+        conn.commit()
+
+
+def test_time_fallback_recovers_open_time_from_decision_log(tmp_path):
     path = make_db(tmp_path)
-    trade_id = _qty_trade(path, opened_at=None, entry_price=4, exit_price=5, gross_pnl_usdt=1.0)
-    ts = trade_ts()
+    opened = "2024-06-01 06:00:00"
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=None)
+    _entry_decision(path, opened)
     ex = FakeExchange(trades=[
-        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", ts - 1000),
-        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts),
+        fill("11", "buy", 1.0, 100.0, 0.1, "USDT", trade_ts(opened)),
+        fill("22", "sell", 1.0, 110.0, 0.11, "USDT", trade_ts(closed)),
+    ])
+    result = run(path, ex)
+    row = trade_row(path, trade_id)
+    assert result["matched_by_time"] == 1
+    assert row["cost_quality"] == "matched_by_time"
+    assert row["entry_price"] == pytest.approx(100)
+    assert row["exit_price"] == pytest.approx(110)
+    assert row["opened_at"] == opened
+    assert row["entry_order_ids"] == "11"
+
+
+def test_time_fallback_lookback_matches_price_and_qty(tmp_path):
+    path = make_db(tmp_path)
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=None, entry_price=100.0, exit_price=110.0,
+                          gross_pnl_usdt=10.0)
+    buy_at = trade_ts(closed) - 6 * 3600 * 1000
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", buy_at),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", trade_ts(closed)),
     ])
     run(path, ex)
     row = trade_row(path, trade_id)
-    assert ex.calls == []
-    assert row["reconcile_reason"] == "open_time_missing"
-    assert row["entry_price"] == 4 and row["exit_price"] == 5
+    assert row["cost_quality"] == "matched_by_time"
+    assert row["entry_order_ids"] == "11"
+    assert row["pnl_usdt"] == pytest.approx(10)
+    assert row["opened_at"]
+
+
+def test_time_fallback_lookback_two_buys_is_ambiguous(tmp_path):
+    path = make_db(tmp_path)
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=None, entry_price=100.0, exit_price=110.0,
+                          gross_pnl_usdt=10.0)
+    close_ms = trade_ts(closed)
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", close_ms - 5 * 3600 * 1000),
+        fill("12", "buy", 1.0, 100.1, 0.0, "USDT", close_ms - 2 * 3600 * 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", close_ms),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "ambiguous_match"
     assert row["cost_quality"] == "legacy_or_unverified"
-    assert "وقت الفتح غير محفوظ" in rec.warning_ar(1, 0, 1, {"open_time_missing": 1})
+    assert row["entry_price"] == 100.0
+
+
+def test_time_fallback_lookback_rejects_price_mismatch(tmp_path):
+    path = make_db(tmp_path)
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=None, entry_price=100.0, exit_price=110.0,
+                          gross_pnl_usdt=10.0)
+    close_ms = trade_ts(closed)
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 102.0, 0.0, "USDT", close_ms - 3600 * 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", close_ms),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "entry_price_mismatch"
+    assert row["cost_quality"] == "legacy_or_unverified"
+    assert row["entry_price"] == 100.0 and row["exit_price"] == 110.0
 
 
 def test_time_fallback_history_does_not_reach_the_trade(tmp_path):
