@@ -256,6 +256,9 @@ BLOCK_RULE_LABELS = {
     "trend_volume": "تأكيد الحجم",
     "rl_skip": "التعلم المعزز",
     "portfolio_risk": "مخاطر المحفظة",
+    "kill_switch": "مفتاح الإيقاف (بيانات)",
+    "max_open_positions": "حد المراكز المفتوحة",
+    "sizing": "حجم الصفقة",
 }
 
 
