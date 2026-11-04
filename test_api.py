@@ -177,6 +177,48 @@ def test_dashboard_icons_served_with_auth(app_module):
         assert marker in html
 
 
+def test_state_trades_include_strategy_and_market(app_module, monkeypatch):
+    monkeypatch.setattr(app_module.exchange, "fetch_balance", lambda: {"free": {"USDT": 10}, "total": {"USDT": 10}})
+    with app_module.get_db_connection(app_module.DB_NAME) as conn:
+        conn.execute(
+            """INSERT INTO trades
+               (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe, cost_quality)
+               VALUES ('BTC/USDT', 1, 2, 1, 'closed', '2026-11-04 10:00:00', 3.5, 'trend_pullback', '4h', 'actual')"""
+        )
+    data = _client(app_module).get("/api/state", headers=_auth()).json()
+    row = next(item for item in data["trades"] if item["symbol"] == "BTC/USDT")
+    assert row["strategy"] == "trend_pullback"
+    assert row["market_type"] == "Spot"
+    futures = next(item for item in data["platforms"] if item["id"] == "binance_futures")
+    assert "realized_pnl" in futures
+    assert data["params"]["strategies"]
+
+
+def test_dashboard_bindings_and_neural_markup(app_module):
+    html = _client(app_module).get("/", headers=_auth()).text
+    for marker in (
+        "binance_futures",
+        "futures.realized_pnl",
+        "لا إشارة",
+        "Asia/Riyadh",
+        "الخلية العصبية",
+        "التعلم المعزز",
+        "متاح",
+        "unverified_spot_trades",
+        "/api/rl",
+        "trend_pullback",
+        "donchian_breakout",
+        'id="riskCard"',
+        'id="neuralCard"',
+        'id="rlPanel"',
+    ):
+        assert marker in html, marker
+    assert "futures.pnl_usdt" not in html
+    assert "fallbackData" not in html
+    assert "12540" not in html
+    assert "مثبت" not in html
+
+
 def test_three_assets_allowlisted_with_auth(app_module):
     c = _client(app_module)
     assert c.get("/three/three.module.js").status_code == 401
