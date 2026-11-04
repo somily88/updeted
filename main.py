@@ -1,6 +1,7 @@
 import os
 from execution import place_entry_order
-from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats
+from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats, spot_unverified_sql, spot_verified_sql
+import spot_fill_reconcile
 import spot_rules
 import secrets
 import hashlib
@@ -136,6 +137,8 @@ def init_db():
                 ('protective_stop_price', 'REAL'),
                 ('reconciliation_required', 'INTEGER NOT NULL DEFAULT 0'),
                 ('fees_usdt', 'REAL NOT NULL DEFAULT 0'),
+                ('entry_order_ids', 'TEXT'),
+                ('exit_order_ids', 'TEXT'),
             ]:
                 existing = {row[1] for row in cursor.execute('PRAGMA table_info(open_positions)').fetchall()}
                 if column not in existing:
@@ -180,7 +183,10 @@ def init_db():
                                        ('cost_quality', "TEXT NOT NULL DEFAULT 'legacy_or_unverified'"),
                                        ('gross_pnl_usdt', 'REAL'), ('fees_usdt', 'REAL'),
                                        ('exit_reason', 'TEXT'), ('risk_usdt', 'REAL'),
-                                       ('r_multiple', 'REAL')]:
+                                       ('r_multiple', 'REAL'),
+                                       ('entry_order_ids', 'TEXT'), ('exit_order_ids', 'TEXT'),
+                                       ('stop_price', 'REAL'), ('reconcile_status', 'TEXT'),
+                                       ('reconcile_reason', 'TEXT'), ('reconciled_at', 'TEXT')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         cleanup_legacy_spot_trades(DB_NAME)
@@ -373,19 +379,40 @@ def log_trade(symbol, entry_price, exit_price, pnl_pct, status, pnl_usdt=None,
         logger.error("Log Trade Error: %s", e)
 
 
+def _note_entry_order(pos, fill, fresh=False):
+    """Remember the entry order id and keep a known fill from being stored as unverified."""
+    fill = fill or {}
+    pos['entry_order_ids'] = spot_fill_reconcile.append_order_id(pos.get('entry_order_ids'), fill.get('order_id'))
+    if fresh:
+        pos['fee_quality'] = spot_fill_reconcile.combine_fee_quality(fill.get('fee_quality'))
+    else:
+        pos['fee_quality'] = spot_fill_reconcile.combine_fee_quality(pos.get('fee_quality'), fill.get('fee_quality'))
+
+
+def _note_exit_order(pos, sale):
+    sale = sale or {}
+    pos['exit_order_ids'] = spot_fill_reconcile.append_order_id(pos.get('exit_order_ids'), sale.get('order_id'))
+    if pos.get('simulated'):
+        pos['fee_quality'] = 'simulated'
+    else:
+        pos['fee_quality'] = spot_fill_reconcile.combine_fee_quality(pos.get('fee_quality'), sale.get('fee_quality'))
+
+
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
                               pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
-                              gross_pnl_usdt=None, fees_usdt=None, exit_reason=None, risk_usdt=None):
+                              gross_pnl_usdt=None, fees_usdt=None, exit_reason=None, risk_usdt=None,
+                              entry_order_ids=None, exit_order_ids=None, stop_price=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
             (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
-             cost_quality, gross_pnl_usdt, fees_usdt, exit_reason, risk_usdt, r_multiple)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             cost_quality, gross_pnl_usdt, fees_usdt, exit_reason, risk_usdt, r_multiple,
+             entry_order_ids, exit_order_ids, stop_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
              pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason,
-             risk_usdt, r_multiple(pnl_usdt, risk_usdt)))
+             risk_usdt, r_multiple(pnl_usdt, risk_usdt), entry_order_ids, exit_order_ids, stop_price))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
     try:
         rl_bandit.get_agent(DB_NAME).record_outcome('Spot', symbol, r_multiple(pnl_usdt, risk_usdt))
@@ -411,7 +438,7 @@ def get_performance_stats():
                 SUM(CASE WHEN pnl_pct IS NOT NULL THEN pnl_pct END),
                 MAX(pnl_pct), MIN(pnl_pct)
                 FROM trades
-                WHERE pnl_usdt IS NOT NULL AND cost_quality IN ('actual','estimated')""").fetchone()
+                WHERE """ + spot_verified_sql()).fetchone()
         if row and row[0] > 0:
             total = int(row[0])
             wins = int(row[1] or 0)
@@ -425,16 +452,14 @@ def get_performance_stats():
         return 0, 0, 0, 0.0, 0.0, 0.0, 0.0
 def get_realized_stats():
     """Return net Spot PnL only when the result and cost quality are known."""
-    known = "pnl_usdt IS NOT NULL AND cost_quality IN ('actual','estimated')"
+    known = spot_verified_sql()
     try:
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         with get_db_connection(DB_NAME) as conn:
             total = conn.execute("SELECT COALESCE(SUM(pnl_usdt), 0) FROM trades WHERE " + known).fetchone()[0]
             today_total = conn.execute("SELECT COALESCE(SUM(pnl_usdt), 0) FROM trades WHERE " + known +
                                        " AND timestamp LIKE ?", (today + "%",)).fetchone()[0]
-            unverified = conn.execute("""SELECT COUNT(*) FROM trades
-                WHERE pnl_usdt IS NULL OR cost_quality IS NULL
-                   OR cost_quality NOT IN ('actual','estimated','simulated')""").fetchone()[0]
+            unverified = conn.execute("SELECT COUNT(*) FROM trades WHERE " + spot_unverified_sql()).fetchone()[0]
             estimated = conn.execute("""SELECT COUNT(*) FROM trades
                 WHERE pnl_usdt IS NOT NULL AND cost_quality='estimated'""").fetchone()[0]
         return float(total or 0.0), float(today_total or 0.0), int(unverified or 0), int(estimated or 0)
@@ -483,8 +508,8 @@ def save_position(symbol, pos):
                  strategy, timeframe, stop_price, target_price, trailing_distance, entries, last_add_candle, add_attempted,
                  risk_distance, partial_taken, partial_attempted, partial_pnl_usdt, initial_cost,
                  exit_attempted, fee_quality, protective_order_id, protective_client_id,
-                 protective_stop_price, reconciliation_required, fees_usdt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 protective_stop_price, reconciliation_required, fees_usdt, entry_order_ids, exit_order_ids)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (symbol, pos['entry_price'], pos['amount'], pos['cost'],
                   pos['highest_price'], pos['time'], 1 if pos.get('simulated') else 0,
                   pos.get('strategy', 'trend'), pos.get('timeframe', '1h'),
@@ -497,7 +522,8 @@ def save_position(symbol, pos):
                   1 if pos.get('exit_attempted') else 0, pos.get('fee_quality', 'unverified'),
                   pos.get('protective_order_id'), pos.get('protective_client_id'),
                   pos.get('protective_stop_price'), 1 if pos.get('reconciliation_required') else 0,
-                  float(pos.get('fees_usdt') or 0.0)))
+                  float(pos.get('fees_usdt') or 0.0),
+                  pos.get('entry_order_ids'), pos.get('exit_order_ids')))
         return True
     except Exception as e:
         logger.error("Save Position Error: %s", e)
@@ -521,7 +547,8 @@ def load_positions():
                               simulated, strategy, timeframe, stop_price, target_price, trailing_distance,
                               entries, last_add_candle, add_attempted, risk_distance, partial_taken, partial_attempted,
                               partial_pnl_usdt, initial_cost, exit_attempted, fee_quality, protective_order_id,
-                              protective_client_id, protective_stop_price, reconciliation_required, fees_usdt
+                              protective_client_id, protective_stop_price, reconciliation_required, fees_usdt,
+                              entry_order_ids, exit_order_ids
                               FROM open_positions''')
             for r in cursor.fetchall():
                 result[r[0]] = {
@@ -537,6 +564,7 @@ def load_positions():
                     'protective_order_id': r[22], 'protective_client_id': r[23],
                     'protective_stop_price': float(r[24] or 0.0),
                     'reconciliation_required': bool(r[25]), 'fees_usdt': float(r[26] or 0.0),
+                    'entry_order_ids': r[27], 'exit_order_ids': r[28],
                 }
                 if result[r[0]]['fees_usdt'] <= 0 and result[r[0]]['initial_cost'] > 0:
                     result[r[0]]['fees_usdt'] = result[r[0]]['initial_cost'] * 0.001
@@ -733,6 +761,23 @@ def get_recent_decisions(limit=80):
         return []
     finally:
         conn.close()
+
+
+def run_spot_fill_reconcile_safe():
+    """Match closed Spot trades to Binance fills. Reads only; failures retry next run."""
+    if not spot_fill_reconcile.enabled():
+        return
+    try:
+        result = spot_fill_reconcile.reconcile_closed_spot_trades(
+            DB_NAME, exchange, pause_sec=spot_fill_reconcile.pause_seconds())
+        PERFORMANCE_REPORT_CACHE["updated_at"] = 0.0
+        PERFORMANCE_REPORT_CACHE["data"] = None
+        log_event("INFO", result.get("summary_ar") or "انتهت مطابقة صفقات السبوت")
+    except Exception as exc:
+        log_event("ERR", "تعذر مطابقة صفقات السبوت ({})؛ ستُعاد المحاولة لاحقًا".format(type(exc).__name__))
+        logger.error("spot fill reconcile failed: %s", type(exc).__name__)
+
+
 scheduler = BackgroundScheduler()
 futures_engine = None
 
@@ -782,6 +827,12 @@ async def lifespan(app: FastAPI):
                           next_run_time=datetime.datetime.now())
     if massive_client.MASSIVE_ENABLED:
         scheduler.add_job(refresh_massive, 'interval', minutes=2, max_instances=1, coalesce=True,
+                          next_run_time=datetime.datetime.now())
+    if spot_fill_reconcile.enabled():
+        scheduler.add_job(run_spot_fill_reconcile_safe, 'interval',
+                          minutes=spot_fill_reconcile.interval_minutes(),
+                          max_instances=1, coalesce=True, misfire_grace_time=300,
+                          id='spot_fill_reconcile', replace_existing=True,
                           next_run_time=datetime.datetime.now())
     scheduler.start()
     log_event("START", "البوت يعمل ({} | اختيار الاستراتيجية تلقائي)".format(BINANCE_ENV))
@@ -2103,8 +2154,7 @@ def check_and_close_positions():
                             pos['fees_usdt'] = float(pos.get('fees_usdt') or 0.0) + float(partial_sale.get('fee_usdt') or 0.0)
                             pos['partial_taken'] = True
                             pos['partial_attempted'] = False
-                            if partial_sale.get('fee_quality') != 'actual':
-                                pos['fee_quality'] = partial_sale.get('fee_quality', 'unverified')
+                            _note_exit_order(pos, partial_sale)
                             pos['target_price'] = None  # let the remaining half run under the trailing stop
                             pos['stop_price'] = max(float(pos.get('stop_price') or 0.0), entry_price)
                             active_positions[symbol] = pos
@@ -2157,8 +2207,7 @@ def check_and_close_positions():
             pos['amount'] = remaining_amount
             pos['cost'] = max(float(pos.get('cost') or 0.0) - cost_sold, 0.0)
             pos['partial_pnl_usdt'] = float(pos.get('partial_pnl_usdt') or 0.0) + tranche_pnl
-            if sale.get('fee_quality') != 'actual':
-                pos['fee_quality'] = sale.get('fee_quality', 'unverified')
+            _note_exit_order(pos, sale)
 
             # A market order can fill less than requested. Preserve the unsold
             # amount instead of recording a full close or crediting phantom proceeds.
@@ -2193,10 +2242,14 @@ def check_and_close_positions():
             exit_reason = spot_exit_reason(reason, pos.get('partial_taken'), trail_armed)
             record_closed_spot_trade(symbol, entry_price, sale['price'], realized_pnl, status,
                                       total_pnl, pos.get('strategy'), pos.get('timeframe'),
-                                      ('simulated' if pos.get('simulated') else pos.get('fee_quality', 'unverified')),
+                                      spot_fill_reconcile.closed_spot_quality(
+                                          pos.get('simulated'), pos.get('fee_quality'), pos.get('fee_quality')),
                                       gross_pnl_usdt=total_pnl + fees_total, fees_usdt=fees_total,
                                       exit_reason=exit_reason,
-                                      risk_usdt=initial_risk_usdt(entry_price, pos.get('risk_distance'), pnl_basis))
+                                      risk_usdt=initial_risk_usdt(entry_price, pos.get('risk_distance'), pnl_basis),
+                                      entry_order_ids=pos.get('entry_order_ids'),
+                                      exit_order_ids=pos.get('exit_order_ids'),
+                                      stop_price=pos.get('stop_price'))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -2332,6 +2385,7 @@ def automated_market_scan():
                             'stop_price': fill['price'] - test_stop_distance,
                             'risk_distance': test_stop_distance,
                         }
+                        _note_entry_order(pos, fill, fresh=True)
                         active_positions[symbol] = pos
                         save_position(symbol, pos)
                         if not pos.get('simulated'):
@@ -2489,9 +2543,10 @@ def automated_market_scan():
                         'simulated': bool(pos.get('simulated') or fill['simulated']),
                         'initial_cost': float(pos.get('initial_cost') or pos['cost']) + float(fill['cost']),
                         'fees_usdt': float(pos.get('fees_usdt') or 0.0) + float(fill.get('fee_usdt') or 0.0),
-                        'fee_quality': ('estimated' if 'estimated' in (pos.get('fee_quality'), fill.get('fee_quality'))
-                                        else 'actual' if pos.get('fee_quality') == fill.get('fee_quality') == 'actual'
-                                        else 'unverified'),
+                        'fee_quality': spot_fill_reconcile.combine_fee_quality(
+                            pos.get('fee_quality'), fill.get('fee_quality')),
+                        'entry_order_ids': spot_fill_reconcile.append_order_id(
+                            pos.get('entry_order_ids'), fill.get('order_id')),
                     })
                     active_positions[symbol] = pos
                     save_position(symbol, pos)
@@ -2688,6 +2743,7 @@ def automated_market_scan():
                     'fees_usdt': float(fill.get('fee_usdt') or 0.0),
                     'entries': 1, 'last_add_candle': None,
                 }
+                _note_entry_order(pos, fill, fresh=True)
                 active_positions[symbol] = pos
                 save_position(symbol, pos)
                 rl_bandit.get_agent(DB_NAME).mark_opened(rl_decision.get('decision_id'))
@@ -3094,6 +3150,7 @@ def api_state():
             'realized_total': realized_total, 'realized_today': realized_today,
             'unverified_spot_trades': unverified_spot_trades,
             'estimated_spot_trades': estimated_spot_trades,
+            'spot_reconcile': spot_fill_reconcile.status_snapshot(DB_NAME, unverified_spot_trades),
             'unrealized': unrealized, 'wins': wins, 'losses': losses, 'total': total,
             'win_rate': win_rate, 'best': best, 'worst': worst,
             'exposure': min((invested + futures_position_value) /
@@ -3348,8 +3405,10 @@ def api_rl():
 @app.get("/api/strategy-stats", dependencies=[Depends(require_dashboard_auth)])
 def api_strategy_stats():
     """Read-only per-strategy performance (net of recorded fees; R where initial risk is known)."""
+    _realized, _today, _unverified, _estimated = get_realized_stats()
     return {"strategies": load_strategy_stats(DB_NAME),
-            "note": "عينات أقل من 30 صفقة غير كافية إحصائيًا"}
+            "spot_realized_usdt": _realized,
+            "note": "الربح المحقق يطابق /api/state: صفقات السبوت ذات التكلفة actual أو estimated فقط. الصفقات غير الموثّقة والمستبعدة (legacy) لا تدخل إحصاء الاستراتيجية."}
 
 
 @app.get("/api/equity", dependencies=[Depends(require_dashboard_auth)])

@@ -25,7 +25,7 @@ def test_load_stats_skips_simulated_and_old_schema(tmp_path):
     db = str(tmp_path / "t.db")
     with sqlite3.connect(db) as c:
         c.execute("CREATE TABLE trades (strategy TEXT, pnl_usdt REAL, cost_quality TEXT)")
-        c.execute("INSERT INTO trades VALUES ('trend', 5, 'verified')")
+        c.execute("INSERT INTO trades VALUES ('trend', 5, 'actual')")
         c.execute("INSERT INTO trades VALUES ('trend', 99, 'simulated')")
         c.execute("CREATE TABLE futures_trades (strategy TEXT, pnl_usdt REAL, fees_usdt REAL, r_multiple REAL)")
         c.execute("INSERT INTO futures_trades VALUES ('range', -2, 0.1, -1)")

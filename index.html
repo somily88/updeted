@@ -71,6 +71,7 @@ details.card>summary{cursor:pointer;font-weight:800;list-style:none;display:flex
 .consent{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--bg2);display:grid;gap:8px;font-size:12px}.consent label{display:flex;gap:8px;align-items:flex-start}
 .params{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;font-size:12px}.params div{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:3px 0}.params b{direction:ltr}
 .toast{position:fixed;bottom:18px;inset-inline-start:50%;transform:translateX(50%);background:var(--card2);border:1px solid var(--line);padding:10px 16px;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:50}
+.warnbox{display:none;margin:0 0 14px;padding:12px 14px;border-radius:12px;border:1px solid color-mix(in srgb,var(--warn,#f59e0b) 55%,transparent);background:color-mix(in srgb,var(--warn,#f59e0b) 12%,transparent);color:var(--text);font-weight:700;line-height:1.7}
 .tabs{display:none}
 .flash-up{animation:fu 1s}.flash-down{animation:fd 1s}@keyframes fu{from{background:color-mix(in srgb,var(--up) 25%,transparent)}}@keyframes fd{from{background:color-mix(in srgb,var(--down) 25%,transparent)}}
 @media (max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}}
@@ -98,6 +99,7 @@ details.card>summary{cursor:pointer;font-weight:800;list-style:none;display:flex
 </div></header>
 
 <main class="wrap">
+  <div id="reconcile-warn" class="warnbox" role="status"></div>
   <section class="grid kpis" aria-label="نظرة عامة">
     <div class="card kpi hero"><div class="label"><span>قيمة محفظة Spot</span><span id="wallet-status-tag" class="tag">—</span></div><div class="val" id="wallet-value">—</div><div class="sub" id="wallet-sub">—</div></div>
     <div class="card kpi"><div class="label">الربح المحقق</div><div class="val" id="realized-pl">—</div><div class="sub" id="realized-sub">—</div></div>
@@ -327,7 +329,10 @@ function render(d){
   set('wallet-status-tag',miss?'غير متاح':d.balance_status==='stale'?'قديم':w.price_status==='stale'?'سعر قديم':'محدّث','tag'+(miss||d.balance_status==='stale'?' short':' long'));
   el('wallet-sub').textContent=miss?'تعذّر جلب قيمة موثوقة':'متاح '+usd(w.free,2)+' · نقد '+usd(w.cash,2)+' · مراكز '+usd(w.positions_value,2);
   set('realized-pl',usd(st.realized_total,2),'val '+cls(st.realized_total));
-  el('realized-sub').textContent='اليوم '+usd(st.realized_today,2)+(st.unverified_spot_trades?' · '+st.unverified_spot_trades+' سجل مستبعد':'');
+  var rec=st.spot_reconcile||{}, oldN=Number(st.unverified_spot_trades)||0;
+  var warn=rec.warning_ar||(oldN?('تنبيه: '+oldN+' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.'):'');
+  var box=el('reconcile-warn'); if(box){box.style.display=warn?'block':'none'; box.textContent=warn;}
+  el('realized-sub').textContent='اليوم '+usd(st.realized_today,2)+(oldN?' · '+oldN+' صفقة غير موثّقة':'');
   set('unrealized-pl',usd(st.unrealized,2),'val '+cls(st.unrealized));
   var ps=d.positions||[];el('unrealized-sub').textContent='على '+ps.length+' مركز مفتوح';
   set('open-total',String(s.active_trades!=null?s.active_trades:ps.length));
