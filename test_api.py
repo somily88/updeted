@@ -118,7 +118,9 @@ def test_futures_exit_reason_codes():
 def test_root_serves_new_dashboard(app_module):
     resp = _client(app_module).get("/", headers=_auth())
     assert resp.status_code == 200
-    assert "/api/trading" in resp.text and "sample-data.js" not in resp.text
+    assert "/api/state" in resp.text and "stratLabel" in resp.text
+    assert "trend_pullback" in resp.text and "donchian_breakout" in resp.text
+    assert "sample-data.js" not in resp.text
     assert "SAMPLE_STATE" not in resp.text and "?cap" not in resp.text
 
 
@@ -171,8 +173,8 @@ def test_dashboard_icons_served_with_auth(app_module):
     assert c.get("/icons/NOPE.svg", headers=_auth()).status_code == 404
     assert c.get("/icons/..%2Fmain.svg", headers=_auth()).status_code == 404
     html = c.get("/", headers=_auth()).text
-    for tab in ('data-v="spot"', 'data-v="strat"', 'data-v="dec"'):
-        assert tab in html
+    for marker in ('id="marketGrid"', 'id="decisionList"', "stratLabel"):
+        assert marker in html
 
 
 def test_three_assets_allowlisted_with_auth(app_module):
