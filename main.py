@@ -187,7 +187,8 @@ def init_db():
                                        ('r_multiple', 'REAL'),
                                        ('entry_order_ids', 'TEXT'), ('exit_order_ids', 'TEXT'),
                                        ('stop_price', 'REAL'), ('reconcile_status', 'TEXT'),
-                                       ('reconcile_reason', 'TEXT'), ('reconciled_at', 'TEXT')]:
+                                       ('reconcile_reason', 'TEXT'), ('reconciled_at', 'TEXT'),
+                                       ('opened_at', 'TEXT')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         cleanup_legacy_spot_trades(DB_NAME)
@@ -402,18 +403,19 @@ def _note_exit_order(pos, sale):
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
                               pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
                               gross_pnl_usdt=None, fees_usdt=None, exit_reason=None, risk_usdt=None,
-                              entry_order_ids=None, exit_order_ids=None, stop_price=None):
+                              entry_order_ids=None, exit_order_ids=None, stop_price=None, opened_at=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
             (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
              cost_quality, gross_pnl_usdt, fees_usdt, exit_reason, risk_usdt, r_multiple,
-             entry_order_ids, exit_order_ids, stop_price)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             entry_order_ids, exit_order_ids, stop_price, opened_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
              pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason,
-             risk_usdt, r_multiple(pnl_usdt, risk_usdt), entry_order_ids, exit_order_ids, stop_price))
+             risk_usdt, r_multiple(pnl_usdt, risk_usdt), entry_order_ids, exit_order_ids, stop_price,
+             opened_at))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
     try:
         rl_bandit.get_agent(DB_NAME).record_outcome('Spot', symbol, r_multiple(pnl_usdt, risk_usdt))
@@ -2250,7 +2252,8 @@ def check_and_close_positions():
                                       risk_usdt=initial_risk_usdt(entry_price, pos.get('risk_distance'), pnl_basis),
                                       entry_order_ids=pos.get('entry_order_ids'),
                                       exit_order_ids=pos.get('exit_order_ids'),
-                                      stop_price=pos.get('stop_price'))
+                                      stop_price=pos.get('stop_price'),
+                                      opened_at=pos.get('time'))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,

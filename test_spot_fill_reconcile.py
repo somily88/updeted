@@ -122,17 +122,18 @@ def add_trade(path, **overrides):
         "status": "LOSS", "timestamp": "2024-06-01 12:00:00", "pnl_usdt": -4.0,
         "strategy": "trend", "timeframe": "1h", "cost_quality": "legacy_or_unverified",
         "gross_pnl_usdt": None, "fees_usdt": None, "risk_usdt": None, "r_multiple": None,
-        "entry_order_ids": None, "exit_order_ids": None,
+        "entry_order_ids": None, "exit_order_ids": None, "opened_at": None,
     }
     row.update(overrides)
     with rec._connect(path) as conn:
         conn.execute(
             """INSERT INTO trades
                (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
-                cost_quality, gross_pnl_usdt, fees_usdt, risk_usdt, r_multiple, entry_order_ids, exit_order_ids)
+                cost_quality, gross_pnl_usdt, fees_usdt, risk_usdt, r_multiple, entry_order_ids, exit_order_ids,
+                opened_at)
                VALUES (:symbol, :entry_price, :exit_price, :pnl_pct, :status, :timestamp, :pnl_usdt, :strategy,
                        :timeframe, :cost_quality, :gross_pnl_usdt, :fees_usdt, :risk_usdt, :r_multiple,
-                       :entry_order_ids, :exit_order_ids)""",
+                       :entry_order_ids, :exit_order_ids, :opened_at)""",
             row,
         )
         trade_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
@@ -518,10 +519,16 @@ def test_api_state_and_strategy_stats_share_realized_pnl(app_module, monkeypatch
 
 
 def _qty_trade(path, **overrides):
-    """Stored gross implies base qty 1.0 from entry 50 and exit 60."""
+    """Stored gross implies base qty 1.0 from entry 50 and exit 60.
+
+    opened_at defaults to the close timestamp so a short round trip still has an
+    entry window. Pass opened_at=None to cover a row that never stored an open time.
+    """
     fields = dict(entry_price=50.0, exit_price=60.0, gross_pnl_usdt=10.0, pnl_usdt=-4.0,
                   pnl_pct=-1.0, entry_order_ids=None, exit_order_ids=None)
     fields.update(overrides)
+    if "opened_at" not in overrides:
+        fields["opened_at"] = fields.get("timestamp", "2024-06-01 12:00:00")
     return add_trade(path, **fields)
 
 
@@ -622,6 +629,60 @@ def test_time_fallback_out_of_window_is_not_verified(tmp_path, monkeypatch):
     assert row["cost_quality"] == "legacy_or_unverified"
 
 
+def test_time_fallback_long_hold_matches_entry_and_exit_separately(tmp_path):
+    path = make_db(tmp_path)
+    opened = "2024-06-01 06:00:00"
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=opened)
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.1, "USDT", trade_ts(opened)),
+        fill("22", "sell", 1.0, 110.0, 0.11, "USDT", trade_ts(closed)),
+    ])
+    result = run(path, ex)
+    row = trade_row(path, trade_id)
+    assert result["matched_by_time"] == 1
+    assert row["cost_quality"] == "matched_by_time"
+    assert row["entry_price"] == pytest.approx(100)
+    assert row["exit_price"] == pytest.approx(110)
+    assert row["pnl_usdt"] == pytest.approx(9.79)
+    assert row["entry_order_ids"] == "11" and row["exit_order_ids"] == "22"
+
+
+def test_time_fallback_ambiguous_entry_stays_unverified(tmp_path):
+    path = make_db(tmp_path)
+    opened = "2024-06-01 06:00:00"
+    closed = "2024-06-01 12:00:00"
+    trade_id = _qty_trade(path, timestamp=closed, opened_at=opened, entry_price=9, exit_price=10,
+                          gross_pnl_usdt=1.0)
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", trade_ts(opened) - 1000),
+        fill("12", "buy", 1.0, 101.0, 0.0, "USDT", trade_ts(opened) + 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", trade_ts(closed)),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert row["reconcile_reason"] == "ambiguous_match"
+    assert row["cost_quality"] == "legacy_or_unverified"
+    assert row["entry_price"] == 9 and row["exit_price"] == 10
+
+
+def test_time_fallback_missing_open_time_stays_unverified(tmp_path):
+    path = make_db(tmp_path)
+    trade_id = _qty_trade(path, opened_at=None, entry_price=4, exit_price=5, gross_pnl_usdt=1.0)
+    ts = trade_ts()
+    ex = FakeExchange(trades=[
+        fill("11", "buy", 1.0, 100.0, 0.0, "USDT", ts - 1000),
+        fill("22", "sell", 1.0, 110.0, 0.0, "USDT", ts),
+    ])
+    run(path, ex)
+    row = trade_row(path, trade_id)
+    assert ex.calls == []
+    assert row["reconcile_reason"] == "open_time_missing"
+    assert row["entry_price"] == 4 and row["exit_price"] == 5
+    assert row["cost_quality"] == "legacy_or_unverified"
+    assert "وقت الفتح غير محفوظ" in rec.warning_ar(1, 0, 1, {"open_time_missing": 1})
+
+
 def test_time_fallback_history_does_not_reach_the_trade(tmp_path):
     path = make_db(tmp_path)
     trade_id = _qty_trade(path, timestamp="2020-01-01 00:00:00", entry_price=4, exit_price=5, gross_pnl_usdt=1.0)
@@ -643,13 +704,15 @@ def test_record_closed_keeps_known_fees_and_order_ids(app_module):
         "BTC/USDT", 100, 110, 9, "WIN", 9, "trend", "1h", quality,
         gross_pnl_usdt=10, fees_usdt=1, exit_reason="TP", risk_usdt=20,
         entry_order_ids="11", exit_order_ids="22", stop_price=90,
+        opened_at="2024-06-01 06:00:00",
     )
     with app_module.get_db_connection(app_module.DB_NAME) as conn:
         row = conn.execute(
-            "SELECT cost_quality, entry_order_ids, exit_order_ids, r_multiple, stop_price FROM trades"
+            "SELECT cost_quality, entry_order_ids, exit_order_ids, r_multiple, stop_price, opened_at FROM trades"
         ).fetchone()
     assert row["cost_quality"] == "estimated"
     assert row["entry_order_ids"] == "11"
     assert row["exit_order_ids"] == "22"
     assert row["stop_price"] == 90
+    assert row["opened_at"] == "2024-06-01 06:00:00"
     assert row["r_multiple"] == pytest.approx(9 / 20)

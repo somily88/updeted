@@ -36,12 +36,13 @@ REASON_AR = {
     "no_fills_in_window": "لا تنفيذ داخل النافذة",
     "qty_mismatch": "الكمية لا تطابق النافذة",
     "history_unavailable": "سجل التنفيذات لا يغطي الصفقة",
+    "open_time_missing": "وقت الفتح غير محفوظ",
 }
 _KNOWN_FEE = ("actual", "estimated", "simulated")
 _SNAPSHOT_FIELDS = (
     "entry_price", "exit_price", "pnl_pct", "pnl_usdt", "status", "cost_quality",
     "gross_pnl_usdt", "fees_usdt", "risk_usdt", "r_multiple", "strategy", "timeframe",
-    "timestamp", "entry_order_ids", "exit_order_ids",
+    "timestamp", "opened_at", "entry_order_ids", "exit_order_ids",
 )
 
 
@@ -100,7 +101,7 @@ def fallback_enabled():
 
 
 def fallback_window_sec():
-    """Tight window around the recorded close. Default is three minutes."""
+    """Width of each side's window. Buys use the open time; sells use the close."""
     try:
         value = float(str(os.getenv("SPOT_RECONCILE_FALLBACK_WINDOW_SEC", "180")).strip() or "180")
     except ValueError:
@@ -194,6 +195,7 @@ def ensure_schema(conn):
         ("reconcile_status", "TEXT"),
         ("reconcile_reason", "TEXT"),
         ("reconciled_at", "TEXT"),
+        ("opened_at", "TEXT"),
     ):
         if column not in existing:
             conn.execute("ALTER TABLE trades ADD COLUMN {} {}".format(column, definition))
@@ -735,45 +737,75 @@ def _contested(order, trade_id, windows, reserved_ids):
     return False
 
 
-def candidate_order_pairs(orders, qty, tolerance, start_ms, end_ms):
-    """One buy order and one sell order, each already aggregated, both fully inside the window."""
+def trade_open_moment(row):
+    """Stored open time. created_at is accepted when opened_at was not the column name."""
+    keys = row.keys() if hasattr(row, "keys") else ()
+    for key in ("opened_at", "created_at"):
+        if key not in keys or not row[key]:
+            continue
+        parsed = _parse_ts(row[key])
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _window_ms(moment, window_sec):
+    return int((moment - float(window_sec)) * 1000), int((moment + float(window_sec)) * 1000)
+
+
+def _side_orders(orders, side, qty, tolerance, start_ms, end_ms):
     inside = [
         order for order in orders
-        if order.get("summary") and order["first_ms"] >= start_ms and order["last_ms"] <= end_ms
+        if order.get("summary") and order["side"] == side
+        and order["first_ms"] >= start_ms and order["last_ms"] <= end_ms
     ]
-    buys = [order for order in inside if order["side"] == "buy" and quantities_match(order["net_qty"], qty, tolerance)]
-    sells = [order for order in inside if order["side"] == "sell" and quantities_match(order["net_qty"], qty, tolerance)]
-    pairs = [(buy, sell) for buy in buys for sell in sells if buy["last_ms"] <= sell["last_ms"]]
-    return inside, pairs
+    matched = [order for order in inside if quantities_match(order["net_qty"], qty, tolerance)]
+    return inside, matched
 
 
-def plan_time_matches(trades, orders, windows, reserved_ids, window_sec, tolerance, history_gap):
-    """Return {trade_id: {"status": "matched", "buy", "sell"} | {"status": "unmatched", "reason"}}."""
+def plan_time_matches(trades, orders, entry_windows, exit_windows, reserved_ids,
+                      window_sec, tolerance, history_floor_ms):
+    """Match the buy to the open window and the sell to the close window, separately.
+
+    history_floor_ms is the oldest fill the exchange still returned, or None when
+    the symbol has no history at all.
+    """
     plans = {}
     proposals = {}
     for row in trades:
         trade_id = int(row["id"])
-        moment = _parse_ts(row["timestamp"])
+        opened = trade_open_moment(row)
+        if opened is None:
+            plans[trade_id] = {"status": "unmatched", "reason": "open_time_missing"}
+            continue
+        close = _parse_ts(row["timestamp"]) if "timestamp" in row.keys() else None
         qty = expected_base_qty(row)
-        if moment is None or qty is None:
+        if close is None or qty is None:
             plans[trade_id] = {"status": "unmatched", "reason": "qty_mismatch"}
             continue
-        start_ms = int((moment - float(window_sec)) * 1000)
-        end_ms = int((moment + float(window_sec)) * 1000)
-        _inside, pairs = candidate_order_pairs(orders, qty, tolerance, start_ms, end_ms)
-        if len(pairs) > 1:
+        entry_start, entry_end = _window_ms(opened, window_sec)
+        exit_start, exit_end = _window_ms(close, window_sec)
+        entry_inside, buys = _side_orders(orders, "buy", qty, tolerance, entry_start, entry_end)
+        exit_inside, sells = _side_orders(orders, "sell", qty, tolerance, exit_start, exit_end)
+        if len(buys) > 1 or len(sells) > 1:
             plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
             continue
-        if len(pairs) == 1 and (_contested(pairs[0][0], trade_id, windows, reserved_ids)
-                                or _contested(pairs[0][1], trade_id, windows, reserved_ids)):
-            plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+        if len(buys) == 1 and len(sells) == 1:
+            buy, sell = buys[0], sells[0]
+            contested = (
+                buy["last_ms"] > sell["last_ms"]
+                or _contested(buy, trade_id, entry_windows, reserved_ids)
+                or _contested(sell, trade_id, exit_windows, reserved_ids)
+            )
+            if contested:
+                plans[trade_id] = {"status": "unmatched", "reason": "ambiguous_match"}
+            else:
+                proposals[trade_id] = (buy, sell)
             continue
-        if len(pairs) == 1:
-            proposals[trade_id] = pairs[0]
-            continue
-        if history_gap and not _inside:
+        entry_uncovered = history_floor_ms is None or history_floor_ms > entry_end
+        if entry_uncovered and not entry_inside:
             plans[trade_id] = {"status": "unmatched", "reason": "history_unavailable"}
-        elif not _inside:
+        elif not entry_inside or not exit_inside:
             plans[trade_id] = {"status": "unmatched", "reason": "no_fills_in_window"}
         else:
             plans[trade_id] = {"status": "unmatched", "reason": "qty_mismatch"}
@@ -791,39 +823,41 @@ def plan_time_matches(trades, orders, windows, reserved_ids, window_sec, toleran
 
 
 def _symbol_windows(conn, symbol, window_sec):
+    """Entry windows follow the stored open time. Exit windows follow the close."""
     reserved_ids = set()
-    windows = []
+    entry_windows = []
+    exit_windows = []
     if "trades" not in {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
-        return reserved_ids, windows
-    for row in conn.execute(
-        "SELECT id, timestamp, entry_order_ids, exit_order_ids, cost_quality FROM trades WHERE symbol=?",
-        (symbol,),
-    ):
+        return reserved_ids, entry_windows, exit_windows
+    cols = _columns(conn, "trades")
+    open_bits = [name for name in ("opened_at", "created_at") if name in cols]
+    selected = "id, timestamp, entry_order_ids, exit_order_ids, cost_quality"
+    if open_bits:
+        selected += ", " + ", ".join(open_bits)
+    for row in conn.execute("SELECT {} FROM trades WHERE symbol=?".format(selected), (symbol,)):
         if str(row["cost_quality"] or "") == "simulated":
             continue
         for order_id in split_order_ids(row["entry_order_ids"]) + split_order_ids(row["exit_order_ids"]):
             reserved_ids.add(order_id)
-        moment = _parse_ts(row["timestamp"])
-        if moment is None:
-            continue
-        windows.append((
-            int(row["id"]),
-            int((moment - float(window_sec)) * 1000),
-            int((moment + float(window_sec)) * 1000),
-        ))
-    return reserved_ids, windows
+        close = _parse_ts(row["timestamp"])
+        if close is not None:
+            exit_windows.append((int(row["id"]),) + _window_ms(close, window_sec))
+        opened = trade_open_moment(row)
+        if opened is not None:
+            entry_windows.append((int(row["id"]),) + _window_ms(opened, window_sec))
+    return reserved_ids, entry_windows, exit_windows
 
 
-def _history_gap(client, symbol, window_end_ms, fetched, pause, sleeper):
-    """True when the exchange has no fill old enough to cover this window."""
-    if fetched:
-        return False
+def _history_floor_ms(client, symbol, fetched, pause, sleeper):
+    """Oldest fill timestamp still visible, or None when the symbol has no history."""
+    times = [int(item.get("timestamp") or 0) for item in fetched if item.get("timestamp")]
+    if times:
+        return min(times)
     earliest = _read(client.fetch_my_trades, symbol, 0, 1, {}) or []
     sleeper(pause)
     if not earliest:
-        return True
-    oldest = min(int(item.get("timestamp") or 0) for item in earliest)
-    return oldest > int(window_end_ms)
+        return None
+    return min(int(item.get("timestamp") or 0) for item in earliest)
 
 
 def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, action):
@@ -847,24 +881,43 @@ def _apply_verified(conn, row, snapshot, reconciled, entry_ids, exit_ids, now, a
     conn.commit()
 
 
+def _fallback_span_ms(rows, window_sec):
+    starts = []
+    ends = []
+    for row in rows:
+        opened = trade_open_moment(row)
+        close = _parse_ts(row["timestamp"]) if "timestamp" in row.keys() else None
+        if opened is not None:
+            start, end = _window_ms(opened, window_sec)
+            starts.append(start)
+            ends.append(end)
+        if close is not None:
+            start, end = _window_ms(close, window_sec)
+            starts.append(start)
+            ends.append(end)
+    if not starts:
+        return None
+    return min(starts), max(ends)
+
+
 def _time_fallback_symbol(conn, client, rows, pause, sleeper, tolerance, window_sec, page_limit, price_cache, now):
     symbol = rows[0]["symbol"]
-    moments = [moment for moment in (_parse_ts(row["timestamp"]) for row in rows) if moment is not None]
-    if not moments:
+    if not any(trade_open_moment(row) is not None for row in rows):
         for row in rows:
             snapshot = _snapshot(row)
             _capture_original(conn, int(row["id"]), snapshot, now)
-            _mark_unmatched(conn, row, snapshot, "qty_mismatch", [], [], now)
+            _mark_unmatched(conn, row, snapshot, "open_time_missing", [], [], now)
         return 0
-    window_start = int((min(moments) - float(window_sec)) * 1000)
-    window_end = int((max(moments) + float(window_sec)) * 1000)
+    span = _fallback_span_ms(rows, window_sec)
+    window_start, window_end = span
     fetched = fetch_symbol_trades(
         client, symbol, window_start, window_end, pause, sleeper, page_limit=page_limit)
-    gap = _history_gap(client, symbol, window_end, fetched, pause, sleeper)
+    history_floor = _history_floor_ms(client, symbol, fetched, pause, sleeper)
     lookup = _quote_price_fn(client, price_cache, pause, sleeper)
     orders = aggregate_orders(fetched, symbol, lookup)
-    reserved_ids, windows = _symbol_windows(conn, symbol, window_sec)
-    plans = plan_time_matches(rows, orders, windows, reserved_ids, window_sec, tolerance, gap)
+    reserved_ids, entry_windows, exit_windows = _symbol_windows(conn, symbol, window_sec)
+    plans = plan_time_matches(
+        rows, orders, entry_windows, exit_windows, reserved_ids, window_sec, tolerance, history_floor)
     matched = 0
     for row in rows:
         trade_id = int(row["id"])
