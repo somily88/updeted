@@ -1,6 +1,7 @@
 import os
 from execution import place_entry_order
-from trade_stats import initial_risk_usdt, r_multiple, load_strategy_stats, spot_unverified_sql, spot_verified_sql
+from trade_stats import (initial_risk_usdt, r_multiple, load_strategy_stats,
+                         spot_unverified_sql, spot_verified_sql, VERIFIED_SPOT_QUALITIES)
 import spot_fill_reconcile
 import spot_rules
 import secrets
@@ -186,7 +187,8 @@ def init_db():
                                        ('r_multiple', 'REAL'),
                                        ('entry_order_ids', 'TEXT'), ('exit_order_ids', 'TEXT'),
                                        ('stop_price', 'REAL'), ('reconcile_status', 'TEXT'),
-                                       ('reconcile_reason', 'TEXT'), ('reconciled_at', 'TEXT')]:
+                                       ('reconcile_reason', 'TEXT'), ('reconciled_at', 'TEXT'),
+                                       ('opened_at', 'TEXT')]:
                 if column not in trade_columns:
                     cursor.execute('ALTER TABLE trades ADD COLUMN {} {}'.format(column, definition))
         cleanup_legacy_spot_trades(DB_NAME)
@@ -401,18 +403,19 @@ def _note_exit_order(pos, sale):
 def record_closed_spot_trade(symbol, entry_price, exit_price, pnl_pct, status,
                               pnl_usdt=None, strategy=None, timeframe=None, cost_quality='unverified',
                               gross_pnl_usdt=None, fees_usdt=None, exit_reason=None, risk_usdt=None,
-                              entry_order_ids=None, exit_order_ids=None, stop_price=None):
+                              entry_order_ids=None, exit_order_ids=None, stop_price=None, opened_at=None):
     """Atomically record the realized trade and remove its persisted open position."""
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection(DB_NAME) as conn:
         conn.execute("""INSERT INTO trades
             (symbol, entry_price, exit_price, pnl_pct, status, timestamp, pnl_usdt, strategy, timeframe,
              cost_quality, gross_pnl_usdt, fees_usdt, exit_reason, risk_usdt, r_multiple,
-             entry_order_ids, exit_order_ids, stop_price)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             entry_order_ids, exit_order_ids, stop_price, opened_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, entry_price, exit_price, pnl_pct, status, now_str,
              pnl_usdt, strategy, timeframe, cost_quality, gross_pnl_usdt, fees_usdt, exit_reason,
-             risk_usdt, r_multiple(pnl_usdt, risk_usdt), entry_order_ids, exit_order_ids, stop_price))
+             risk_usdt, r_multiple(pnl_usdt, risk_usdt), entry_order_ids, exit_order_ids, stop_price,
+             opened_at))
         conn.execute("DELETE FROM open_positions WHERE symbol=?", (symbol,))
     try:
         rl_bandit.get_agent(DB_NAME).record_outcome('Spot', symbol, r_multiple(pnl_usdt, risk_usdt))
@@ -2249,7 +2252,8 @@ def check_and_close_positions():
                                       risk_usdt=initial_risk_usdt(entry_price, pos.get('risk_distance'), pnl_basis),
                                       entry_order_ids=pos.get('entry_order_ids'),
                                       exit_order_ids=pos.get('exit_order_ids'),
-                                      stop_price=pos.get('stop_price'))
+                                      stop_price=pos.get('stop_price'),
+                                      opened_at=pos.get('time'))
             send_telegram_message(
                 "{} ({})\n🪙 العملة: {}\n📥 سعر الدخول: {}\n📤 سعر الخروج: {}\n📊 النتيجة (بعد العمولة): {:+.2f}%\n🧭 الاستراتيجية: {} · {}{}".format(
                     title, status, symbol, entry_price, sale['price'], realized_pnl,
@@ -2896,13 +2900,14 @@ def get_performance_report(days=30, limit=5000):
                 WHERE timestamp >= ? ORDER BY id DESC LIMIT ?""", (cutoff, limit)).fetchall()
         for row in rows:
             quality = row[7] or "legacy_or_unverified"
-            if row[3] is None or quality not in ("actual", "estimated", "simulated"):
+            if row[3] is None or quality not in VERIFIED_SPOT_QUALITIES + ("simulated",):
                 unverified_spot_trades += 1
                 continue
             pnl = float(row[3])
             quality_label = {
                 "actual": "صافي بعد رسوم فعلية",
                 "estimated": "صافي بعد رسوم مقدرة",
+                "matched_by_time": "مطابقة بالوقت من تنفيذات Binance وتُحسب في المحقق",
                 "simulated": "محاكاة برسوم مقدرة",
                 "legacy_or_unverified": "سجل قديم أو تكلفة غير مؤكدة",
                 "unverified": "تكلفة غير مؤكدة",
@@ -3075,7 +3080,7 @@ def api_state():
     trades = [{
         'id': t[0], 'symbol': t[1], 'entry': t[2], 'exit': t[3], 'pnl_pct': t[4],
         'status': t[5], 'time': t[6], 'pnl_usdt': t[7], 'cost_quality': t[8],
-        'pnl_known': (t[7] is not None and t[8] in ('actual', 'estimated', 'simulated')),
+        'pnl_known': (t[7] is not None and t[8] in VERIFIED_SPOT_QUALITIES + ('simulated',)),
         'gross_pnl_usdt': t[9], 'fees_usdt': t[10], 'funding_usdt': None,
         'strategy': t[11] if len(t) > 11 else None, 'market_type': 'Spot'
     } for t in get_recent_trades(limit=50)]

@@ -1238,11 +1238,13 @@
           ['حالة الموزّع', cfg.enabled === false ? 'متوقف (الأرقام للعرض)' : (cfg.enabled ? 'مفعّل · سقف ' + pct(cfg.max_open_risk_pct, 1) : '—')]
         ];
         const unverified = safeNum(stats.unverified_spot_trades, 0);
+        const reconcile = stats.spot_reconcile || {};
+        const note = reconcile.warning_ar || (unverified > 0
+          ? 'تنبيه: ' + unverified + ' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.'
+          : '');
         body.innerHTML = '<div class="risk-grid">' + items.map((item) =>
           '<div class="risk-item"><span>' + esc(item[0]) + '</span><b>' + esc(item[1]) + '</b></div>'
-        ).join('') + '</div>' + (unverified > 0
-          ? '<div class="risk-note">تنبيه: ' + esc(String(unverified)) + ' صفقة سبوت غير موثّقة. ربحها غير داخل في المحقق حتى تُطابق التكلفة.</div>'
-          : '');
+        ).join('') + '</div>' + (note ? '<div class="risk-note">' + esc(note) + '</div>' : '');
         const chip = document.getElementById('strategyModeChip');
         if (chip) chip.textContent = modeLabel(params.strategy_mode);
       }
