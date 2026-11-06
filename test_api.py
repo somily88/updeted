@@ -226,6 +226,7 @@ def test_dashboard_bindings_and_neural_markup(app_module):
         'id="positionCards"',
         'id="sourcesList"',
         "مفتاح الإيقاف",
+        "syncFlow",
     ):
         assert marker in html, marker
     assert "futures.pnl_usdt" not in html
