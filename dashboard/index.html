@@ -925,7 +925,7 @@
         return Object.prototype.hasOwnProperty.call(STRAT_AR, key) ? STRAT_AR[key] : key;
       }
 
-      window.__SOBHI = window.__SOBHI || { nodeCount: 0, visualReady: false, waveEnergy: 0 };
+      window.__SOBHI = window.__SOBHI || { nodeCount: 0, visualReady: false, waveEnergy: 0, flowVersion: 0, flow: { pace: 0.34, scanning: false, links: [] } };
       let lastGood = null;
       let lastGoodAt = null;
       let linkMode = 'empty';
@@ -1718,6 +1718,72 @@
           if (btn) openPanel(openNodeId, btn, true);
           else hidePanel();
         }
+        syncFlow(data, rl);
+      }
+
+      function flowDecision(node, decisions) {
+        const list = Array.isArray(decisions) ? decisions : [];
+        for (let i = 0; i < list.length && i < 24; i++) {
+          const d = list[i];
+          if (node.kind === 'coin') {
+            const base = String(d.symbol || '').split('/')[0];
+            if (d.symbol === node.symbol || base === node.short) return d;
+          } else if (node.kind === 'strategy') {
+            const s = String(d.strategy || '');
+            if (s === node.strategy || s === stratLabel(node.strategy)) return d;
+          } else if (node.kind === 'rl') {
+            if (/معزز|تعلّم/.test(String(d.outcome || '') + String(d.reason || ''))) return d;
+          }
+        }
+        return null;
+      }
+
+      function linkTone(node, decision) {
+        if (node.kind === 'rl') return 'rl';
+        if (!decision) return (node.kind === 'coin' && node.on) ? 'entry' : 'idle';
+        const blob = String(decision.signal || '') + ' ' + String(decision.outcome || '');
+        if (/تم فتح|تم تنفيذ|إرسال/.test(blob) || /^(long|short|buy|sell)$/i.test(String(decision.signal || ''))) return 'entry';
+        if (isNoneSignal(decision) || /لا إشارة|مراقبة|انتظار/.test(blob)) return 'wait';
+        return 'idle';
+      }
+
+      function linkWeight(node, tone, decision, rl, scanning) {
+        let weight = scanning ? 0.46 : 0.26;
+        if (tone === 'entry') weight = Math.max(weight, decision ? 0.92 : 0.7);
+        else if (tone === 'wait') weight = Math.max(weight, 0.48);
+        else if (tone === 'rl') {
+          const mode = (rl && rl.mode) || 'off';
+          const recentN = rl && Array.isArray(rl.recent) ? rl.recent.length : 0;
+          let samples = 0;
+          if (rl && Array.isArray(rl.arms)) rl.arms.forEach((arm) => { samples += Number(arm.samples) || 0; });
+          weight = mode === 'live' ? 0.82 : mode === 'shadow' ? 0.58 : 0.3;
+          if (recentN) weight += Math.min(0.3, recentN / 16);
+          if (samples) weight += Math.min(0.18, samples / 180);
+        } else if (node.kind === 'filter') {
+          weight = node.on ? 0.36 : 0.24;
+        }
+        return Math.max(0.2, Math.min(1, weight));
+      }
+
+      function syncFlow(data, rl) {
+        const scanning = !!(data && data.scanner && data.scanner.status === 'running');
+        const decisions = data && data.decisions;
+        const meaningful = Array.isArray(decisions) ? decisions.filter((d) => rankDecision(d, false) >= 20).length : 0;
+        let pace = data ? 0.38 : 0.3;
+        if (scanning) pace += 0.48;
+        pace += Math.min(0.55, meaningful / 8);
+        if (data && data.scanner && data.scanner.last_completed_at) {
+          const age = (Date.now() - new Date(data.scanner.last_completed_at).getTime()) / 1000;
+          if (age >= 0 && age < 90) pace += 0.14;
+        }
+        const links = orbitNodes.map((node) => {
+          const decision = data ? flowDecision(node, decisions) : null;
+          const tone = linkTone(node, decision);
+          return { id: node.id, kind: node.kind, tone: tone, weight: linkWeight(node, tone, decision, rl, scanning) };
+        });
+        window.__SOBHI.flow = { pace: Math.min(1.7, pace), scanning: scanning, links: links };
+        window.__SOBHI.flowVersion = (window.__SOBHI.flowVersion || 0) + 1;
+        if (window.__SOBHI.requestFlowFrame) window.__SOBHI.requestFlowFrame();
       }
 
       function renderMetrics(data) {
@@ -2246,6 +2312,56 @@
         ctx.restore();
       }
 
+      const FLAT_TONE = { entry: '#3dffb0', wait: '#ffb020', rl: '#d38bff', idle: '#7ad4ff' };
+
+      function drawFlatLinks(ctx, w, h, t, animate) {
+        const flow = bus.flow;
+        const root = document.getElementById('neuralOrbit');
+        if (!flow || !root || !flow.links || !flow.links.length) return;
+        const sr = stage.getBoundingClientRect();
+        if (sr.width < 2 || sr.height < 2) return;
+        const sx = w / sr.width;
+        const sy = h / sr.height;
+        const x0 = w * 0.5;
+        const y0 = h * 0.46;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.lineWidth = 1.4;
+        flow.links.forEach((link, index) => {
+          const btn = root.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(link.id) : link.id) + '"]');
+          if (!btn) return;
+          const br = btn.getBoundingClientRect();
+          const x = (br.left + br.width / 2 - sr.left) * sx;
+          const y = (br.top + br.height / 2 - sr.top) * sy;
+          const x1 = x0 + (x - x0) * 0.84;
+          const y1 = y0 + (y - y0) * 0.84;
+          const speed = (flow.pace || 0.34) * (0.35 + link.weight * 0.8);
+          ctx.strokeStyle = FLAT_TONE[link.tone] || FLAT_TONE.idle;
+          ctx.globalAlpha = 0.35 + link.weight * 0.4;
+          ctx.setLineDash([7, 9]);
+          ctx.lineDashOffset = animate ? -((t * 28 * speed + index) % 32) : 0;
+          ctx.beginPath();
+          ctx.moveTo(x0 + (x1 - x0) * 0.2, y0 + (y1 - y0) * 0.2);
+          ctx.lineTo(x1, y1);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          const pulses = link.kind === 'filter' ? 1 : 2;
+          for (let p = 0; p < pulses; p++) {
+            const dirOut = p % 2 === 0;
+            const u = animate ? ((t * speed * (dirOut ? 0.55 : 0.42) + index * 0.13 + p * 0.47) % 1) : (0.35 + p * 0.3);
+            const along = dirOut ? u : (1 - u);
+            const px = x0 + (x1 - x0) * (0.2 + along * 0.8);
+            const py = y0 + (y1 - y0) * (0.2 + along * 0.8);
+            ctx.globalAlpha = 0.9;
+            ctx.fillStyle = dirOut ? (link.tone === 'rl' ? FLAT_TONE.rl : '#bff6ff') : (FLAT_TONE[link.tone] || FLAT_TONE.idle);
+            ctx.beginPath();
+            ctx.arc(px, py, link.weight > 0.7 ? 3.2 : 2.3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+        ctx.restore();
+      }
+
       function startFlat() {
         const ctx = flat.getContext('2d');
         const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -2259,6 +2375,7 @@
           if (bus.flatMode !== 'glow') {
             drawFloor(ctx, box.w, box.h);
             drawFlatOrb(ctx, box.w, box.h, t);
+            drawFlatLinks(ctx, box.w, box.h, t, !reduce);
           }
           if (!reduce) flatRaf = requestAnimationFrame(frame);
         }
@@ -2367,6 +2484,191 @@
           const amber = new THREE.PointLight(0xff9a32, 6, 16);
           amber.position.set(-1.6, 0.2, 1.2);
           scene.add(amber);
+
+          const FLOW_CAP = 48;
+          const FLOW_COLOR = {
+            entry: new THREE.Color(0x3dffb0),
+            wait: new THREE.Color(0xffb020),
+            rl: new THREE.Color(0xd38bff),
+            idle: new THREE.Color(0x7ad4ff),
+            out: new THREE.Color(0x9af6ff)
+          };
+          const flowGroup = new THREE.Group();
+          scene.add(flowGroup);
+          const MAX_LINKS = 12;
+          const linkLines = [];
+          for (let i = 0; i < MAX_LINKS; i++) {
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+            geo.setAttribute('lineDistance', new THREE.BufferAttribute(new Float32Array(2), 1));
+            const mat = new THREE.LineDashedMaterial({
+              color: 0x7ad4ff, transparent: true, opacity: 0.55,
+              dashSize: 0.16, gapSize: 0.22, blending: THREE.AdditiveBlending,
+              depthWrite: false, depthTest: false
+            });
+            const line = new THREE.Line(geo, mat);
+            line.visible = false;
+            line.frustumCulled = false;
+            line.renderOrder = 3;
+            flowGroup.add(line);
+            linkLines.push(line);
+          }
+          const dotCanvas = document.createElement('canvas');
+          dotCanvas.width = dotCanvas.height = 64;
+          const dotCtx = dotCanvas.getContext('2d');
+          const dotGrad = dotCtx.createRadialGradient(32, 32, 0, 32, 32, 32);
+          dotGrad.addColorStop(0, 'rgba(255,255,255,1)');
+          dotGrad.addColorStop(0.4, 'rgba(255,255,255,0.75)');
+          dotGrad.addColorStop(1, 'rgba(255,255,255,0)');
+          dotCtx.fillStyle = dotGrad;
+          dotCtx.fillRect(0, 0, 64, 64);
+          const pulsePos = new Float32Array(FLOW_CAP * 3);
+          const pulseCol = new Float32Array(FLOW_CAP * 3);
+          const pulseGeo = new THREE.BufferGeometry();
+          pulseGeo.setAttribute('position', new THREE.BufferAttribute(pulsePos, 3));
+          pulseGeo.setAttribute('color', new THREE.BufferAttribute(pulseCol, 3));
+          const pulseMat = new THREE.PointsMaterial({
+            size: 0.12, map: new THREE.CanvasTexture(dotCanvas), vertexColors: true,
+            transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending,
+            depthWrite: false, depthTest: false, sizeAttenuation: true
+          });
+          const pulsePoints = new THREE.Points(pulseGeo, pulseMat);
+          pulsePoints.frustumCulled = false;
+          pulsePoints.renderOrder = 4;
+          flowGroup.add(pulsePoints);
+          const pulseSlots = Array.from({ length: FLOW_CAP }, () => ({ link: -1, dir: 1, t: Math.random(), jitter: 0.75 + Math.random() * 0.5 }));
+          const raycaster = new THREE.Raycaster();
+          const ndc = new THREE.Vector2();
+          const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+          const hit = new THREE.Vector3();
+          const origin = new THREE.Vector3(0, 0.05, 0);
+          const full = new THREE.Vector3();
+          const start = new THREE.Vector3();
+          const end = new THREE.Vector3();
+          const tmpColor = new THREE.Color();
+          const segS = Array.from({ length: MAX_LINKS }, () => new THREE.Vector3());
+          const segE = Array.from({ length: MAX_LINKS }, () => new THREE.Vector3());
+          const segOn = new Array(MAX_LINKS).fill(false);
+          let seenFlow = -1;
+          let seenBucket = '';
+          const activeCap = () => (stage.clientWidth > 0 && stage.clientWidth < 760) ? 24 : FLOW_CAP;
+
+          function layoutPulses(links) {
+            const cap = activeCap();
+            const wanted = [];
+            links.forEach((link, index) => {
+              wanted.push({ link: index, dir: 1 });
+              if (link.kind !== 'filter') wanted.push({ link: index, dir: -1 });
+            });
+            const order = links.map((link, index) => index).sort((a, b) => links[b].weight - links[a].weight);
+            let extra = 0;
+            while (wanted.length < cap && links.length && extra < cap) {
+              const index = order[extra % order.length];
+              wanted.push({ link: index, dir: extra % 2 === 0 ? 1 : -1 });
+              extra += 1;
+            }
+            for (let i = 0; i < FLOW_CAP; i++) {
+              const slot = pulseSlots[i];
+              const next = i < cap ? wanted[i] : null;
+              if (!next) {
+                slot.link = -1;
+                continue;
+              }
+              if (slot.link !== next.link || slot.dir !== next.dir) slot.t = (i * 0.173) % 1;
+              slot.link = next.link;
+              slot.dir = next.dir;
+            }
+          }
+
+          function updateFlow(clock, advance) {
+            const flow = bus.flow || { links: [], pace: 0.34 };
+            const links = flow.links || [];
+            const nLinks = Math.min(links.length, MAX_LINKS);
+            const bucket = stage.clientWidth < 760 ? 'm' : 'd';
+            if ((bus.flowVersion || 0) !== seenFlow || bucket !== seenBucket) {
+              seenFlow = bus.flowVersion || 0;
+              seenBucket = bucket;
+              layoutPulses(links.slice(0, nLinks));
+            }
+            const stageRect = stage.getBoundingClientRect();
+            camera.updateMatrixWorld();
+            const root = document.getElementById('neuralOrbit');
+            let drawn = 0;
+            for (let i = 0; i < MAX_LINKS; i++) {
+              const line = linkLines[i];
+              const link = i < nLinks ? links[i] : null;
+              const btn = link && root ? root.querySelector('[data-id="' + (window.CSS && CSS.escape ? CSS.escape(link.id) : link.id) + '"]') : null;
+              segOn[i] = false;
+              if (!link || !btn || stageRect.width < 2) {
+                line.visible = false;
+                continue;
+              }
+              const br = btn.getBoundingClientRect();
+              ndc.set(
+                ((br.left + br.width / 2 - stageRect.left) / stageRect.width) * 2 - 1,
+                -(((br.top + br.height / 2 - stageRect.top) / stageRect.height) * 2 - 1)
+              );
+              raycaster.setFromCamera(ndc, camera);
+              const placed = raycaster.ray.intersectPlane(plane, hit);
+              full.copy(hit).sub(origin);
+              const len = full.length();
+              if (!placed || !Number.isFinite(len) || len < 0.25 || len > 14) {
+                line.visible = false;
+                continue;
+              }
+              start.copy(origin).addScaledVector(full, 0.2);
+              end.copy(origin).addScaledVector(full, 0.86);
+              segS[i].copy(start);
+              segE[i].copy(end);
+              segOn[i] = true;
+              const pos = line.geometry.attributes.position;
+              pos.setXYZ(0, start.x, start.y, start.z);
+              pos.setXYZ(1, end.x, end.y, end.z);
+              pos.needsUpdate = true;
+              const dash = Math.max(0.08, len * 0.055);
+              const gap = dash * 1.45;
+              line.material.dashSize = dash;
+              line.material.gapSize = gap;
+              line.material.color.copy(FLOW_COLOR[link.tone] || FLOW_COLOR.idle);
+              line.material.opacity = 0.34 + link.weight * 0.45;
+              const dist = line.geometry.attributes.lineDistance;
+              const shift = advance ? (clock * (0.25 + link.weight) * (flow.pace || 0.4)) % (dash + gap) : 0;
+              dist.setX(0, shift);
+              dist.setX(1, shift + start.distanceTo(end));
+              dist.needsUpdate = true;
+              line.visible = true;
+              drawn += 1;
+            }
+            bus.flowDrawn = drawn;
+            const pace = flow.pace || 0.34;
+            const dt = advance ? 0.016 : 0;
+            for (let i = 0; i < FLOW_CAP; i++) {
+              const slot = pulseSlots[i];
+              const link = slot.link >= 0 && slot.link < nLinks && segOn[slot.link] ? links[slot.link] : null;
+              if (!link) {
+                pulsePos[i * 3 + 1] = -40;
+                pulseCol[i * 3] = pulseCol[i * 3 + 1] = pulseCol[i * 3 + 2] = 0;
+                continue;
+              }
+              const speed = pace * (0.28 + link.weight * 0.9) * slot.jitter * (slot.dir === 1 ? 1 : 0.8);
+              if (advance) slot.t = (slot.t + speed * dt) % 1;
+              const along = slot.dir === 1 ? slot.t : (1 - slot.t);
+              const a = segS[slot.link];
+              const b = segE[slot.link];
+              pulsePos[i * 3] = a.x + (b.x - a.x) * along;
+              pulsePos[i * 3 + 1] = a.y + (b.y - a.y) * along;
+              pulsePos[i * 3 + 2] = a.z + (b.z - a.z) * along;
+              const outbound = slot.dir === 1;
+              tmpColor.copy(outbound ? (link.tone === 'rl' ? FLOW_COLOR.rl : FLOW_COLOR.out) : (FLOW_COLOR[link.tone] || FLOW_COLOR.idle));
+              pulseCol[i * 3] = tmpColor.r;
+              pulseCol[i * 3 + 1] = tmpColor.g;
+              pulseCol[i * 3 + 2] = tmpColor.b;
+            }
+            pulseGeo.attributes.position.needsUpdate = true;
+            pulseGeo.attributes.color.needsUpdate = true;
+            pulseMat.size = stage.clientWidth < 760 ? 0.18 : 0.11;
+          }
+
           const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
           let clock = 0;
           let glRaf = 0;
@@ -2401,6 +2703,7 @@
               });
               pointsGeo.attributes.position.needsUpdate = true;
             }
+            updateFlow(clock, !reduce);
             renderer.render(scene, camera);
             if (!reduce) glRaf = requestAnimationFrame(loop);
           }
@@ -2425,7 +2728,14 @@
             glCanvas.style.display = 'none';
             bus.flatMode = 'full';
           });
+          bus.requestFlowFrame = () => {
+            if (!glRaf && glVisible && !document.hidden) glRaf = requestAnimationFrame(loop);
+          };
           if (!reduce) glRaf = requestAnimationFrame(loop);
+          else {
+            updateFlow(0, false);
+            renderer.render(scene, camera);
+          }
           return true;
         } catch (err) {
           if (renderer) {
