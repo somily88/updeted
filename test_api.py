@@ -177,6 +177,15 @@ def test_dashboard_icons_served_with_auth(app_module):
         assert marker in html
 
 
+def test_state_exposes_boot_and_kill_switch(app_module):
+    data = _client(app_module).get("/api/state", headers=_auth()).json()
+    assert data["boot_at"]
+    switch = data["kill_switch"]
+    assert set(switch) >= {"enabled", "tripped", "reason"}
+    assert switch["tripped"] in (True, False)
+    assert switch["enabled"] in (True, False)
+
+
 def test_state_trades_include_strategy_and_market(app_module, monkeypatch):
     monkeypatch.setattr(app_module.exchange, "fetch_balance", lambda: {"free": {"USDT": 10}, "total": {"USDT": 10}})
     with app_module.get_db_connection(app_module.DB_NAME) as conn:
@@ -206,11 +215,17 @@ def test_dashboard_bindings_and_neural_markup(app_module):
         "متاح",
         "unverified_spot_trades",
         "/api/rl",
+        "/api/trading",
         "trend_pullback",
         "donchian_breakout",
         'id="riskCard"',
         'id="neuralCard"',
         'id="rlPanel"',
+        'id="emergencyCard"',
+        'id="listenPanel"',
+        'id="positionCards"',
+        'id="sourcesList"',
+        "مفتاح الإيقاف",
     ):
         assert marker in html, marker
     assert "futures.pnl_usdt" not in html

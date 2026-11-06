@@ -3,23 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>صبحي تريدر | لوحة التحكم</title>
+    <meta name="theme-color" content="#020814" />
+    <title>صبحي تريدر | مركز القيادة</title>
     <style>
       :root {
-        --bg: #08111f;
-        --bg-2: #101b2d;
-        --panel: rgba(17, 25, 38, 0.82);
-        --panel-strong: rgba(22, 31, 47, 0.96);
-        --line: rgba(148, 163, 184, 0.18);
-        --text: #edf3ff;
-        --muted: #9aa9bf;
-        --brand-1: #7c5cff;
-        --brand-2: #22c55e;
-        --brand-3: #f59e0b;
-        --danger: #ef4444;
-        --cyan: #38bdf8;
-        --shadow: 0 20px 50px rgba(6, 10, 18, 0.5);
-        --radius: 22px;
+        --bg: #020814;
+        --text: #e7f6ff;
+        --muted: #8eb6d4;
+        --line: rgba(64, 214, 255, 0.45);
+        --line-soft: rgba(90, 190, 255, 0.2);
+        --cyan: #3ee7ff;
+        --green: #3dffb0;
+        --amber: #ffc14d;
+        --danger: #ff4d5e;
+        --orange: #ff8a2a;
+        --shadow: 0 0 0 1px rgba(120, 220, 255, 0.06) inset, 0 0 22px rgba(0, 160, 255, 0.12);
       }
 
       @font-face {
@@ -30,655 +28,577 @@
 
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; }
-      body { overflow-x: hidden; }
       body {
         margin: 0;
         min-height: 100vh;
+        color: var(--text);
+        overflow-x: clip;
         font-family: Cairo, "Segoe UI", Tahoma, "Noto Sans Arabic", sans-serif;
         background:
-          radial-gradient(circle at top left, rgba(124, 92, 255, 0.2), transparent 28%),
-          radial-gradient(circle at top right, rgba(34, 197, 94, 0.16), transparent 25%),
-          linear-gradient(180deg, #07111d 0%, #0d1726 100%);
-        color: var(--text);
+          radial-gradient(ellipse 70% 48% at 50% 38%, rgba(0, 120, 255, 0.16), transparent 60%),
+          radial-gradient(ellipse 40% 30% at 8% 0%, rgba(0, 190, 255, 0.12), transparent 46%),
+          linear-gradient(180deg, #04122e 0%, #020814 48%, #01040e 100%);
       }
-
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image:
+          linear-gradient(rgba(0, 180, 255, 0.045) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 180, 255, 0.045) 1px, transparent 1px);
+        background-size: 56px 56px;
+        mask-image: radial-gradient(ellipse at 50% 30%, #000 15%, transparent 78%);
+      }
       a { color: inherit; text-decoration: none; }
-      button, input { font: inherit; }
+      button, input { font: inherit; color: inherit; }
+      a:focus-visible, button:focus-visible { outline: 2px solid #7af4ff; outline-offset: 2px; }
+      ::selection { background: rgba(0, 200, 255, 0.35); }
 
-      .shell {
-        max-width: 1440px;
-        margin: 0 auto;
-        padding: 24px 20px 40px;
-      }
+      .shell { position: relative; z-index: 1; max-width: 1680px; margin: 0 auto; padding: 12px 14px 28px; }
 
       .topbar {
+        direction: ltr;
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 18px;
-        padding: 16px 20px;
-        margin-bottom: 20px;
+        gap: 14px;
+        padding: 10px 14px;
+        margin-bottom: 12px;
         border: 1px solid var(--line);
-        background: rgba(13, 20, 30, 0.7);
-        backdrop-filter: blur(18px);
-        border-radius: 18px;
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(8, 28, 68, 0.82), rgba(3, 12, 32, 0.9));
         box-shadow: var(--shadow);
       }
-
-      .brand {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-      }
-
+      .brand { display: flex; align-items: center; gap: 12px; direction: ltr; min-width: 0; }
+      .brand-copy { direction: rtl; min-width: 0; }
       .logo {
-        width: 42px;
-        height: 42px;
-        border-radius: 14px;
-        display: grid;
-        place-items: center;
-        background: linear-gradient(135deg, var(--brand-1), #3b82f6 55%, #22d3ee);
+        width: 42px; height: 42px; display: grid; place-items: center;
+        border-radius: 12px;
+        background: radial-gradient(circle at 40% 35%, #9aefff, #1278ff 45%, #062044);
+        border: 1px solid rgba(160, 240, 255, 0.7);
+        box-shadow: 0 0 16px rgba(0, 200, 255, 0.55);
         font-weight: 800;
-        font-size: 18px;
-        box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
       }
-
-      .brand h1 {
-        margin: 0;
-        font-size: 1.1rem;
-      }
-
-      .brand small {
+      .brand h1 { margin: 0; font-size: 1.05rem; letter-spacing: 0.02em; }
+      .brand small { display: block; color: var(--muted); font-weight: 700; }
+      .clock { direction: ltr; text-align: left; }
+      .clock b {
         display: block;
-        color: var(--muted);
-        font-weight: 600;
+        font-size: 1.25rem;
+        letter-spacing: 0.08em;
+        font-variant-numeric: tabular-nums;
+        text-shadow: 0 0 12px rgba(0, 220, 255, 0.45);
       }
-
-      .header-meta {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        justify-content: flex-end;
+      .clock span { display: block; color: var(--muted); font-size: 0.72rem; }
+      .nav { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; direction: rtl; }
+      .nav a {
+        color: #b7e4f6;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        font-weight: 700;
       }
+      .nav a.on, .nav a:hover {
+        color: #fff;
+        border-color: rgba(0, 220, 255, 0.55);
+        box-shadow: 0 0 12px rgba(0, 200, 255, 0.28);
+        background: rgba(0, 140, 255, 0.12);
+      }
+      .header-meta { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; direction: rtl; }
 
-      .pill {
+      .pill, .chip {
         display: inline-flex;
         align-items: center;
         gap: 8px;
-        padding: 8px 12px;
         border-radius: 999px;
-        border: 1px solid var(--line);
-        background: rgba(255,255,255,0.02);
-        color: var(--muted);
-        font-size: 0.8rem;
-        font-weight: 700;
+        border: 1px solid var(--line-soft);
+        font-weight: 800;
       }
-
+      .pill { padding: 7px 12px; color: var(--muted); font-size: 0.78rem; background: rgba(0, 20, 40, 0.35); }
       .pill::before {
         content: "";
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
+        width: 8px; height: 8px; border-radius: 50%;
         background: currentColor;
-        box-shadow: 0 0 12px currentColor;
+        box-shadow: 0 0 10px currentColor;
       }
+      .pill.live { color: var(--green); border-color: rgba(61, 255, 176, 0.45); }
+      .pill.warn { color: var(--amber); border-color: rgba(255, 193, 77, 0.5); }
+      .pill.danger { color: var(--danger); border-color: rgba(255, 77, 94, 0.55); }
+      .pill.neutral { color: var(--cyan); }
+      .chip { padding: 4px 8px; font-size: 0.68rem; background: rgba(0, 30, 60, 0.45); }
+      .chip.green { color: var(--green); background: rgba(61, 255, 176, 0.1); }
+      .chip.red { color: var(--danger); background: rgba(255, 77, 94, 0.12); }
+      .chip.cyan { color: var(--cyan); background: rgba(62, 231, 255, 0.1); }
+      .chip.orange { color: var(--amber); background: rgba(255, 193, 77, 0.12); }
 
-      .pill.live { color: var(--brand-2); }
-      .pill.warn { color: var(--brand-3); }
-
-      .reconcile-warn {
-        margin: 0 0 18px;
-        padding: 12px 16px;
+      .offline-banner, .reconcile-warn {
+        margin: 0 0 12px;
+        padding: 12px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(245, 158, 11, 0.45);
-        background: rgba(245, 158, 11, 0.12);
-        color: #fcd34d;
         font-weight: 700;
-        line-height: 1.7;
+        line-height: 1.65;
+      }
+      .offline-banner {
+        display: none;
+        border: 1px solid rgba(255, 193, 77, 0.55);
+        background: rgba(90, 50, 8, 0.72);
+        color: #ffe3a3;
+      }
+      .offline-banner.show { display: block; }
+      .reconcile-warn {
+        border: 1px solid rgba(255, 193, 77, 0.45);
+        background: rgba(255, 170, 40, 0.12);
+        color: #ffd98a;
       }
       .reconcile-warn[hidden] { display: none; }
-      .pill.danger { color: var(--danger); }
-      .pill.neutral { color: var(--cyan); }
 
-      .content {
+      .hud {
+        direction: ltr;
         display: grid;
-        gap: 18px;
+        grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(280px, 340px);
+        gap: 12px;
+        align-items: start;
       }
-
-      .stats-grid {
+      .col { direction: rtl; display: grid; gap: 12px; min-width: 0; }
+      .wide {
+        direction: rtl;
         display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: 18px;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
       }
+      #rlPanel { margin-top: 12px; }
 
-      .card {
+      .hud-card, .card {
         position: relative;
-        overflow: hidden;
-        background: linear-gradient(180deg, rgba(17,25,38,0.88), rgba(12,18,29,0.85));
         border: 1px solid var(--line);
-        border-radius: var(--radius);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(8, 32, 74, 0.72), rgba(3, 12, 32, 0.9));
         box-shadow: var(--shadow);
+        min-width: 0;
       }
-
-      .card::after {
-        content: "";
-        position: absolute;
-        inset: 0 auto auto 0;
-        width: 100%;
-        height: 1px;
-        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
-      }
-
-      .stat-card {
-        padding: 18px 18px 16px;
-      }
-
-      .stat-card.hero {
-        background: linear-gradient(135deg, rgba(124,92,255,0.22), rgba(17,25,38,0.92));
-      }
-
-      .label-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 10px;
-        color: var(--muted);
-        font-size: 0.72rem;
-        margin-bottom: 8px;
-      }
-
-      .value {
-        font-size: clamp(1.5rem, 2vw, 2.2rem);
-        font-weight: 800;
-        letter-spacing: -0.04em;
-      }
-
-      .delta {
-        font-size: 0.8rem;
-        color: var(--muted);
-        margin-top: 8px;
-      }
-
-      .up { color: var(--brand-2); }
-      .down { color: var(--danger); }
-      .neutral { color: var(--cyan); }
-
-      .two-col {
-        display: grid;
-        grid-template-columns: 1.3fr 0.7fr;
-        gap: 18px;
-      }
-
-      .panel {
-        padding: 20px;
-      }
-
+      .panel { padding: 14px; }
       .panel-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 16px;
-      }
-
-      .panel-header h2 {
-        margin: 0;
-        font-size: 1.08rem;
-      }
-
-      .market-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .market-tile {
-        padding: 14px 12px;
-        border-radius: 16px;
-        border: 1px solid var(--line);
-        background: rgba(255,255,255,0.02);
-      }
-
-      .market-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
+        gap: 10px;
         margin-bottom: 10px;
       }
-
-      .coin-tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: 700;
-      }
-
-      .coin-icon {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        font-size: 0.72rem;
-        color: white;
-        background: linear-gradient(135deg, #f59e0b, #f97316);
-      }
-
-      .price {
-        font-weight: 800;
-        letter-spacing: -0.02em;
-      }
-
-      .signal-bar {
-        height: 8px;
-        border-radius: 999px;
-        background: rgba(148,163,184,0.12);
-        overflow: hidden;
-      }
-
-      .signal-fill {
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #22c55e, #38bdf8, #7c5cff);
-      }
-
-      .account-stack {
-        display: grid;
-        gap: 12px;
-      }
-
-      .account-box {
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        background: rgba(255,255,255,0.02);
-        padding: 14px 14px 12px;
-      }
-
-      .account-heading {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .account-heading strong {
-        font-size: 0.95rem;
-      }
-
-      .mini-stat {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-        color: var(--muted);
-        font-size: 0.78rem;
-      }
-
-      .mini-stat b {
-        display: block;
-        margin-top: 4px;
-        color: var(--text);
-        font-size: 0.95rem;
-      }
-
-      .three-col {
-        display: grid;
-        grid-template-columns: 1.2fr 0.8fr;
-        gap: 18px;
-      }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      th, td {
-        text-align: right;
-        padding: 12px 10px;
-        border-bottom: 1px solid var(--line);
-      }
-
-      th {
-        color: var(--muted);
-        font-size: 0.74rem;
-        font-weight: 700;
-      }
-
-      td {
-        font-size: 0.82rem;
-      }
-
-      .symbol {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-weight: 700;
-      }
-
-      .chip {
-        display: inline-block;
-        padding: 5px 9px;
-        border-radius: 999px;
-        border: 1px solid var(--line);
-        font-size: 0.68rem;
-        font-weight: 700;
-        background: rgba(255,255,255,0.02);
-      }
-
-      .chip.green { background: rgba(34,197,94,0.12); color: var(--brand-2); }
-      .chip.red { background: rgba(239,68,68,0.12); color: var(--danger); }
-      .chip.cyan { background: rgba(56,189,248,0.1); color: var(--cyan); }
-      .chip.orange { background: rgba(245,158,11,0.12); color: var(--brand-3); }
-
-      .timeline {
-        display: grid;
-        gap: 12px;
-      }
-
-      .decision {
-        padding: 12px 14px;
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        background: rgba(255,255,255,0.02);
-      }
-
-      .decision-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        margin-bottom: 7px;
-        font-weight: 700;
-      }
-
-      .decision-meta {
-        color: var(--muted);
-        font-size: 0.72rem;
-        line-height: 1.7;
-      }
-
-      .news-box {
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        background: rgba(255,255,255,0.02);
-        padding: 14px;
-      }
-
-      .news-list {
-        display: grid;
-        gap: 8px;
-        margin-top: 12px;
-      }
-
-      .news-item {
-        padding: 10px 12px;
-        border-radius: 12px;
-        background: rgba(255,255,255,0.02);
-        color: var(--muted);
-        line-height: 1.6;
-      }
-
-      .news-item strong {
-        color: var(--text);
-      }
-
+      .panel-header h2, .listen h2, .core-copy h2 { margin: 0; font-size: 0.98rem; color: #e9f8ff; }
+      .tiny { font-size: 0.72rem; line-height: 1.55; }
       .muted { color: var(--muted); }
-      .tiny { font-size: 0.7rem; }
-      .table-wrap { overflow-x: auto; }
+      .up { color: var(--green); }
+      .down { color: var(--danger); }
+      .neutral { color: var(--cyan); }
 
-      .offline-banner {
-        display: none;
-        margin-bottom: 16px;
-        padding: 12px 14px;
-        border-radius: 14px;
-        border: 1px solid rgba(245, 158, 11, 0.55);
-        background: rgba(120, 53, 15, 0.55);
-        color: #fde68a;
-        font-weight: 700;
-        line-height: 1.6;
+      .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .stat-card { padding: 10px 12px; }
+      .stat-card.hero {
+        background: linear-gradient(160deg, rgba(0, 140, 255, 0.22), rgba(4, 16, 40, 0.9));
       }
-      .offline-banner.show { display: block; }
-
-      .decision.dim { opacity: 0.55; }
-      .decision-time { color: var(--muted); }
-
-      .risk-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 10px;
+      .label-row {
+        display: flex; justify-content: space-between; gap: 8px;
+        color: var(--muted); font-size: 0.7rem; margin-bottom: 4px;
       }
-      .risk-item {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 10px 12px;
-        background: rgba(255,255,255,0.02);
+      .value {
+        direction: ltr;
+        text-align: right;
+        font-size: 1.2rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: 0;
       }
-      .risk-item span { display: block; color: var(--muted); font-size: 0.75rem; margin-bottom: 4px; }
-      .risk-item b { display: block; line-height: 1.45; font-size: 0.92rem; }
-      .risk-note {
-        margin-top: 12px;
-        padding: 10px 12px;
-        border-radius: 12px;
-        background: rgba(245, 158, 11, 0.14);
-        color: #fcd34d;
-        line-height: 1.6;
+      .delta {
+        margin-top: 4px; color: var(--muted); font-size: 0.68rem; line-height: 1.45;
+        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
       }
 
-      .rl-kpis {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin: 12px 0;
+      .health-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 10px; }
+      .health-copy { min-width: 0; flex: 1; }
+      .ring {
+        --p: 0;
+        width: 108px; height: 108px; flex: 0 0 auto;
+        border-radius: 50%;
+        display: grid; place-items: center;
+        background: conic-gradient(from -90deg, var(--cyan) calc(var(--p) * 1%), rgba(255,255,255,0.08) 0);
+        box-shadow: 0 0 22px rgba(0, 200, 255, 0.35);
       }
-      .rl-kpis div {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 10px 12px;
-        background: rgba(255,255,255,0.03);
+      .ring.warn { background: conic-gradient(from -90deg, var(--amber) calc(var(--p) * 1%), rgba(255,255,255,0.08) 0); }
+      .ring.bad { background: conic-gradient(from -90deg, var(--danger) calc(var(--p) * 1%), rgba(255,255,255,0.08) 0); }
+      .ring span {
+        width: 82px; height: 82px; border-radius: 50%;
+        display: grid; place-items: center;
+        background: #041226;
+        font-weight: 800; font-size: 1.15rem;
+        font-variant-numeric: tabular-nums;
       }
-      .rl-kpis span { display: block; color: var(--muted); font-size: 0.75rem; }
-      .rl-kpis b { display: block; margin-top: 4px; }
-
-      .neural {
-        padding: 0;
-        border-color: rgba(90, 180, 255, 0.35);
-        background:
-          radial-gradient(120% 80% at 50% 30%, rgba(18, 60, 140, 0.55), transparent 46%),
-          linear-gradient(180deg, #07101f 0%, #040712 100%);
-      }
-      .neural-head, .neural-metrics, .neural-timeline, .neural-ticker { position: relative; z-index: 2; }
-      .neural-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 12px;
-        align-items: flex-end;
-        padding: 18px 18px 0;
-      }
-      .neural-head h2 { margin: 0; font-size: 1.2rem; color: #eaf6ff; text-shadow: 0 0 18px rgba(80, 190, 255, 0.45); }
-      .neural-head p { margin: 6px 0 0; color: #9ec4e4; font-size: 0.82rem; }
-      .neural-metrics {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 8px;
-        padding: 12px 14px 0;
-      }
-      .neural-metrics div {
-        border: 1px solid rgba(120, 190, 255, 0.22);
-        border-radius: 12px;
-        padding: 7px 8px;
-        background: rgba(4, 12, 28, 0.55);
+      .kv, .op, .src {
+        display: flex; justify-content: space-between; gap: 10px;
+        padding: 6px 0;
+        border-top: 1px solid var(--line-soft);
+        font-size: 0.78rem;
         min-width: 0;
       }
-      .neural-metrics span { display: block; color: #8fb4d6; font-size: 0.68rem; }
-      .neural-metrics b { display: block; margin-top: 2px; color: #f3fbff; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .kv span, .op span, .src span { color: var(--muted); flex: 0 0 auto; }
+      .kv b, .op b, .src b { min-width: 0; text-align: left; overflow-wrap: break-word; }
+      .account-stack { display: grid; gap: 8px; margin-top: 8px; }
+      .account-box {
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        padding: 10px;
+        background: rgba(0, 16, 40, 0.35);
+      }
+      .account-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+      .mini-stat { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; color: var(--muted); font-size: 0.72rem; }
+      .mini-stat b { display: block; margin-top: 2px; color: var(--text); font-size: 0.92rem; direction: ltr; text-align: right; }
+
+      .src-list { display: grid; }
+      .src i {
+        width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex: 0 0 auto;
+        background: #4a6278;
+      }
+      .src { align-items: flex-start; }
+      .src i.on { background: var(--green); box-shadow: 0 0 8px var(--green); }
+      .src i.off { background: var(--danger); box-shadow: 0 0 8px rgba(255, 77, 94, 0.45); }
+      .alert {
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        padding: 8px 10px;
+        margin-top: 8px;
+        background: rgba(0, 20, 40, 0.35);
+      }
+      .alert b { display: block; }
+      .alert span { display: block; color: var(--muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+      .alert.danger { border-color: rgba(255, 77, 94, 0.55); }
+      .alert.warn { border-color: rgba(255, 193, 77, 0.5); }
+
+      .neural { overflow: hidden; }
+      .neural-head, .neural-metrics { position: relative; z-index: 2; }
+      .neural-head {
+        display: flex; justify-content: space-between; gap: 10px; align-items: flex-end;
+        padding: 14px 14px 0;
+      }
+      .neural-head p { margin: 4px 0 0; color: var(--muted); font-size: 0.78rem; }
+      .neural-metrics {
+        display: flex;
+        gap: 6px;
+        padding: 8px 12px 0;
+        overflow-x: auto;
+      }
+      .neural-metrics div {
+        flex: 1 0 88px;
+        border: 1px solid var(--line-soft);
+        border-radius: 10px;
+        padding: 6px 8px;
+        background: rgba(2, 12, 30, 0.55);
+        min-width: 0;
+      }
+      .neural-metrics span { display: block; color: var(--muted); font-size: 0.66rem; }
+      .neural-metrics b {
+        display: block; margin-top: 2px; font-size: 0.82rem;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
       .neural-stage {
         position: relative;
         direction: ltr;
-        height: 640px;
-        margin-top: 10px;
+        height: 500px;
+        margin-top: 8px;
         overflow: hidden;
         background:
-          radial-gradient(circle at 50% 42%, rgba(150, 210, 255, 0.28), transparent 28%),
-          radial-gradient(circle at 50% 78%, rgba(20, 60, 140, 0.35), transparent 42%),
-          #030712;
+          radial-gradient(circle at 50% 46%, rgba(90, 190, 255, 0.22), transparent 26%),
+          radial-gradient(ellipse at 50% 74%, rgba(0, 110, 220, 0.22), transparent 46%),
+          #030918;
       }
       #neuralGl, #neuralFlat {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        display: block;
-        direction: ltr;
+        position: absolute; inset: 0; width: 100%; height: 100%; display: block;
       }
       #neuralGl { z-index: 1; }
       #neuralFlat { z-index: 0; }
-      .neural-ring {
-        position: absolute;
-        left: 50%;
-        top: 47%;
-        width: min(78%, 860px);
-        height: min(70%, 480px);
+      .holo, .neural-ring, .neural-scan { position: absolute; pointer-events: none; }
+      .holo {
+        left: 50%; top: 70%; z-index: 0;
+        width: min(86%, 640px); height: 24%;
         transform: translate(-50%, -50%);
-        border: 1px solid rgba(120, 190, 255, 0.22);
         border-radius: 50%;
-        box-shadow: 0 0 40px rgba(40, 140, 255, 0.12);
-        pointer-events: none;
-        z-index: 2;
+        border: 1px solid rgba(80, 210, 255, 0.38);
+        background: radial-gradient(ellipse at center, rgba(0, 170, 255, 0.2), transparent 68%);
+        box-shadow: 0 0 36px rgba(0, 160, 255, 0.28);
+      }
+      .holo::before, .holo::after {
+        content: ""; position: absolute; border-radius: 50%;
+        border: 1px solid rgba(90, 210, 255, 0.28);
+      }
+      .holo::before { inset: 14% 10%; }
+      .holo::after { inset: 28% 18%; border-color: rgba(255, 150, 50, 0.35); }
+      .neural-ring {
+        left: 50%; top: 46%; z-index: 2;
+        width: min(68%, 500px); height: min(46%, 260px);
+        transform: translate(-50%, -50%);
+        border: 1px solid rgba(130, 230, 255, 0.32);
+        border-radius: 50%;
+        box-shadow: 0 0 24px rgba(0, 180, 255, 0.16);
+      }
+      .neural-ring.orange {
+        width: min(78%, 580px); height: min(30%, 180px); top: 49%;
+        border-color: rgba(255, 150, 40, 0.5);
+        transform: translate(-50%, -50%) rotate(-16deg);
       }
       .neural-scan {
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        z-index: 2;
+        inset: 0; z-index: 2;
         background: repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 3px);
-        mix-blend-mode: overlay;
-        opacity: 0.35;
+        mix-blend-mode: overlay; opacity: 0.35;
       }
-      .neural-orbit { position: absolute; inset: 0; z-index: 3; direction: ltr; }
+      .core-label {
+        position: absolute; left: 50%; top: 44%; z-index: 4;
+        transform: translate(-50%, -50%);
+        text-align: center; pointer-events: none; direction: rtl;
+        text-shadow: 0 0 16px rgba(80, 210, 255, 0.75);
+      }
+      .core-label span, .core-label em { display: block; font-style: normal; color: #d7f4ff; font-size: 0.85rem; }
+      .core-label strong {
+        display: block;
+        font-size: clamp(2rem, 4vw, 3.2rem);
+        letter-spacing: 0.08em;
+        color: #f7fdff;
+      }
+      .neural-orbit { position: absolute; inset: 0; z-index: 5; direction: ltr; }
       .agent {
         position: absolute;
-        width: 76px;
-        height: 76px;
-        margin: -38px 0 0 -38px;
+        width: 74px; height: 74px; margin: -37px 0 0 -37px;
         border-radius: 50%;
-        border: 1px solid rgba(140, 210, 255, 0.75);
-        background: radial-gradient(circle at 50% 40%, rgba(18, 42, 84, 0.35), rgba(4, 10, 24, 0.88));
-        box-shadow: 0 0 18px rgba(56, 189, 248, 0.35), inset 0 0 12px rgba(80, 180, 255, 0.28);
-        color: #e7f6ff;
-        cursor: pointer;
-        display: grid;
-        place-items: center;
-        text-align: center;
-        padding: 6px;
-        line-height: 1.2;
+        border: 1px solid rgba(140, 230, 255, 0.8);
+        background: radial-gradient(circle at 50% 40%, rgba(20, 60, 110, 0.35), rgba(3, 10, 28, 0.9));
+        box-shadow: 0 0 16px rgba(56, 210, 255, 0.4), inset 0 0 12px rgba(80, 190, 255, 0.28);
+        color: #e7f6ff; cursor: pointer;
+        display: grid; place-items: center; text-align: center; padding: 6px; line-height: 1.2;
+        direction: rtl;
       }
-      .agent { direction: rtl; }
       .agent strong { font-size: 11px; }
-      .agent small { display: block; color: #9ad7ff; font-size: 9px; margin-top: 2px; }
-      .agent.on { box-shadow: 0 0 22px rgba(80, 220, 255, 0.7); }
+      .agent small { display: block; color: #9adfff; font-size: 10px; margin-top: 2px; }
+      .agent.on { box-shadow: 0 0 20px rgba(80, 230, 255, 0.75); }
       .agent.off { opacity: 0.62; }
-      .agent.kind-rl { border-color: #d38bff; box-shadow: 0 0 16px rgba(190, 120, 255, 0.45); }
+      .agent.kind-rl { border-color: #d38bff; }
       .agent.kind-filter { border-color: #ff7ad9; }
       .agent-panel {
-        position: absolute;
-        z-index: 6;
-        width: 270px;
-        max-height: 46%;
-        overflow: auto;
-        background: rgba(6, 12, 28, 0.9);
-        border: 1px solid rgba(120, 210, 255, 0.5);
-        border-radius: 16px;
-        padding: 12px 14px;
-        color: #e7f4ff;
-        box-shadow: 0 12px 40px rgba(0,0,0,0.45), 0 0 24px rgba(40, 140, 255, 0.22);
-        backdrop-filter: blur(8px);
+        position: absolute; z-index: 6; width: 270px; max-height: 46%; overflow: auto;
+        background: rgba(4, 14, 36, 0.94);
+        border: 1px solid rgba(120, 220, 255, 0.55);
+        border-radius: 14px; padding: 12px 14px; color: #e7f6ff;
+        box-shadow: 0 12px 36px rgba(0,0,0,0.45), 0 0 20px rgba(0, 160, 255, 0.25);
       }
       .agent-panel[hidden] { display: none !important; }
       .agent-panel h3 { margin: 0 0 6px; font-size: 0.95rem; }
       .agent-panel .row { display: flex; justify-content: space-between; gap: 8px; font-size: 0.75rem; padding: 3px 0; color: #b7d4ea; }
       .agent-panel .row b { color: #fff; text-align: left; }
-      .agent-panel ul { margin: 8px 0 0; padding: 0 16px 0 0; font-size: 0.72rem; color: #d5e8f8; }
-      .agent-panel li { margin: 4px 0; white-space: normal; overflow-wrap: anywhere; }
+      .agent-panel ul { margin: 8px 0 0; padding: 0 16px 0 0; font-size: 0.72rem; }
+      .agent-panel li { margin: 4px 0; overflow-wrap: anywhere; }
       .strength { height: 6px; border-radius: 99px; background: rgba(255,255,255,0.08); margin-top: 8px; overflow: hidden; }
       .strength i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #d38bff); }
-      .neural-timeline {
-        display: flex;
-        gap: 14px;
-        overflow-x: auto;
-        padding: 8px 14px 4px;
-        border-top: 1px solid rgba(80, 160, 255, 0.2);
+
+      .listen { padding: 12px; }
+      .listen-grid {
+        display: grid;
+        grid-template-columns: minmax(140px, 190px) minmax(0, 1fr) 110px;
+        gap: 10px;
+        align-items: center;
       }
-      .tick { min-width: 92px; text-align: center; font-size: 11px; color: #c5e4ff; }
-      .tick i { display: block; width: 8px; height: 8px; border-radius: 50%; margin: 0 auto 4px; background: #38bdf8; box-shadow: 0 0 8px #38bdf8; }
-      .tick.green i { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-      .tick.red i { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
-      .tick.orange i { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+      .listen-brand { display: flex; align-items: center; gap: 10px; }
+      .listen-mark {
+        width: 46px; height: 46px; flex: 0 0 auto;
+        border-radius: 14px;
+        transform: rotate(45deg);
+        background: radial-gradient(circle at 50% 45%, rgba(160, 245, 255, 0.95), rgba(0, 90, 190, 0.25) 62%, transparent 72%), #062044;
+        border: 1px solid rgba(150, 240, 255, 0.75);
+        box-shadow: 0 0 16px rgba(0, 210, 255, 0.5);
+      }
+      .wave-wrap {
+        border-radius: 12px;
+        border: 1px solid rgba(80, 200, 255, 0.2);
+        background: radial-gradient(ellipse at center, rgba(0, 140, 255, 0.16), transparent 72%);
+        min-width: 0;
+      }
+      #decisionWave { width: 100%; height: 84px; display: block; }
+      .listen-states { display: grid; gap: 6px; }
+      .listen-states span { display: flex; align-items: center; gap: 6px; color: #6f93b0; font-size: 0.75rem; font-weight: 700; }
+      .listen-states span.on { color: #e7f8ff; }
+      .listen-states i { width: 8px; height: 8px; border-radius: 50%; background: #23445f; }
+      .listen-states span.on i { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+      .neural-timeline {
+        display: flex; gap: 12px; overflow-x: auto;
+        padding: 8px 2px 2px; margin-top: 6px;
+      }
+      .tick { min-width: 88px; text-align: center; font-size: 11px; color: #c5e4ff; }
+      .tick i { display: block; width: 8px; height: 8px; border-radius: 50%; margin: 0 auto 4px; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); }
+      .tick.green i { background: var(--green); box-shadow: 0 0 8px var(--green); }
+      .tick.red i { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+      .tick.orange i { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
       .tick small { display: block; color: #8fb4d4; }
       .neural-ticker {
-        position: relative;
-        overflow: hidden;
-        height: 36px;
-        border-top: 1px solid rgba(80, 160, 255, 0.25);
-        contain: inline-size;
+        position: relative; overflow: hidden; height: 32px;
+        border-top: 1px solid var(--line-soft); margin-top: 6px;
+        contain: inline-size; max-width: 100%;
       }
       .ticker-track {
-        position: absolute;
-        top: 0;
-        right: 0;
-        display: flex;
-        gap: 28px;
-        width: max-content;
-        padding: 8px 0;
-        animation: marquee 42s linear infinite;
-        direction: rtl;
+        position: absolute; top: 0; right: 0; display: flex; gap: 28px; width: max-content;
+        padding: 7px 0; animation: marquee 42s linear infinite; direction: rtl;
       }
       .ticker-track span { color: #d7ecff; font-size: 12px; white-space: nowrap; }
       @keyframes marquee { from { transform: translateX(0); } to { transform: translateX(50%); } }
       html.tab-hidden .ticker-track { animation-play-state: paused; }
 
-      @media (max-width: 1100px) {
-        .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        .two-col, .three-col { grid-template-columns: 1fr; }
-        .neural-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-        .risk-grid, .rl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .timeline { display: grid; gap: 8px; max-height: 240px; overflow: auto; }
+      .decision {
+        padding: 8px 10px;
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        background: rgba(0, 16, 40, 0.35);
       }
+      .decision.dim { opacity: 0.62; }
+      .decision-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; }
+      .decision-meta, .decision-time { color: var(--muted); font-size: 0.72rem; line-height: 1.6; }
 
+      .task-list { display: grid; gap: 8px; max-height: 380px; overflow: auto; }
+      .task {
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(0, 18, 44, 0.4);
+      }
+      .task-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+      .bar {
+        position: relative; height: 8px; border-radius: 99px; margin: 8px 0;
+        background: rgba(255,255,255,0.08); direction: ltr; overflow: visible;
+      }
+      .bar i {
+        display: block; height: 100%; border-radius: inherit;
+        background: linear-gradient(90deg, #ff5a7a, #3ee7ff 55%, #3dffb0);
+        box-shadow: 0 0 10px rgba(60, 230, 255, 0.4);
+      }
+      .bar em { position: absolute; top: -3px; width: 2px; height: 14px; background: #fff; box-shadow: 0 0 6px #fff; }
+
+      .market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .market-tile {
+        padding: 10px;
+        border-radius: 12px;
+        border: 1px solid var(--line-soft);
+        background: rgba(0, 16, 40, 0.35);
+      }
+      .market-row, .symbol, .coin-tag { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .symbol, .coin-tag { justify-content: flex-start; font-weight: 800; }
+      .coin-icon {
+        width: 26px; height: 26px; border-radius: 50%;
+        display: grid; place-items: center;
+        font-size: 0.68rem; color: #fff;
+        background: linear-gradient(135deg, #1280ff, #3ee7ff);
+        box-shadow: 0 0 10px rgba(0, 190, 255, 0.35);
+      }
+      .price { font-weight: 800; direction: ltr; text-align: right; }
+      .signal-bar { height: 7px; border-radius: 99px; background: rgba(255,255,255,0.08); overflow: hidden; }
+      .signal-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #3dffb0, #3ee7ff); }
+
+      .table-wrap { display: block; width: 100%; max-width: 100%; overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: right; padding: 8px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+      th { color: var(--muted); font-size: 0.72rem; }
+      td { font-size: 0.8rem; }
+      .news-box { border: 1px solid var(--line-soft); border-radius: 12px; padding: 10px; background: rgba(0, 16, 40, 0.28); }
+      .news-list { display: grid; gap: 8px; margin-top: 8px; }
+      .news-item { padding: 8px; border-radius: 10px; background: rgba(255,255,255,0.03); color: var(--muted); line-height: 1.55; }
+      .news-item strong { color: var(--text); }
+
+      .risk-grid, .rl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+      .risk-item, .rl-kpis div {
+        border: 1px solid var(--line-soft);
+        border-radius: 12px;
+        padding: 8px 10px;
+        background: rgba(0, 16, 40, 0.35);
+      }
+      .risk-item span, .rl-kpis span { display: block; color: var(--muted); font-size: 0.72rem; }
+      .risk-item b, .rl-kpis b { display: block; margin-top: 3px; overflow-wrap: anywhere; }
+      .risk-note {
+        margin-top: 8px; padding: 8px 10px; border-radius: 10px;
+        background: rgba(255, 170, 40, 0.12); color: #ffd98a; line-height: 1.55;
+      }
+      .rl-kpis { margin: 10px 0; }
+
+      .emergency {
+        border-color: rgba(255, 70, 90, 0.72);
+        box-shadow: 0 0 18px rgba(255, 40, 60, 0.16), inset 0 0 18px rgba(255, 0, 40, 0.05);
+        padding: 14px;
+      }
+      .emergency.tripped { box-shadow: 0 0 22px rgba(255, 40, 60, 0.4); }
+      .emergency h2 { margin: 0 0 6px; color: #ffd0d4; }
+      .em-kicker { color: #ff8b96; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; }
+      #killStatus, #entriesStatus { margin: 4px 0; line-height: 1.5; }
+      #emergencyBtn {
+        width: 100%;
+        margin-top: 8px;
+        border: 0;
+        border-radius: 12px;
+        padding: 12px 10px;
+        background: linear-gradient(180deg, #ff5a62, #c41222);
+        color: #fff;
+        font-weight: 800;
+        cursor: pointer;
+        box-shadow: 0 0 16px rgba(255, 40, 50, 0.45);
+      }
+      #emergencyBtn.resume { background: linear-gradient(180deg, #2ad2ff, #0a6ad8); box-shadow: 0 0 16px rgba(0, 170, 255, 0.4); }
+      #emergencyBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+      @media (max-width: 1100px) {
+        .hud, .wide { grid-template-columns: 1fr; }
+        .col-center { order: 1; }
+        .col-right { order: 2; }
+        .col-left { order: 3; }
+        .topbar { flex-wrap: wrap; }
+        .neural-metrics { display: flex; }
+      }
       @media (max-width: 760px) {
-        .topbar { flex-direction: column; align-items: stretch; }
-        .header-meta { justify-content: flex-start; }
-        .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .market-grid { grid-template-columns: 1fr; }
-        .neural-stage { height: 540px; }
-        .neural-metrics, .risk-grid, .rl-kpis { grid-template-columns: 1fr 1fr; }
+        .shell { padding: 10px 10px 24px; }
+        .stats-grid, .market-grid { grid-template-columns: 1fr 1fr; }
+        .listen-grid { grid-template-columns: 1fr; }
+        .neural-stage { height: 420px; }
         .neural-metrics b { white-space: normal; }
         .agent { width: 58px; height: 58px; margin: -29px 0 0 -29px; }
         .agent strong { font-size: 10px; }
-        .neural-head { flex-direction: column; align-items: flex-start; }
+        .task-list, .timeline { max-height: none; }
+        .header-meta { justify-content: flex-start; }
+        .value { font-size: 1.15rem; }
       }
-
-      @media (prefers-reduced-motion: reduce) {
-        .ticker-track { animation: none; flex-wrap: wrap; width: auto; padding-inline: 12px; }
-      }
-
       @media (max-width: 520px) {
-        .shell { padding: 16px 12px 30px; }
         .stats-grid { grid-template-columns: 1fr; }
-        th, td { padding: 10px 8px; }
+        .clock b { font-size: 1.05rem; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ticker-track { animation: none; flex-wrap: wrap; position: static; width: auto; padding-inline: 8px; }
+        .neural-ticker { height: auto; }
       }
     </style>
   </head>
   <body>
     <div class="shell">
-      <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite"></div>
       <header class="topbar">
         <div class="brand">
-          <div class="logo">S</div>
-          <div>
+          <div class="logo" aria-hidden="true">ص</div>
+          <div class="brand-copy">
             <h1>صبحي تريدر</h1>
-            <small>لوحة مراقبة Binance</small>
+            <small>مركز القيادة</small>
+          </div>
+          <div class="clock">
+            <b id="clockTime">--:--:--</b>
+            <span id="clockDate" dir="rtl">توقيت الرياض</span>
           </div>
         </div>
-
+        <nav class="nav" aria-label="أقسام اللوحة">
+          <a href="#overview">نظرة النظام</a>
+          <a class="on" href="#neuralCard">النواة</a>
+          <a href="#listenPanel">القرارات</a>
+          <a href="#riskCard">المخاطر</a>
+          <a href="#rlPanel">التعلم</a>
+        </nav>
         <div class="header-meta">
           <span class="pill neutral" id="statusPill">التواصل...</span>
           <span class="pill live" id="modePill">الوضع: تجريبي</span>
@@ -686,66 +606,33 @@
         </div>
       </header>
 
-      <main class="content">
-        <div id="spotReconcileWarning" class="reconcile-warn" hidden></div>
-        <section class="stats-grid">
-          <article class="card stat-card hero">
-            <div class="label-row">
-              <span>قيمة المحفظة</span>
-              <span class="chip cyan" id="walletBadge">سبوت + فيوتشرز</span>
-            </div>
-            <div class="value" id="totalWallet">$0.00</div>
-            <div class="delta" id="walletDelta">تحديث...</div>
-          </article>
+      <div id="offlineBanner" class="offline-banner" role="status" aria-live="polite"></div>
+      <div id="spotReconcileWarning" class="reconcile-warn" hidden></div>
 
-          <article class="card stat-card">
-            <div class="label-row"><span>الربح المحقق · الإجمالي</span></div>
-            <div class="value up" id="realizedPnl">$0.00</div>
-            <div class="delta" id="realizedMeta">...</div>
-          </article>
-
-          <article class="card stat-card">
-            <div class="label-row"><span>الربح غير المحقق · سبوت + فيوتشرز</span></div>
-            <div class="value neutral" id="unrealizedPnl">$0.00</div>
-            <div class="delta" id="unrealizedMeta">...</div>
-          </article>
-
-          <article class="card stat-card">
-            <div class="label-row"><span>الصفقات المفتوحة</span></div>
-            <div class="value" id="openTrades">0</div>
-            <div class="delta" id="openMeta">...</div>
-          </article>
-
-          <article class="card stat-card">
-            <div class="label-row"><span>نسبة الفوز · سبوت</span></div>
-            <div class="value" id="winRate">0%</div>
-            <div class="delta" id="winMeta">...</div>
-          </article>
-
-          <article class="card stat-card">
-            <div class="label-row"><span>التعرّض · سبوت + فيوتشرز</span></div>
-            <div class="value" id="exposurePct">0%</div>
-            <div class="delta" id="exposureMeta">منخفض</div>
-          </article>
-        </section>
-
-        <section class="two-col">
-          <article class="card panel">
+      <div class="hud">
+        <div class="col col-left">
+          <article class="hud-card panel" id="overview">
             <div class="panel-header">
-              <h2>الأسواق</h2>
-              <span class="chip cyan" id="marketCount">0 رموز</span>
+              <h2>نظرة النظام</h2>
+              <span class="chip cyan">سلامة</span>
             </div>
-            <div class="market-grid" id="marketGrid"></div>
-          </article>
-
-          <article class="card panel">
-            <div class="panel-header">
-              <h2>حالة الحسابات</h2>
+            <div class="health-row">
+              <div class="ring" id="healthRing" role="img" aria-label="نسبة فحوصات السلامة"><span id="healthPct">—</span></div>
+              <div class="health-copy">
+                <div class="tiny muted">فحوصات ناجحة من حالة البوت</div>
+                <b id="healthFraction">—</b>
+                <p class="tiny muted" id="healthCaption">بانتظار أول قراءة من الخادم.</p>
+              </div>
             </div>
+            <div class="kv"><span>الوضع</span><b id="overviewMode">—</b></div>
+            <div class="kv"><span>وقت التشغيل</span><b id="uptimeValue">—</b></div>
+            <div class="kv"><span>آخر فحص</span><b id="overviewScan">—</b></div>
+            <div class="kv"><span>حداثة الرصيد</span><b id="overviewBalance">—</b></div>
+            <div class="kv"><span>إرسال الأوامر</span><b id="overviewTrading">—</b></div>
             <div class="account-stack">
               <div class="account-box">
                 <div class="account-heading">
-                  <strong>Spot</strong>
+                  <strong>سبوت</strong>
                   <span class="chip green" id="spotState">متصل</span>
                 </div>
                 <div class="mini-stat">
@@ -755,10 +642,9 @@
                   <div>الربح<b id="spotPnl">$0.00</b></div>
                 </div>
               </div>
-
               <div class="account-box">
                 <div class="account-heading">
-                  <strong>Futures Demo</strong>
+                  <strong>فيوتشرز تجريبي</strong>
                   <span class="chip cyan" id="futuresState">غير متصل</span>
                 </div>
                 <div class="mini-stat">
@@ -770,24 +656,76 @@
               </div>
             </div>
           </article>
-        </section>
 
-        <section>
-          <article class="card panel" id="riskCard">
+          <article class="hud-card panel">
             <div class="panel-header">
-              <h2>الاستراتيجيات والمخاطر</h2>
-              <span class="chip cyan" id="strategyModeChip">—</span>
+              <h2>المصادر المتصلة</h2>
+              <span class="chip cyan" id="sourcesCount">—</span>
             </div>
-            <div id="riskBody"><div class="muted">بانتظار أول قراءة من الخادم.</div></div>
+            <div id="sourcesList" class="src-list"><div class="muted">بانتظار القراءة.</div></div>
           </article>
-        </section>
 
-        <section>
-          <article class="card neural" id="neuralCard">
+          <article class="hud-card panel">
+            <div class="panel-header"><h2>تنبيهات مهمة</h2></div>
+            <div id="alertsList"><div class="muted">بانتظار القراءة.</div></div>
+          </article>
+
+          <article class="hud-card panel">
+            <div class="panel-header"><h2>العمليات الجارية</h2></div>
+            <div id="opsList"><div class="muted">بانتظار القراءة.</div></div>
+          </article>
+
+          <article class="hud-card panel">
+            <div class="panel-header"><h2>الأخبار وفلتر المخاطر</h2></div>
+            <div class="news-box">
+              <div class="tiny muted" id="newsSummary">جارٍ التحميل...</div>
+              <div class="news-list" id="newsList"></div>
+            </div>
+          </article>
+        </div>
+
+        <div class="col col-center">
+          <section class="stats-grid">
+            <article class="card stat-card hero">
+              <div class="label-row">
+                <span>إجمالي المحفظة</span>
+                <span class="chip cyan" id="walletBadge">سبوت + فيوتشرز</span>
+              </div>
+              <div class="value" id="totalWallet">$0.00</div>
+              <div class="delta" id="walletDelta">تحديث...</div>
+            </article>
+            <article class="card stat-card">
+              <div class="label-row"><span>الربح المحقق · الإجمالي</span></div>
+              <div class="value up" id="realizedPnl">$0.00</div>
+              <div class="delta" id="realizedMeta">...</div>
+            </article>
+            <article class="card stat-card">
+              <div class="label-row"><span>الربح غير المحقق</span></div>
+              <div class="value neutral" id="unrealizedPnl">$0.00</div>
+              <div class="delta" id="unrealizedMeta">...</div>
+            </article>
+            <article class="card stat-card">
+              <div class="label-row"><span>الصفقات المفتوحة</span></div>
+              <div class="value" id="openTrades">0</div>
+              <div class="delta" id="openMeta">...</div>
+            </article>
+            <article class="card stat-card">
+              <div class="label-row"><span>نسبة الفوز · سبوت</span></div>
+              <div class="value" id="winRate">0%</div>
+              <div class="delta" id="winMeta">...</div>
+            </article>
+            <article class="card stat-card">
+              <div class="label-row"><span>التعرّض · سبوت + فيوتشرز</span></div>
+              <div class="value" id="exposurePct">0%</div>
+              <div class="delta" id="exposureMeta">منخفض</div>
+            </article>
+          </section>
+
+          <article class="hud-card neural" id="neuralCard">
             <div class="neural-head">
               <div>
                 <h2>الخلية العصبية</h2>
-                <p>هذه الحلقة بلا مفتاح إيقاف. النواة تربط الاستراتيجيات والفلاتر والتعلم المعزز والعملات ببيانات حية.</p>
+                <p>النواة تربط الاستراتيجيات والفلاتر والتعلم المعزز والعملات ببيانات حية.</p>
               </div>
               <span class="chip cyan" id="neuralLive">بانتظار البيانات</span>
             </div>
@@ -795,129 +733,172 @@
             <div class="neural-stage" id="neuralStage">
               <canvas id="neuralFlat" aria-hidden="true"></canvas>
               <canvas id="neuralGl" aria-hidden="true"></canvas>
-              <div class="neural-ring"></div>
-              <div class="neural-scan"></div>
+              <div class="holo" aria-hidden="true"></div>
+              <div class="neural-ring" aria-hidden="true"></div>
+              <div class="neural-ring orange" aria-hidden="true"></div>
+              <div class="neural-scan" aria-hidden="true"></div>
+              <div class="core-label">
+                <span>نواة التداول</span>
+                <strong>صبحي</strong>
+                <em id="coreMode">—</em>
+              </div>
               <div class="neural-orbit" id="neuralOrbit"></div>
               <div class="agent-panel" id="agentPanel" hidden></div>
             </div>
+          </article>
+
+          <section class="hud-card listen" id="listenPanel">
+            <div class="listen-grid">
+              <div class="listen-brand">
+                <div class="listen-mark" aria-hidden="true"></div>
+                <div>
+                  <h2>بث القرارات</h2>
+                  <p class="tiny muted" id="listenPrompt">نبض النشاط من قرارات البوت والفحص. يُحدَّث كل 15 ثانية.</p>
+                </div>
+              </div>
+              <div class="wave-wrap"><canvas id="decisionWave" aria-hidden="true"></canvas></div>
+              <div class="listen-states">
+                <span id="stListen"><i></i>يستمع</span>
+                <span id="stScan"><i></i>يفحص</span>
+                <span id="stWatch"><i></i>يراقب</span>
+                <span id="stExec"><i></i>ينفّذ</span>
+              </div>
+            </div>
             <div class="neural-timeline" id="neuralTimeline"></div>
             <div class="neural-ticker" id="neuralTicker"><div class="ticker-track" id="tickerTrack"></div></div>
-          </article>
-        </section>
+            <div class="tiny muted" id="decisionHint"></div>
+            <div class="timeline" id="decisionList"></div>
+          </section>
 
-        <section>
-          <article class="card panel" id="rlPanel">
+          <article class="hud-card panel">
             <div class="panel-header">
-              <h2>التعلم المعزز</h2>
-              <span class="chip cyan" id="rlMode">جارٍ التحميل</span>
+              <h2>الأسواق</h2>
+              <span class="chip cyan" id="marketCount">0 رموز</span>
             </div>
-            <p class="tiny muted" id="rlIntro">طبقة تتعلّم من نتيجة كل صفقة مغلقة (بالـ R بعد الرسوم) وتقرّر: تخطي، أو نصف الحجم، أو الحجم الكامل. لا ترفع الحجم أبدًا فوق قواعد المخاطرة. تُضبط عبر متغيرات RL_MODE وRL_MIN_SAMPLES.</p>
-            <div class="rl-kpis" id="rlKpis"></div>
-            <div class="tiny muted" id="rlNote"></div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>السياق</th>
-                    <th>العينات</th>
-                    <th>متوسط R</th>
-                    <th>R المتوقع</th>
-                    <th>احتمال الربح</th>
-                    <th>القرار</th>
-                    <th>الجاهزية</th>
-                  </tr>
-                </thead>
-                <tbody id="rlArms"></tbody>
-              </table>
-            </div>
-            <div class="table-wrap" style="margin-top:14px">
-              <table>
-                <thead>
-                  <tr>
-                    <th>الوقت</th>
-                    <th>الزوج</th>
-                    <th>السياق</th>
-                    <th>القرار</th>
-                    <th>المطبّق</th>
-                    <th>R المتوقع</th>
-                    <th>الحالة</th>
-                    <th>R الفعلي</th>
-                  </tr>
-                </thead>
-                <tbody id="rlRecent"></tbody>
-              </table>
-            </div>
+            <div class="market-grid" id="marketGrid"></div>
           </article>
-        </section>
+        </div>
 
-        <section class="three-col">
-          <article class="card panel">
+        <div class="col col-right">
+          <article class="hud-card panel">
             <div class="panel-header">
               <h2>المراكز المفتوحة</h2>
               <span class="chip cyan" id="openCountLabel">0</span>
             </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>الرمز</th>
-                    <th>السوق</th>
-                    <th>الاستراتيجية</th>
-                    <th>الاتجاه</th>
-                    <th>الدخول</th>
-                    <th>السعر</th>
-                    <th>الربح</th>
-                  </tr>
-                </thead>
-                <tbody id="positionsBody"></tbody>
-              </table>
-            </div>
+            <p class="tiny muted">الشريط من وقف الخسارة حتى الهدف. الخط الأبيض علامة الدخول.</p>
+            <div id="positionCards" class="task-list"><div class="muted">بانتظار القراءة.</div></div>
           </article>
 
-          <article class="card panel">
-            <div class="panel-header">
-              <h2>آخر القرارات</h2>
-            </div>
-            <div class="tiny muted" id="decisionHint"></div>
-            <div class="timeline" id="decisionList"></div>
-          </article>
-        </section>
-
-        <section class="three-col">
-          <article class="card panel">
-            <div class="panel-header">
-              <h2>آخر الصفقات المغلقة</h2>
-              <span class="chip orange" id="tradeCount">0</span>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>الزوج</th>
-                    <th>السوق</th>
-                    <th>الاستراتيجية</th>
-                    <th>الوقت</th>
-                    <th>الدخول</th>
-                    <th>الخروج</th>
-                    <th>صافي الربح</th>
-                  </tr>
-                </thead>
-                <tbody id="tradeBody"></tbody>
-              </table>
-            </div>
+          <article class="hud-card panel">
+            <div class="panel-header"><h2>قرارات تحتاج متابعة</h2></div>
+            <div class="timeline" id="decisionSide"><div class="muted">بانتظار القراءة.</div></div>
           </article>
 
-          <article class="card panel">
+          <article class="hud-card panel" id="riskCard">
             <div class="panel-header">
-              <h2>الأخبار وفلتر المخاطر</h2>
+              <h2>الاستراتيجيات والمخاطر</h2>
+              <span class="chip cyan" id="strategyModeChip">—</span>
             </div>
-            <div class="news-box">
-              <div class="tiny muted" id="newsSummary">جارٍ التحميل...</div>
-              <div class="news-list" id="newsList"></div>
-            </div>
+            <div id="riskBody"><div class="muted">بانتظار أول قراءة من الخادم.</div></div>
           </article>
-        </section>
-      </main>
+
+          <article class="hud-card emergency" id="emergencyCard">
+            <div class="em-kicker">طوارئ</div>
+            <h2>مفتاح الإيقاف</h2>
+            <p id="killStatus">بانتظار القراءة</p>
+            <p class="tiny" id="entriesStatus"></p>
+            <button type="button" id="emergencyBtn" disabled>إيقاف طارئ للدخول</button>
+            <p class="tiny muted" id="emergencyNote">الزر يوقف أو يستأنف فتح صفقات جديدة فقط عبر الطلب الحالي. لا يغلق المراكز ولا يلغي وقف الخسارة، ولا يغيّر مفتاح الإيقاف التلقائي عند خطأ البيانات.</p>
+          </article>
+        </div>
+      </div>
+
+      <section class="wide">
+        <article class="hud-card panel">
+          <div class="panel-header"><h2>جدول المراكز</h2></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>الرمز</th>
+                  <th>السوق</th>
+                  <th>الاستراتيجية</th>
+                  <th>الاتجاه</th>
+                  <th>الدخول</th>
+                  <th>السعر</th>
+                  <th>الربح</th>
+                </tr>
+              </thead>
+              <tbody id="positionsBody"></tbody>
+            </table>
+          </div>
+        </article>
+        <article class="hud-card panel">
+          <div class="panel-header">
+            <h2>آخر الصفقات المغلقة</h2>
+            <span class="chip orange" id="tradeCount">0</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>الزوج</th>
+                  <th>السوق</th>
+                  <th>الاستراتيجية</th>
+                  <th>الوقت</th>
+                  <th>الدخول</th>
+                  <th>الخروج</th>
+                  <th>صافي الربح</th>
+                </tr>
+              </thead>
+              <tbody id="tradeBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <article class="hud-card panel" id="rlPanel">
+        <div class="panel-header">
+          <h2>التعلم المعزز</h2>
+          <span class="chip cyan" id="rlMode">جارٍ التحميل</span>
+        </div>
+        <p class="tiny muted" id="rlIntro">طبقة تتعلّم من نتيجة كل صفقة مغلقة (بالـ R بعد الرسوم) وتقرّر: تخطي، أو نصف الحجم، أو الحجم الكامل. لا ترفع الحجم أبدًا فوق قواعد المخاطرة. تُضبط عبر متغيرات RL_MODE وRL_MIN_SAMPLES.</p>
+        <div class="rl-kpis" id="rlKpis"></div>
+        <div class="tiny muted" id="rlNote"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>السياق</th>
+                <th>العينات</th>
+                <th>متوسط R</th>
+                <th>R المتوقع</th>
+                <th>احتمال الربح</th>
+                <th>القرار</th>
+                <th>الجاهزية</th>
+              </tr>
+            </thead>
+            <tbody id="rlArms"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap" style="margin-top:14px">
+          <table>
+            <thead>
+              <tr>
+                <th>الوقت</th>
+                <th>الزوج</th>
+                <th>السياق</th>
+                <th>القرار</th>
+                <th>المطبّق</th>
+                <th>R المتوقع</th>
+                <th>الحالة</th>
+                <th>R الفعلي</th>
+              </tr>
+            </thead>
+            <tbody id="rlRecent"></tbody>
+          </table>
+        </div>
+      </article>
     </div>
 
     <script>
@@ -944,7 +925,7 @@
         return Object.prototype.hasOwnProperty.call(STRAT_AR, key) ? STRAT_AR[key] : key;
       }
 
-      window.__SOBHI = window.__SOBHI || { nodeCount: 0, visualReady: false };
+      window.__SOBHI = window.__SOBHI || { nodeCount: 0, visualReady: false, waveEnergy: 0 };
       let lastGood = null;
       let lastGoodAt = null;
       let linkMode = 'empty';
@@ -961,7 +942,7 @@
       function money(v, digits = 2) {
         if (v == null || Number.isNaN(Number(v))) return '$0.00';
         const n = Number(v);
-        return '$' + n.toLocaleString('en-US', {
+        return '\u200E$' + n.toLocaleString('en-US', {
           minimumFractionDigits: digits,
           maximumFractionDigits: digits
         });
@@ -1059,11 +1040,41 @@
       }
 
       function coinMark(symbol) {
-        return esc(String(symbol || '').split('/')[0].slice(0, 3).toUpperCase() || '—');
+        return esc(String(symbol || '').split('/')[0].replace(/:.*/, '').slice(0, 3).toUpperCase() || '—');
       }
 
       function modeLabel(mode) {
         return MODE_AR[mode] || (mode ? String(mode) : '—');
+      }
+
+      function envLabel(env) {
+        const value = String(env || '').toLowerCase();
+        if (value === 'live') return 'حقيقي';
+        if (value === 'testnet') return 'شبكة اختبار';
+        if (value === 'demo') return 'تجريبي';
+        return value || '—';
+      }
+
+      function uptimeText(iso) {
+        const t = new Date(iso).getTime();
+        if (!Number.isFinite(t)) return '—';
+        let sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        const days = Math.floor(sec / 86400);
+        sec %= 86400;
+        const hours = Math.floor(sec / 3600);
+        sec %= 3600;
+        const mins = Math.floor(sec / 60);
+        if (days > 0) return days + ' أيام ' + hours + ' س';
+        if (hours > 0) return hours + ' س ' + mins + ' د';
+        return mins + ' د ' + (sec % 60) + ' ث';
+      }
+
+      function balanceLabel(data) {
+        const map = { fresh: 'حديث', stale: 'قديم', unavailable: 'غير متاح' };
+        const base = map[data.balance_status] || '—';
+        const age = data.balance_age_seconds;
+        if (age == null || data.balance_status === 'unavailable') return base;
+        return base + ' · منذ ' + (age < 90 ? age + ' ث' : Math.round(age / 60) + ' د');
       }
 
       function rankDecision(d, futuresOff) {
@@ -1136,6 +1147,46 @@
         }).join('');
       }
 
+      function targetProgress(pos) {
+        const price = Number(pos && pos.price);
+        const stop = Number(pos && pos.stop);
+        const target = Number(pos && pos.target);
+        if (![price, stop, target].every(Number.isFinite)) return null;
+        const short = pos.side === 'short';
+        const denom = short ? (stop - target) : (target - stop);
+        if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
+        const raw = short ? (stop - price) / denom : (price - stop) / denom;
+        return Math.max(0, Math.min(1, raw));
+      }
+
+      function renderPositionCards(positions) {
+        const el = document.getElementById('positionCards');
+        if (!el) return;
+        const list = Array.isArray(positions) ? positions : [];
+        if (!list.length) {
+          el.innerHTML = '<div class="muted">لا توجد مراكز مفتوحة</div>';
+          return;
+        }
+        el.innerHTML = list.map((pos) => {
+          const pnl = safeNum(pos.pnl_usdt, 0);
+          const pnlPct = Number(pos.pnl_pct);
+          const prog = targetProgress(pos);
+          const entryMark = targetProgress({ price: pos.entry, stop: pos.stop, target: pos.target, side: pos.side });
+          const short = pos.side === 'short';
+          const market = isFuturesSymbol(pos.symbol, pos.market_type) ? 'فيوتشرز' : 'سبوت';
+          const bar = prog == null
+            ? '<div class="tiny muted">الوقف أو الهدف غير متاح في هذه القراءة</div>'
+            : '<div class="bar"><i style="width:' + (prog * 100).toFixed(1) + '%"></i>' +
+              (entryMark == null ? '' : '<em style="left:' + (entryMark * 100).toFixed(1) + '%"></em>') + '</div>';
+          return '<div class="task"><div class="task-top"><span class="symbol"><span class="coin-icon">' + coinMark(pos.symbol) +
+            '</span>' + esc(pos.symbol || '—') + '</span><b class="' + pnlClass(pnl) + '">' + money(pnl, 2) +
+            (Number.isFinite(pnlPct) ? ' · ' + pct(pnlPct, 1) : '') + '</b></div><div class="tiny muted">' + market +
+            ' · ' + esc(pos.strategy ? stratLabel(pos.strategy) : '—') + ' · ' + (short ? 'شورت' : 'لونغ') + '</div>' + bar +
+            '<div class="tiny muted">دخول ' + priceFmt(pos.entry) + ' · وقف ' + priceFmt(pos.stop) + ' · هدف ' + priceFmt(pos.target) +
+            (prog == null ? '' : ' · ' + pct(prog * 100, 0) + ' نحو الهدف') + '</div></div>';
+        }).join('');
+      }
+
       function renderTrades(trades) {
         const tbody = document.getElementById('tradeBody');
         if (!tbody) return;
@@ -1154,9 +1205,20 @@
         }).join('');
       }
 
+      function decisionCard(row) {
+        const d = row.d;
+        const dim = isNoneSignal(d) || row.score < 20;
+        return '<div class="decision' + (dim ? ' dim' : '') + '"><div class="decision-head"><span>' + esc(d.symbol || '—') +
+          '</span><span class="chip ' + outcomeTone(d.outcome) + '">' + esc(d.outcome || '—') +
+          '</span></div><div class="decision-meta"><div>' + esc(stratLabel(d.strategy)) + ' · ' + esc(signalText(d.signal)) +
+          ' · <span class="decision-time">' + esc(riyadhTime(d.created_at)) + '</span></div><div>' +
+          esc(d.reason || 'لا يوجد سبب') + '</div></div></div>';
+      }
+
       function renderDecisions(decisions, futuresOff) {
         const holder = document.getElementById('decisionList');
         const hint = document.getElementById('decisionHint');
+        const side = document.getElementById('decisionSide');
         if (!holder) return;
         const all = Array.isArray(decisions) ? decisions : [];
         const chosen = pickDecisions(all, futuresOff);
@@ -1168,28 +1230,24 @@
         }
         if (!chosen.length) {
           holder.innerHTML = '<div class="muted">لا توجد قرارات بعد</div>';
+          if (side) side.innerHTML = '<div class="muted">لا قرارات تحتاج متابعة</div>';
           return;
         }
-        holder.innerHTML = chosen.map((row) => {
-          const d = row.d;
-          const dim = isNoneSignal(d) || row.score < 20;
-          return '<div class="decision' + (dim ? ' dim' : '') + '"><div class="decision-head"><span>' + esc(d.symbol || '—') +
-            '</span><span class="chip ' + outcomeTone(d.outcome) + '">' + esc(d.outcome || '—') +
-            '</span></div><div class="decision-meta"><div>' + esc(stratLabel(d.strategy)) + ' · ' + esc(signalText(d.signal)) +
-            ' · <span class="decision-time">' + esc(riyadhTime(d.created_at)) + '</span></div><div>' +
-            esc(d.reason || 'لا يوجد سبب') + '</div></div></div>';
-        }).join('');
+        holder.innerHTML = chosen.map(decisionCard).join('');
+        if (side) {
+          const hot = chosen.filter((r) => /مرفوض|فشل|تم فتح|تم تنفيذ/.test(String(r.d.outcome || '')));
+          const show = (hot.length ? hot : chosen).slice(0, 3);
+          side.innerHTML = show.map(decisionCard).join('');
+        }
       }
 
       function renderNews(data) {
         const summary = document.getElementById('newsSummary');
         const list = document.getElementById('newsList');
         if (!summary || !list) return;
-
         const news = data && Array.isArray(data.headlines) ? data.headlines.slice(0, 3) : [];
         const blocked = !!(data && data.blocked);
         summary.textContent = blocked ? 'الأخبار محظورة: الدخول مؤقتاً متوقف' : (data && data.reason ? data.reason : 'لا توجد إشعارات رأسمالية عالية');
-
         list.innerHTML = news.length ? news.map((item) =>
           '<div class="news-item"><strong>' + esc(item.source || 'خبر') + '</strong><br>' + esc(item.title_ar || item.title || '') + '</div>'
         ).join('') : '<div class="news-item">لا توجد أخبار حديثة.</div>';
@@ -1216,6 +1274,13 @@
         return label + ' · ' + age + dur + err;
       }
 
+      function killLine(ks) {
+        if (!ks) return 'غير متاح في هذه القراءة';
+        if (ks.enabled === false) return 'معطّل';
+        if (ks.tripped) return 'مفصول' + (ks.reason ? ' · ' + ks.reason : '');
+        return 'جاهز';
+      }
+
       function renderRisk(data) {
         const body = document.getElementById('riskBody');
         if (!body) return;
@@ -1229,6 +1294,8 @@
           ['وضع الاستراتيجية', modeLabel(params.strategy_mode)],
           ['الاستراتيجيات المفعّلة', names.length ? names.join('، ') : '—'],
           ['أقصى المراكز المفتوحة', params.max_open_positions == null ? '—' : String(params.max_open_positions)],
+          ['حد الخسارة اليومي', params.daily_loss_limit_pct == null ? '—' : pct(params.daily_loss_limit_pct, 1)],
+          ['مفتاح الإيقاف', killLine(data.kill_switch)],
           ['دخول فيوتشرز جديد', params.futures_new_entries ? 'مفعّل' : 'متوقف'],
           ['خسارة اليوم · سبوت', dailyText(daily.spot)],
           ['خسارة اليوم · فيوتشرز', dailyText(daily.futures)],
@@ -1247,6 +1314,229 @@
         ).join('') + '</div>' + (note ? '<div class="risk-note">' + esc(note) + '</div>' : '');
         const chip = document.getElementById('strategyModeChip');
         if (chip) chip.textContent = modeLabel(params.strategy_mode);
+      }
+
+      function renderHealth(data) {
+        const ring = document.getElementById('healthRing');
+        const pctEl = document.getElementById('healthPct');
+        const fraction = document.getElementById('healthFraction');
+        const cap = document.getElementById('healthCaption');
+        if (!ring || !pctEl) return;
+        if (!data) {
+          ring.style.setProperty('--p', '0');
+          ring.className = 'ring';
+          pctEl.textContent = '—';
+          if (fraction) fraction.textContent = '—';
+          if (cap) cap.textContent = 'لا قراءة';
+          return;
+        }
+        const platforms = Array.isArray(data.platforms) ? data.platforms : [];
+        const spot = platforms.find((p) => p && p.id === 'binance');
+        const fut = platforms.find((p) => p && (p.id === 'binance_futures' || p.id === 'binance-futures'));
+        const scan = (data.scanner || {}).status;
+        const ks = data.kill_switch;
+        const daily = data.daily_risk || {};
+        const dailyKnown = !!(daily.spot || daily.futures);
+        const checks = [
+          ['سبوت', !!(spot && spot.connected)],
+          ['فيوتشرز', fut ? !!fut.connected : null],
+          ['الرصيد', data.balance_status === 'fresh'],
+          ['الفحص', scan === 'idle' || scan === 'running'],
+          ['مفتاح الإيقاف', ks ? (ks.enabled === false ? null : !ks.tripped) : null],
+          ['حد اليوم', dailyKnown ? !((daily.spot && daily.spot.blocked) || (daily.futures && daily.futures.blocked)) : null]
+        ];
+        const used = checks.filter((item) => item[1] !== null);
+        const ok = used.filter((item) => item[1]).length;
+        const score = used.length ? Math.round(ok / used.length * 100) : 0;
+        const failed = used.filter((item) => !item[1]).map((item) => item[0]);
+        ring.style.setProperty('--p', String(score));
+        ring.className = 'ring' + (score < 50 ? ' bad' : score < 80 ? ' warn' : '');
+        pctEl.textContent = used.length ? score + '%' : '—';
+        if (fraction) fraction.textContent = used.length ? (ok + ' من ' + used.length) : '—';
+        if (cap) cap.textContent = failed.length ? ('يحتاج متابعة: ' + failed.join(' · ')) : 'الفحوصات الظاهرة ناجحة في هذه القراءة';
+      }
+
+      function renderOverview(data) {
+        if (!data) {
+          ['overviewMode', 'uptimeValue', 'overviewScan', 'overviewBalance', 'overviewTrading'].forEach((id) => setText(id, '—'));
+          return;
+        }
+        setText('overviewMode', envLabel(data.env));
+        setText('uptimeValue', data.boot_at ? uptimeText(data.boot_at) : '—');
+        setText('overviewScan', scannerText(data.scanner));
+        setText('overviewBalance', balanceLabel(data));
+        setText('overviewTrading', data.trading_enabled === false ? 'متوقف' : 'يعمل');
+      }
+
+      function feedDetail(snap) {
+        if (snap == null) return [false, 'غير متاح'];
+        if (!snap.enabled) return [false, 'متوقف'];
+        if (!snap.has_key) return [false, 'بدون مفتاح'];
+        const errors = snap.errors ? Object.keys(snap.errors).length : 0;
+        let text = errors ? ('متصل · ' + errors + ' أخطاء') : 'متصل';
+        if (snap.market_ar) text += ' · ' + snap.market_ar;
+        return [true, text];
+      }
+
+      function renderSources(data) {
+        const el = document.getElementById('sourcesList');
+        const count = document.getElementById('sourcesCount');
+        if (!el) return;
+        if (!data) {
+          el.innerHTML = '<div class="muted">لا قراءة للمصادر.</div>';
+          if (count) count.textContent = '—';
+          return;
+        }
+        const platforms = Array.isArray(data.platforms) ? data.platforms : [];
+        const spot = platforms.find((p) => p && p.id === 'binance') || {};
+        const fut = platforms.find((p) => p && (p.id === 'binance_futures' || p.id === 'binance-futures')) || {};
+        const mit = platforms.find((p) => p && p.id === 'mitrade');
+        const finnhub = feedDetail(data.finnhub);
+        const massive = feedDetail(data.massive);
+        const rows = [
+          ['بينانس سبوت', !!spot.connected, spot.connected ? ('متصل · ' + envLabel(spot.environment)) : 'غير متصل'],
+          ['بينانس فيوتشرز', !!fut.connected, fut.connected ? ('متصل · ' + envLabel(fut.environment || 'demo')) : 'غير متصل'],
+          ['Finnhub', finnhub[0], finnhub[1]],
+          ['Massive', massive[0], massive[1]],
+          ['تيليغرام', !!data.telegram, data.telegram ? 'مهيأ' : 'غير مهيأ']
+        ];
+        if (mit) rows.push(['Mitrade', false, mit.supported === false ? 'غير مدعوم' : (mit.connected ? 'متصل' : 'غير متصل')]);
+        const online = rows.filter((row) => row[1]).length;
+        if (count) count.textContent = online + ' متصل';
+        el.innerHTML = rows.map((row) =>
+          '<div class="src"><i class="' + (row[1] ? 'on' : 'off') + '"></i><span>' + esc(row[0]) + '</span><b>' + esc(row[2]) + '</b></div>'
+        ).join('');
+      }
+
+      function renderAlerts(data) {
+        const el = document.getElementById('alertsList');
+        if (!el) return;
+        if (!data) {
+          el.innerHTML = '<div class="muted">لا تنبيهات بدون اتصال.</div>';
+          return;
+        }
+        const items = [];
+        const ks = data.kill_switch;
+        if (ks && ks.tripped) items.push(['danger', 'مفتاح الإيقاف مفصول', ks.reason || 'خطأ في البيانات']);
+        else if (ks && ks.enabled === false) items.push(['warn', 'مفتاح الإيقاف', 'معطّل في إعدادات الخادم']);
+        const daily = data.daily_risk || {};
+        if (daily.spot && daily.spot.blocked) items.push(['danger', 'خسارة اليوم · سبوت', daily.spot.reason || dailyText(daily.spot)]);
+        if (daily.futures && daily.futures.blocked) items.push(['danger', 'خسارة اليوم · فيوتشرز', daily.futures.reason || dailyText(daily.futures)]);
+        const stats = data.stats || {};
+        const unverified = safeNum(stats.unverified_spot_trades, 0);
+        if (unverified > 0) items.push(['warn', 'صفقات غير موثّقة', unverified + ' صفقة سبوت خارج الربح المحقق']);
+        const rec = stats.spot_reconcile || {};
+        if (rec.last_error) items.push(['warn', 'مطابقة السبوت', String(rec.last_error)]);
+        if (rec.exchange_unavailable) items.push(['warn', 'مطابقة السبوت', 'المنصة غير متاحة']);
+        if (data.news && data.news.blocked) items.push(['warn', 'فلتر الأخبار', data.news.reason || 'الدخول متوقف مؤقتاً']);
+        if (data.balance_status === 'unavailable') items.push(['danger', 'الرصيد', 'تعذّر قراءة رصيد بينانس']);
+        else if (data.balance_status === 'stale') items.push(['warn', 'الرصيد', 'آخر قراءة قديمة']);
+        const entries = data.entries_enabled || {};
+        if (entries.spot === false || entries.futures === false) {
+          const which = [entries.spot === false ? 'سبوت' : '', entries.futures === false ? 'فيوتشرز' : ''].filter(Boolean).join(' و ');
+          items.push(['warn', 'دخول جديد موقوف', which]);
+        }
+        const sc = data.scanner || {};
+        if (sc.status === 'error') items.push(['danger', 'الفحص', sc.last_error || 'خطأ']);
+        el.innerHTML = items.length
+          ? items.map((item) => '<div class="alert ' + item[0] + '"><b>' + esc(item[1]) + '</b><span>' + esc(item[2]) + '</span></div>').join('')
+          : '<div class="muted">لا تنبيهات حرجة في هذه القراءة.</div>';
+      }
+
+      function renderOps(data) {
+        const el = document.getElementById('opsList');
+        if (!el) return;
+        if (!data) {
+          el.innerHTML = '<div class="muted">لا عمليات بدون اتصال.</div>';
+          return;
+        }
+        const rec = (data.stats || {}).spot_reconcile || {};
+        const settings = data.settings || {};
+        const rows = [
+          ['الماسح', scannerText(data.scanner)],
+          ['مطابقة السبوت', rec.enabled === false
+            ? 'متوقفة'
+            : ('مفعّلة · مطابق ' + safeNum(rec.matched, 0) + ' · غير موثّق ' + safeNum(rec.unmatched, 0) + (rec.last_run_at ? ' · ' + riyadhTime(rec.last_run_at) : ''))],
+          ['التعلم المعزز', rlCache ? ((rlCache.mode_label || rlCache.mode || '—') + (rlStale ? ' · قراءة قديمة' : '')) : (rlStale ? 'تعذّر القراءة' : 'بانتظار')]
+        ];
+        if (settings.spot_max_concurrent_trades != null || settings.futures_max_concurrent_trades != null) {
+          rows.push(['فتحات الدخول', 'سبوت ' + safeNum(settings.spot_active_trades, 0) + ' / ' + (settings.spot_max_concurrent_trades == null ? '—' : settings.spot_max_concurrent_trades) + ' · فيوتشرز ' + safeNum(settings.futures_active_trades, 0) + ' / ' + (settings.futures_max_concurrent_trades == null ? '—' : settings.futures_max_concurrent_trades)]);
+        }
+        el.innerHTML = rows.map((row) => '<div class="op"><span>' + esc(row[0]) + '</span><b>' + esc(row[1]) + '</b></div>').join('');
+      }
+
+      function renderEmergency(data) {
+        const card = document.getElementById('emergencyCard');
+        const kill = document.getElementById('killStatus');
+        const entries = document.getElementById('entriesStatus');
+        const btn = document.getElementById('emergencyBtn');
+        if (!card || !kill || !btn) return;
+        if (!data) {
+          card.classList.remove('tripped');
+          kill.textContent = 'لا قراءة لمفتاح الإيقاف';
+          if (entries) entries.textContent = '';
+          btn.disabled = true;
+          return;
+        }
+        const ks = data.kill_switch;
+        kill.textContent = ks ? ('مفتاح البيانات: ' + killLine(ks)) : 'حالة مفتاح الإيقاف غير موجودة في هذه القراءة';
+        card.classList.toggle('tripped', !!(ks && ks.tripped));
+        const en = data.entries_enabled;
+        if (!en || (en.spot == null && en.futures == null)) {
+          if (entries) entries.textContent = 'حالة الدخول الجديد غير معروفة';
+          btn.disabled = true;
+          return;
+        }
+        const spotOn = en.spot !== false;
+        const futOn = en.futures !== false;
+        if (entries) entries.textContent = 'دخول سبوت: ' + (spotOn ? 'مفعّل' : 'موقوف') + ' · فيوتشرز: ' + (futOn ? 'مفعّل' : 'موقوف');
+        const anyOn = spotOn || futOn;
+        btn.disabled = false;
+        btn.dataset.enable = anyOn ? 'false' : 'true';
+        btn.textContent = anyOn ? 'إيقاف طارئ للدخول' : 'استئناف الدخول';
+        btn.classList.toggle('resume', !anyOn);
+      }
+
+      function renderListenMode(data) {
+        const map = { listen: 'stListen', scan: 'stScan', watch: 'stWatch', exec: 'stExec' };
+        let active = '';
+        if (data) {
+          active = 'listen';
+          const recent = (data.decisions || []).slice(0, 6);
+          if ((data.scanner || {}).status === 'running') active = 'scan';
+          else if (recent.some((d) => /تم فتح|تم تنفيذ/.test(String(d.outcome || '')))) active = 'exec';
+          else if ((data.markets || []).some((m) => m && m.signal)) active = 'watch';
+        }
+        Object.keys(map).forEach((key) => {
+          const el = document.getElementById(map[key]);
+          if (el) el.classList.toggle('on', key === active);
+        });
+      }
+
+      function setWave(data) {
+        if (!data) {
+          window.__SOBHI.waveEnergy = 0;
+          return;
+        }
+        const decisions = Array.isArray(data.decisions) ? data.decisions : [];
+        const meaningful = decisions.filter((d) => rankDecision(d, false) >= 20).length;
+        const scanning = (data.scanner || {}).status === 'running' ? 0.45 : 0;
+        const strengths = (data.markets || []).map((m) => Number(m.signal_strength)).filter(Number.isFinite);
+        const conviction = strengths.length ? strengths.reduce((a, b) => a + b, 0) / strengths.length / 100 : 0;
+        window.__SOBHI.waveEnergy = Math.max(0, Math.min(1, scanning + conviction * 0.45 + Math.min(meaningful, 8) / 12));
+      }
+
+      function renderHud(data) {
+        renderHealth(data);
+        renderOverview(data);
+        renderSources(data);
+        renderAlerts(data);
+        renderOps(data);
+        renderPositionCards(data && data.positions);
+        renderEmergency(data);
+        renderListenMode(data);
+        setWave(data);
+        setText('coreMode', data ? modeLabel((data.params || {}).strategy_mode) : '—');
       }
 
       function shortStrat(id) {
@@ -1305,9 +1595,7 @@
       function relatedDecisions(node, data) {
         const decisions = (data && data.decisions) || [];
         const rows = decisions.filter((d) => {
-          if (node.kind === 'coin') {
-            return d.symbol === node.symbol || String(d.symbol || '').split('/')[0] === node.short;
-          }
+          if (node.kind === 'coin') return d.symbol === node.symbol || String(d.symbol || '').split('/')[0] === node.short;
           if (node.kind === 'strategy') {
             const label = stratLabel(node.strategy);
             const s = String(d.strategy || '');
@@ -1415,12 +1703,12 @@
         if (sig !== orbitSig) {
           orbitSig = sig;
           const mobile = window.matchMedia('(max-width: 760px)').matches;
-          const rx = mobile ? 34 : 32;
-          const ry = mobile ? 28 : 27;
+          const rx = mobile ? 40 : 36;
+          const ry = mobile ? 34 : 31;
           root.innerHTML = nodes.map((n, i) => {
             const angle = -Math.PI / 2 + (i / nodes.length) * Math.PI * 2;
             const left = 50 + Math.cos(angle) * rx;
-            const top = 47 + Math.sin(angle) * ry;
+            const top = 46 + Math.sin(angle) * ry;
             return '<button type="button" class="agent ' + (n.on ? 'on' : 'off') + ' kind-' + n.kind + '" data-id="' + esc(n.id) +
               '" style="left:' + left.toFixed(2) + '%;top:' + top.toFixed(2) + '%"><strong>' + esc(n.short) + '</strong><small>' + esc(n.status) + '</small></button>';
           }).join('');
@@ -1610,9 +1898,12 @@
         if (trades) trades.innerHTML = '<tr><td colspan="7" class="muted">لا توجد قراءة من الخادم</td></tr>';
         const decisions = document.getElementById('decisionList');
         if (decisions) decisions.innerHTML = '<div class="muted">لا توجد قرارات بدون اتصال</div>';
+        const side = document.getElementById('decisionSide');
+        if (side) side.innerHTML = '<div class="muted">لا توجد قرارات بدون اتصال</div>';
         const risk = document.getElementById('riskBody');
         if (risk) risk.innerHTML = '<div class="muted">لا توجد بيانات مخاطر بدون اتصال.</div>';
         paintNeural(null, rlCache);
+        renderHud(null);
       }
 
       function renderDashboard(data) {
@@ -1713,6 +2004,7 @@
         renderNews(news);
         renderRisk(data);
         paintNeural(data, rlCache);
+        renderHud(data);
       }
 
       async function loadState() {
@@ -1748,10 +2040,109 @@
           markConnection('empty');
         }
         renderRL();
+        renderOps(lastGood);
+      }
+
+      async function onEmergency() {
+        const btn = document.getElementById('emergencyBtn');
+        const note = document.getElementById('emergencyNote');
+        if (!btn || btn.disabled) return;
+        const enable = btn.dataset.enable === 'true';
+        const msg = enable
+          ? 'استئناف فتح صفقات جديدة في السبوت والفيوتشرز؟ المراكز الحالية لا تتغير.'
+          : 'إيقاف الدخول الجديد في السبوت والفيوتشرز؟ لن تُغلق المراكز ولن تُلغى أوامر وقف الخسارة.';
+        if (!window.confirm(msg)) return;
+        btn.disabled = true;
+        try {
+          const response = await fetch('/api/trading', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ enabled: enable, market: 'all' })
+          });
+          if (!response.ok) throw new Error('HTTP ' + response.status);
+          if (note) note.textContent = enable ? 'تم إرسال استئناف الدخول.' : 'تم إرسال إيقاف الدخول الجديد.';
+          await loadState();
+        } catch (err) {
+          if (note) note.textContent = 'تعذّر تنفيذ الطلب. لم تتغير حالة الدخول.';
+          btn.disabled = false;
+        }
+      }
+
+      function tickClock() {
+        const timeEl = document.getElementById('clockTime');
+        const dateEl = document.getElementById('clockDate');
+        const now = new Date();
+        try {
+          if (timeEl) timeEl.textContent = new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Riyadh', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+          }).format(now);
+          if (dateEl) dateEl.textContent = new Intl.DateTimeFormat('ar-SA-u-nu-latn', {
+            timeZone: 'Asia/Riyadh', weekday: 'long', day: 'numeric', month: 'long'
+          }).format(now);
+        } catch (err) {
+          if (timeEl) timeEl.textContent = now.toISOString().slice(11, 19);
+        }
+        if (lastGood && lastGood.boot_at) setText('uptimeValue', uptimeText(lastGood.boot_at));
+      }
+
+      function startWave() {
+        const canvas = document.getElementById('decisionWave');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        let t = 0;
+        let waveRaf = 0;
+        function frame() {
+          waveRaf = 0;
+          if (document.hidden) return;
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          const w = Math.max(1, canvas.clientWidth);
+          const h = Math.max(1, canvas.clientHeight);
+          canvas.width = Math.floor(w * dpr);
+          canvas.height = Math.floor(h * dpr);
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          const energy = Math.max(0, Math.min(1, window.__SOBHI.waveEnergy || 0));
+          const amp = energy * h * 0.36;
+          const mid = h / 2;
+          ctx.beginPath();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = '#7af4ff';
+          ctx.shadowColor = 'rgba(0, 216, 255, 0.85)';
+          ctx.shadowBlur = 12;
+          for (let x = 0; x <= w; x += 2) {
+            const u = x / w;
+            const y = mid + Math.sin(u * 16 + t) * amp * 0.62 + Math.sin(u * 34 - t * 1.6) * amp * 0.28 + Math.sin(u * 7 + t * 0.35) * amp * 0.16;
+            if (x === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          }
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          ctx.strokeStyle = 'rgba(80, 180, 255, 0.28)';
+          ctx.beginPath();
+          ctx.moveTo(0, mid);
+          ctx.lineTo(w, mid);
+          ctx.stroke();
+          if (!reduce) {
+            t += 0.045 * (0.25 + energy);
+            waveRaf = requestAnimationFrame(frame);
+          }
+        }
+        document.addEventListener('visibilitychange', () => {
+          if (!document.hidden && !reduce && !waveRaf) waveRaf = requestAnimationFrame(frame);
+        });
+        waveRaf = requestAnimationFrame(frame);
       }
 
       document.addEventListener('visibilitychange', () => {
         document.documentElement.classList.toggle('tab-hidden', document.hidden);
+      });
+      document.querySelectorAll('.nav a').forEach((link) => {
+        link.addEventListener('click', () => {
+          document.querySelectorAll('.nav a').forEach((item) => item.classList.remove('on'));
+          link.classList.add('on');
+        });
       });
       const orbit = document.getElementById('neuralOrbit');
       const stage = document.getElementById('neuralStage');
@@ -1774,8 +2165,13 @@
           hidePanel();
         });
       }
+      const emergencyBtn = document.getElementById('emergencyBtn');
+      if (emergencyBtn) emergencyBtn.addEventListener('click', onEmergency);
       window.addEventListener('resize', () => { orbitSig = ''; if (lastGood || linkMode === 'empty') renderOrbit(lastGood, rlCache); });
 
+      tickClock();
+      setInterval(tickClock, 1000);
+      startWave();
       loadState();
       setInterval(loadState, 15000);
     </script>
@@ -1788,9 +2184,7 @@
 
       const mobileQuery = () => stage.clientWidth < 760;
       let flatRaf = 0;
-      let flatStop = false;
-      let glRaf = 0;
-      let glVisible = true;
+      bus.flatMode = 'full';
 
       function resizeFlat(ctx) {
         const dpr = Math.min(window.devicePixelRatio || 1, mobileQuery() ? 1.25 : 1.5);
@@ -1802,253 +2196,249 @@
         return { w, h };
       }
 
+      function drawFloor(ctx, w, h) {
+        const floor = h * 0.72;
+        ctx.strokeStyle = 'rgba(40, 140, 220, 0.28)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 9; i++) {
+          const y = floor + Math.pow(i / 9, 1.45) * (h - floor);
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(w, y);
+          ctx.stroke();
+        }
+        for (let i = -8; i <= 8; i++) {
+          ctx.beginPath();
+          ctx.moveTo(w / 2 + i * 28, floor);
+          ctx.lineTo(w / 2 + i * w * 0.12, h);
+          ctx.stroke();
+        }
+      }
+
+      function drawFlatOrb(ctx, w, h, t) {
+        const cx = w * 0.5;
+        const cy = h * 0.46;
+        const r = Math.min(w, h) * 0.2;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const glow = ctx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r * 1.9);
+        glow.addColorStop(0, 'rgba(255,255,255,0.95)');
+        glow.addColorStop(0.16, 'rgba(170, 235, 255, 0.75)');
+        glow.addColorStop(0.42, 'rgba(20, 130, 255, 0.28)');
+        glow.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 1.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(180, 240, 255, 0.9)';
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 150, 48, 0.85)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r * 1.55, r * 0.46, 0.35 + Math.sin(t) * 0.08, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(90, 220, 255, 0.8)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, r * 1.25, r * 0.62, -0.7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
       function startFlat() {
         const ctx = flat.getContext('2d');
-        const count = mobileQuery() ? 26 : 52;
-        const strands = Array.from({ length: count }, (_, i) => ({
-          phase: i * 0.55,
-          amp: 26 + (i % 8) * 18,
-          freq: 1.4 + (i % 5) * 0.42,
-          width: i % 11 === 0 ? 2.2 : 1.05,
-          color: i % 11 === 0 ? 'rgba(255,70,210,' : (i % 7 === 0 ? 'rgba(190,140,255,' : 'rgba(170,220,255,'),
-          speed: 0.18 + (i % 5) * 0.06,
-          particles: [Math.random(), Math.random(), Math.random()]
-        }));
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         let t = 0;
         function frame() {
           flatRaf = 0;
-          if (flatStop || document.hidden || flat.style.display === 'none') return;
+          if (document.hidden) return;
           const box = resizeFlat(ctx);
-          const w = box.w;
-          const h = box.h;
-          t += 0.008;
-          ctx.clearRect(0, 0, w, h);
-          const floor = h * 0.74;
-          ctx.strokeStyle = 'rgba(50,130,210,0.2)';
-          ctx.lineWidth = 1;
-          for (let i = 0; i < 11; i++) {
-            const y = floor + Math.pow(i / 11, 1.5) * (h - floor);
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(w, y);
-            ctx.stroke();
+          t += 0.01;
+          ctx.clearRect(0, 0, box.w, box.h);
+          if (bus.flatMode !== 'glow') {
+            drawFloor(ctx, box.w, box.h);
+            drawFlatOrb(ctx, box.w, box.h, t);
           }
-          for (let i = -8; i <= 8; i++) {
-            ctx.beginPath();
-            ctx.moveTo(w / 2 + i * 26, floor);
-            ctx.lineTo(w / 2 + i * w * 0.11, h);
-            ctx.stroke();
-          }
-          const cx = w * 0.5;
-          const top = h * 0.08;
-          const bot = h * 0.76;
-          ctx.globalCompositeOperation = 'lighter';
-          strands.forEach((s) => {
-            ctx.beginPath();
-            for (let k = 0; k <= 30; k++) {
-              const u = k / 30;
-              const y = top + (bot - top) * u;
-              const bulge = Math.sin(u * Math.PI);
-              const x = cx + Math.sin(s.phase + u * s.freq * Math.PI * 2 + t * s.speed) * s.amp * bulge;
-              if (k === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
-            }
-            ctx.strokeStyle = s.color + '0.9)';
-            ctx.lineWidth = s.width;
-            ctx.stroke();
-            s.particles.forEach((p, index) => {
-              const next = (p + 0.005 * s.speed) % 1;
-              s.particles[index] = next;
-              const bulge = Math.sin(next * Math.PI);
-              const x = cx + Math.sin(s.phase + next * s.freq * Math.PI * 2 + t * s.speed) * s.amp * bulge;
-              const y = top + (bot - top) * next;
-              const g = ctx.createRadialGradient(x, y, 0, x, y, 6);
-              g.addColorStop(0, '#fff');
-              g.addColorStop(0.45, s.color + '0.9)');
-              g.addColorStop(1, 'rgba(0,0,0,0)');
-              ctx.fillStyle = g;
-              ctx.beginPath();
-              ctx.arc(x, y, 6, 0, 7);
-              ctx.fill();
-            });
-          });
-          const glow = ctx.createRadialGradient(cx, h * 0.42, 0, cx, h * 0.42, Math.min(w, h) * 0.34);
-          glow.addColorStop(0, 'rgba(255,255,255,0.92)');
-          glow.addColorStop(0.12, 'rgba(210,240,255,0.55)');
-          glow.addColorStop(0.32, 'rgba(80,160,255,0.22)');
-          glow.addColorStop(1, 'rgba(0,0,0,0)');
-          ctx.fillStyle = glow;
-          ctx.fillRect(0, 0, w, h);
-          ctx.globalCompositeOperation = 'source-over';
-          flatRaf = requestAnimationFrame(frame);
+          if (!reduce) flatRaf = requestAnimationFrame(frame);
         }
         document.addEventListener('visibilitychange', () => {
-          if (!document.hidden && !flatStop && flat.style.display !== 'none' && !flatRaf) flatRaf = requestAnimationFrame(frame);
+          if (!document.hidden && !reduce && !flatRaf) flatRaf = requestAnimationFrame(frame);
         });
-        flatStop = false;
-        if (!flatRaf) flatRaf = requestAnimationFrame(frame);
-      }
-
-      function brainPoint(v, side) {
-        let x = v.x;
-        let y = v.y;
-        let z = v.z;
-        const d = 1 + 0.06 * Math.sin(11 * x + 4 * Math.sin(6 * y + 2 * z)) * Math.sin(10 * y + 6 * z + 2 * Math.sin(5 * x))
-          + 0.045 * Math.abs(Math.sin(17 * x + 3 * y)) * Math.sin(15 * y - 4 * z)
-          - 0.03 * Math.abs(Math.sin(26 * x - 9 * y + 5 * z));
-        x *= d; y *= d; z *= d;
-        if (z * side < 0) z *= 0.18;
-        z += side * 0.66;
-        return [x, y + 0.15, z];
-      }
-
-      function vortexCurve(THREE, i, total) {
-        const pts = [];
-        const turns = 1.7 + (i % 6) * 0.16;
-        const radius = 0.22 + (i / total) * 1.25;
-        const phase = (i / total) * Math.PI * 2;
-        for (let s = 0; s <= 26; s++) {
-          const t = s / 26;
-          const y = (t - 0.5) * 5.8;
-          const a = phase + t * turns * Math.PI * 2;
-          const bulge = 0.2 + 0.8 * Math.sin(t * Math.PI);
-          const r = radius * bulge;
-          pts.push(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r));
-        }
-        return new THREE.CatmullRomCurve3(pts);
+        flatRaf = requestAnimationFrame(frame);
       }
 
       async function startGL() {
-        let THREE;
-        try {
-          THREE = await import('/three/three.module.js');
-        } catch (err) {
-          return false;
-        }
         let renderer;
         try {
-          renderer = new THREE.WebGLRenderer({ canvas: glCanvas, antialias: !mobileQuery(), alpha: true, powerPreference: 'low-power', preserveDrawingBuffer: true });
-        } catch (err) {
-          return false;
-        }
-        renderer.setClearColor(0x000000, 0);
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 80);
-        camera.position.set(0, 0.35, mobileQuery() ? 7.4 : 6.2);
-        const group = new THREE.Group();
-        scene.add(group);
-        const grid = new THREE.GridHelper(28, mobileQuery() ? 18 : 32, 0x1c4e86, 0x0d2c52);
-        grid.position.y = -3.05;
-        [].concat(grid.material).forEach((m) => { m.transparent = true; m.opacity = 0.28; });
-        scene.add(grid);
-        const shell = new THREE.IcosahedronGeometry(1, mobileQuery() ? 1 : 2);
-        const pos = shell.attributes.position;
-        const v = new THREE.Vector3();
-        for (let i = 0; i < pos.count; i++) {
-          v.fromBufferAttribute(pos, i).normalize();
-          const q = brainPoint(v, v.z >= 0 ? 1 : -1);
-          pos.setXYZ(i, q[0] * 0.62, q[1] * 0.78, q[2] * 0.62);
-        }
-        group.add(new THREE.LineSegments(new THREE.WireframeGeometry(shell), new THREE.LineBasicMaterial({
-          color: 0x7ec8ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
-        })));
-        const total = mobileQuery() ? 16 : 34;
-        const curves = [];
-        for (let i = 0; i < total; i++) {
-          const curve = vortexCurve(THREE, i, total);
-          curves.push(curve);
-          const color = i % 9 === 0 ? 0xff4ad4 : (i % 6 === 0 ? 0xb388ff : 0x9ad8ff);
-          group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(40)), new THREE.LineBasicMaterial({
-            color, transparent: true, opacity: 0.72, blending: THREE.AdditiveBlending, depthWrite: false
-          })));
-        }
-        const per = mobileQuery() ? 2 : 3;
-        const count = curves.length * per;
-        const positions = new Float32Array(count * 3);
-        const parts = Array.from({ length: count }, (_, i) => ({ curve: curves[i % curves.length], t: Math.random(), s: 0.002 + Math.random() * 0.004 }));
-        const pointsGeo = new THREE.BufferGeometry();
-        pointsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        group.add(new THREE.Points(pointsGeo, new THREE.PointsMaterial({
-          color: 0xf7fbff, size: mobileQuery() ? 0.08 : 0.055, transparent: true, opacity: 0.95,
-          blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
-        })));
-        const glowCanvas = document.createElement('canvas');
-        glowCanvas.width = glowCanvas.height = 128;
-        const g = glowCanvas.getContext('2d');
-        const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-        grd.addColorStop(0, 'rgba(255,255,255,0.95)');
-        grd.addColorStop(0.18, 'rgba(190,230,255,0.55)');
-        grd.addColorStop(0.5, 'rgba(40,120,255,0.16)');
-        grd.addColorStop(1, 'rgba(0,0,0,0)');
-        g.fillStyle = grd;
-        g.fillRect(0, 0, 128, 128);
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-          map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
-        }));
-        sprite.scale.set(4.2, 5.6, 1);
-        group.add(sprite);
-        scene.add(new THREE.AmbientLight(0x88aaff, 0.6));
-        const pink = new THREE.PointLight(0xff4ad8, 8, 18);
-        pink.position.set(1.2, 0.4, 2);
-        scene.add(pink);
-        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        let clock = 0;
-        const tmp = new THREE.Vector3();
-        function resize() {
-          const w = Math.max(1, stage.clientWidth);
-          const h = Math.max(1, stage.clientHeight);
-          renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobileQuery() ? 1.25 : 1.5));
-          renderer.setSize(w, h, false);
-          camera.aspect = w / h;
-          camera.updateProjectionMatrix();
-        }
-        function loop() {
-          glRaf = 0;
-          if (document.hidden || !glVisible) return;
-          clock += 0.016;
-          if (!reduce) group.rotation.y += 0.004;
-          sprite.scale.set(4.1 + Math.sin(clock * 2) * 0.18, 5.5 + Math.sin(clock * 2) * 0.22, 1);
-          parts.forEach((p, i) => {
-            if (!reduce) p.t = (p.t + p.s) % 1;
-            p.curve.getPoint(p.t, tmp);
-            positions[i * 3] = tmp.x;
-            positions[i * 3 + 1] = tmp.y;
-            positions[i * 3 + 2] = tmp.z;
+          const THREE = await import('/three/three.module.js');
+          renderer = new THREE.WebGLRenderer({
+            canvas: glCanvas,
+            antialias: !mobileQuery(),
+            alpha: true,
+            powerPreference: 'low-power',
+            preserveDrawingBuffer: true
           });
-          pointsGeo.attributes.position.needsUpdate = true;
+          renderer.setClearColor(0x000000, 0);
+          const scene = new THREE.Scene();
+          const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 80);
+          camera.position.set(0, 0.45, mobileQuery() ? 8.4 : 6.7);
+          camera.lookAt(0, 0.05, 0);
+          const group = new THREE.Group();
+          scene.add(group);
+          const grid = new THREE.GridHelper(26, mobileQuery() ? 16 : 30, 0x1c6ec4, 0x0c3e78);
+          grid.position.y = -1.55;
+          [].concat(grid.material).forEach((m) => { m.transparent = true; m.opacity = 0.38; });
+          scene.add(grid);
+          const shell = new THREE.SphereGeometry(1.05, mobileQuery() ? 22 : 40, mobileQuery() ? 16 : 28);
+          group.add(new THREE.Mesh(shell, new THREE.MeshBasicMaterial({
+            color: 0x1478ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false
+          })));
+          group.add(new THREE.Mesh(new THREE.SphereGeometry(0.46, 24, 18), new THREE.MeshBasicMaterial({
+            color: 0xe9fbff, transparent: true, opacity: 0.92
+          })));
+          group.add(new THREE.LineSegments(new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(1.18, mobileQuery() ? 1 : 2)), new THREE.LineBasicMaterial({
+            color: 0x9ae8ff, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false
+          })));
+          function orbitRing(radius, tube, color, tilt) {
+            const mesh = new THREE.Mesh(
+              new THREE.TorusGeometry(radius, tube, 8, mobileQuery() ? 72 : 128),
+              new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false })
+            );
+            mesh.rotation.x = tilt;
+            return mesh;
+          }
+          const rings = [
+            orbitRing(1.72, 0.018, 0x3de7ff, Math.PI / 2.35),
+            orbitRing(2.05, 0.014, 0xff9a32, Math.PI / 2.9),
+            orbitRing(2.28, 0.008, 0x7ecbff, Math.PI / 2.05)
+          ];
+          rings.forEach((ring) => group.add(ring));
+          const floorCount = mobileQuery() ? 3 : 4;
+          for (let i = 1; i <= floorCount; i++) {
+            const ring = new THREE.Mesh(
+              new THREE.RingGeometry(0.45 + i * 0.42, 0.5 + i * 0.42, 72),
+              new THREE.MeshBasicMaterial({
+                color: i === 2 ? 0xff9a32 : 0x39c8ff,
+                transparent: true,
+                opacity: 0.35,
+                side: THREE.DoubleSide,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+              })
+            );
+            ring.rotation.x = -Math.PI / 2;
+            ring.position.y = -1.52;
+            scene.add(ring);
+          }
+          const count = mobileQuery() ? 70 : 160;
+          const positions = new Float32Array(count * 3);
+          const seeds = Array.from({ length: count }, () => ({
+            a: Math.random() * Math.PI * 2,
+            b: Math.acos(2 * Math.random() - 1),
+            r: 1.35 + Math.random() * 0.85,
+            s: 0.003 + Math.random() * 0.006
+          }));
+          const pointsGeo = new THREE.BufferGeometry();
+          pointsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+          group.add(new THREE.Points(pointsGeo, new THREE.PointsMaterial({
+            color: 0xf4fbff, size: mobileQuery() ? 0.045 : 0.03, transparent: true, opacity: 0.9,
+            blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+          })));
+          const glowCanvas = document.createElement('canvas');
+          glowCanvas.width = glowCanvas.height = 128;
+          const g = glowCanvas.getContext('2d');
+          const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+          grd.addColorStop(0, 'rgba(255,255,255,0.95)');
+          grd.addColorStop(0.2, 'rgba(170,230,255,0.55)');
+          grd.addColorStop(0.5, 'rgba(20,110,255,0.16)');
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          g.fillStyle = grd;
+          g.fillRect(0, 0, 128, 128);
+          const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(glowCanvas), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+          }));
+          sprite.scale.set(3.4, 3.4, 1);
+          group.add(sprite);
+          scene.add(new THREE.AmbientLight(0x88ccff, 0.7));
+          const cyan = new THREE.PointLight(0x39e0ff, 12, 18);
+          cyan.position.set(0.2, 0.4, 2.2);
+          scene.add(cyan);
+          const amber = new THREE.PointLight(0xff9a32, 6, 16);
+          amber.position.set(-1.6, 0.2, 1.2);
+          scene.add(amber);
+          const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          let clock = 0;
+          let glRaf = 0;
+          let glVisible = true;
+          function resize() {
+            const w = Math.max(1, stage.clientWidth);
+            const h = Math.max(1, stage.clientHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobileQuery() ? 1.25 : 1.5));
+            renderer.setSize(w, h, false);
+            camera.aspect = w / h;
+            camera.position.z = mobileQuery() ? 8.4 : 6.7;
+            camera.updateProjectionMatrix();
+          }
+          function loop() {
+            glRaf = 0;
+            if (document.hidden || !glVisible) return;
+            clock += 0.016;
+            if (!reduce) {
+              group.rotation.y += 0.0035;
+              rings[0].rotation.z += 0.004;
+              rings[1].rotation.z -= 0.003;
+              rings[2].rotation.z += 0.002;
+              sprite.scale.set(3.25 + Math.sin(clock * 2) * 0.12, 3.25 + Math.sin(clock * 2) * 0.12, 1);
+              seeds.forEach((p, i) => {
+                p.a += p.s;
+                const x = Math.sin(p.b) * Math.cos(p.a) * p.r;
+                const y = Math.cos(p.b) * p.r * 0.72;
+                const z = Math.sin(p.b) * Math.sin(p.a) * p.r;
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+              });
+              pointsGeo.attributes.position.needsUpdate = true;
+            }
+            renderer.render(scene, camera);
+            if (!reduce) glRaf = requestAnimationFrame(loop);
+          }
+          resize();
           renderer.render(scene, camera);
-          glRaf = requestAnimationFrame(loop);
-        }
-        resize();
-        renderer.render(scene, camera);
-        const gl = renderer.getContext();
-        if (!gl || !gl.drawingBufferWidth) {
-          renderer.dispose();
+          const gl = renderer.getContext();
+          if (!gl || !gl.drawingBufferWidth) {
+            renderer.dispose();
+            return false;
+          }
+          window.addEventListener('resize', resize);
+          const io = new IntersectionObserver((entries) => {
+            glVisible = entries.some((e) => e.isIntersecting);
+            if (glVisible && !document.hidden && !glRaf && !reduce) glRaf = requestAnimationFrame(loop);
+          }, { threshold: 0.02 });
+          io.observe(stage);
+          document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && glVisible && !glRaf && !reduce) glRaf = requestAnimationFrame(loop);
+          });
+          glCanvas.addEventListener('webglcontextlost', (event) => {
+            event.preventDefault();
+            glCanvas.style.display = 'none';
+            bus.flatMode = 'full';
+          });
+          if (!reduce) glRaf = requestAnimationFrame(loop);
+          return true;
+        } catch (err) {
+          if (renderer) {
+            try { renderer.dispose(); } catch (ignore) { /* keep the flat orb */ }
+          }
           return false;
         }
-        window.addEventListener('resize', resize);
-        const io = new IntersectionObserver((entries) => {
-          glVisible = entries.some((e) => e.isIntersecting);
-          if (glVisible && !document.hidden && !glRaf) glRaf = requestAnimationFrame(loop);
-        }, { threshold: 0.02 });
-        io.observe(stage);
-        document.addEventListener('visibilitychange', () => {
-          if (!document.hidden && glVisible && !glRaf) glRaf = requestAnimationFrame(loop);
-        });
-        glCanvas.addEventListener('webglcontextlost', (event) => {
-          event.preventDefault();
-          glCanvas.style.display = 'none';
-          flat.style.display = 'block';
-          flatStop = false;
-          startFlat();
-        });
-        if (!reduce) glRaf = requestAnimationFrame(loop);
-        return true;
       }
 
       startFlat();
       startGL().then((ok) => {
         bus.visualReady = true;
+        bus.flatMode = ok ? 'glow' : 'full';
         if (!ok) glCanvas.style.display = 'none';
       });
     </script>

@@ -608,6 +608,7 @@ active_positions = load_positions()
 market_snapshot = {}
 last_entry_candle = {}   # آخر شمعة تمت محاولة الدخول عليها لكل عملة (لمنع تكرار الدخول على نفس الشمعة)
 scan_lock = threading.Lock()
+_BOOT_AT = datetime.datetime.now(datetime.timezone.utc)
 scanner_state = {
     'status': 'waiting', 'last_started_at': None, 'last_completed_at': None,
     'last_error': None, 'duration_seconds': None
@@ -3122,6 +3123,12 @@ def api_state():
         future_state['tradfi_agreement_signed'] = False
     return {
         'as_of': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        'boot_at': _BOOT_AT.isoformat(),
+        'kill_switch': {
+            'enabled': bool(core_strategies.kill_switch.enabled()),
+            'tripped': bool(core_strategies.kill_switch.blocks_entries()),
+            'reason': core_strategies.kill_switch.reason or '',
+        },
         'scanner': dict(scanner_state),
         'daily_risk': {
             'spot': dict(daily_risk_state['spot']) if daily_risk_state.get('spot') else None,
